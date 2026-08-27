@@ -38,7 +38,7 @@ jobs:
           - os: windows-2022
             target: x64
             platform: windows
-          - os: macos-14
+          - os: macos-15
             target: universal
             platform: macos
           - os: ubuntu-24.04

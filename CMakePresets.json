@@ -54,6 +54,7 @@
     }
   ],
   "buildPresets": [
+    {"name": "windows-x64", "configurePreset": "windows-x64", "configuration": "RelWithDebInfo"},
     {"name": "windows-ci-x64", "configurePreset": "windows-ci-x64", "configuration": "RelWithDebInfo"},
     {"name": "macos-ci", "configurePreset": "macos-ci", "configuration": "RelWithDebInfo"},
     {"name": "ubuntu-ci-x86_64", "configurePreset": "ubuntu-ci-x86_64", "configuration": "RelWithDebInfo"}
