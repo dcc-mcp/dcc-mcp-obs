@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "product", "first_slice_issue", "live_acceptance", "domains"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schema_version": {"const": "1.0"},
+    "product": {"const": "dcc-mcp-obs"},
+    "first_slice_issue": {"type": "string", "format": "uri"},
+    "live_acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "tracking_issue"],
+      "properties": {
+        "status": {"enum": ["not_run", "partial", "passed", "failed"]},
+        "tracking_issue": {"type": "string", "format": "uri"}
+      }
+    },
+    "domains": {
+      "type": "array",
+      "minItems": 20,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["domain", "status", "authority", "delivered_operations", "remaining_operations", "dangerous_operations", "tracking_issue"],
+        "properties": {
+          "domain": {"type": "string", "minLength": 1},
+          "status": {"enum": ["delivered", "partial", "planned"]},
+          "authority": {"const": "native_plugin"},
+          "delivered_operations": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+          "remaining_operations": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+          "dangerous_operations": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+          "tracking_issue": {"type": "string", "format": "uri"}
+        }
+      }
+    }
+  }
+}

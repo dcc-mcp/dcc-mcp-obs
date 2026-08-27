@@ -1,0 +1,192 @@
+{
+  "$schema": "./obs-capabilities-v1.schema.json",
+  "schema_version": "1.0",
+  "product": "dcc-mcp-obs",
+  "first_slice_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/1",
+  "live_acceptance": {
+    "status": "not_run",
+    "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/4"
+  },
+  "domains": [
+    {
+      "domain": "status",
+      "status": "partial",
+      "authority": "native_plugin",
+      "delivered_operations": ["get_plugin_status", "get_obs_identity", "get_event_sequence"],
+      "remaining_operations": ["get_output_statistics", "get_dropped_frame_statistics"],
+      "dangerous_operations": [],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/2"
+    },
+    {
+      "domain": "scenes",
+      "status": "partial",
+      "authority": "native_plugin",
+      "delivered_operations": ["list_scenes", "get_current_scene"],
+      "remaining_operations": ["switch_scene", "create_scene", "rename_scene", "remove_scene"],
+      "dangerous_operations": ["switch_scene", "create_scene", "rename_scene", "remove_scene"],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/6"
+    },
+    {
+      "domain": "scene_items",
+      "status": "planned",
+      "authority": "native_plugin",
+      "delivered_operations": [],
+      "remaining_operations": ["list_scene_items", "create_scene_item", "set_scene_item_enabled", "set_scene_item_transform", "remove_scene_item"],
+      "dangerous_operations": ["create_scene_item", "set_scene_item_enabled", "set_scene_item_transform", "remove_scene_item"],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/6"
+    },
+    {
+      "domain": "sources",
+      "status": "partial",
+      "authority": "native_plugin",
+      "delivered_operations": ["list_sources"],
+      "remaining_operations": ["get_source_identity", "create_source", "rename_source", "remove_source"],
+      "dangerous_operations": ["create_source", "rename_source", "remove_source"],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
+    },
+    {
+      "domain": "inputs",
+      "status": "planned",
+      "authority": "native_plugin",
+      "delivered_operations": [],
+      "remaining_operations": ["list_input_kinds", "get_input_settings", "set_input_settings"],
+      "dangerous_operations": ["set_input_settings"],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
+    },
+    {
+      "domain": "properties",
+      "status": "planned",
+      "authority": "native_plugin",
+      "delivered_operations": [],
+      "remaining_operations": ["describe_properties", "validate_property_value", "set_property_value"],
+      "dangerous_operations": ["set_property_value"],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
+    },
+    {
+      "domain": "filters",
+      "status": "planned",
+      "authority": "native_plugin",
+      "delivered_operations": [],
+      "remaining_operations": ["list_filters", "create_filter", "set_filter_enabled", "set_filter_settings", "remove_filter"],
+      "dangerous_operations": ["create_filter", "set_filter_enabled", "set_filter_settings", "remove_filter"],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
+    },
+    {
+      "domain": "audio",
+      "status": "planned",
+      "authority": "native_plugin",
+      "delivered_operations": [],
+      "remaining_operations": ["get_volume", "set_volume", "get_mute", "set_mute", "get_monitor_type", "set_monitor_type"],
+      "dangerous_operations": ["set_volume", "set_mute", "set_monitor_type"],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
+    },
+    {
+      "domain": "transitions",
+      "status": "planned",
+      "authority": "native_plugin",
+      "delivered_operations": [],
+      "remaining_operations": ["list_transitions", "get_current_transition", "set_current_transition", "trigger_transition"],
+      "dangerous_operations": ["set_current_transition", "trigger_transition"],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/6"
+    },
+    {
+      "domain": "studio_mode",
+      "status": "planned",
+      "authority": "native_plugin",
+      "delivered_operations": [],
+      "remaining_operations": ["get_studio_mode", "set_studio_mode", "get_preview_scene", "set_preview_scene", "transition_to_program"],
+      "dangerous_operations": ["set_studio_mode", "set_preview_scene", "transition_to_program"],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/6"
+    },
+    {
+      "domain": "profiles",
+      "status": "planned",
+      "authority": "native_plugin",
+      "delivered_operations": [],
+      "remaining_operations": ["list_profiles", "get_current_profile", "set_current_profile"],
+      "dangerous_operations": ["set_current_profile"],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/3"
+    },
+    {
+      "domain": "scene_collections",
+      "status": "planned",
+      "authority": "native_plugin",
+      "delivered_operations": [],
+      "remaining_operations": ["list_scene_collections", "get_current_scene_collection", "set_current_scene_collection"],
+      "dangerous_operations": ["set_current_scene_collection"],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/3"
+    },
+    {
+      "domain": "recording",
+      "status": "delivered",
+      "authority": "native_plugin",
+      "delivered_operations": ["get_recording_status", "start_recording", "stop_recording", "pause_recording", "resume_recording"],
+      "remaining_operations": [],
+      "dangerous_operations": ["start_recording", "stop_recording", "pause_recording", "resume_recording"],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/1"
+    },
+    {
+      "domain": "replay_buffer",
+      "status": "planned",
+      "authority": "native_plugin",
+      "delivered_operations": [],
+      "remaining_operations": ["get_replay_buffer_status", "start_replay_buffer", "stop_replay_buffer", "save_replay_buffer"],
+      "dangerous_operations": ["start_replay_buffer", "stop_replay_buffer", "save_replay_buffer"],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/2"
+    },
+    {
+      "domain": "streaming",
+      "status": "planned",
+      "authority": "native_plugin",
+      "delivered_operations": [],
+      "remaining_operations": ["get_stream_status", "start_stream", "stop_stream"],
+      "dangerous_operations": ["start_stream", "stop_stream"],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/2"
+    },
+    {
+      "domain": "virtual_camera",
+      "status": "planned",
+      "authority": "native_plugin",
+      "delivered_operations": [],
+      "remaining_operations": ["get_virtual_camera_status", "start_virtual_camera", "stop_virtual_camera"],
+      "dangerous_operations": ["start_virtual_camera", "stop_virtual_camera"],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/2"
+    },
+    {
+      "domain": "media",
+      "status": "planned",
+      "authority": "native_plugin",
+      "delivered_operations": [],
+      "remaining_operations": ["get_media_status", "play_media", "pause_media", "restart_media", "stop_media", "seek_media"],
+      "dangerous_operations": ["play_media", "pause_media", "restart_media", "stop_media", "seek_media"],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
+    },
+    {
+      "domain": "outputs",
+      "status": "planned",
+      "authority": "native_plugin",
+      "delivered_operations": [],
+      "remaining_operations": ["list_outputs", "get_output_status", "start_output", "stop_output"],
+      "dangerous_operations": ["start_output", "stop_output"],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/2"
+    },
+    {
+      "domain": "hotkeys",
+      "status": "planned",
+      "authority": "native_plugin",
+      "delivered_operations": [],
+      "remaining_operations": ["list_allowlisted_hotkeys", "trigger_allowlisted_hotkey"],
+      "dangerous_operations": ["trigger_allowlisted_hotkey"],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/3"
+    },
+    {
+      "domain": "screenshots",
+      "status": "planned",
+      "authority": "native_plugin",
+      "delivered_operations": [],
+      "remaining_operations": ["capture_source_screenshot"],
+      "dangerous_operations": ["capture_source_screenshot"],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/3"
+    }
+  ]
+}
