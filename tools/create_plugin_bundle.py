@@ -10,7 +10,10 @@ import zipfile
 from collections.abc import Sequence
 from pathlib import Path
 
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10 CI
+    import tomli as tomllib
 
 
 def collect_payload(root: Path, platform: str) -> list[tuple[Path, str]]:
