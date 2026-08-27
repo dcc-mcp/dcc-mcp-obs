@@ -40,6 +40,18 @@ def test_native_plugin_uses_libobs_frontend_lifecycle() -> None:
     assert "obs_queue_task(OBS_TASK_UI" in source
 
 
+def test_native_plugin_advances_sequence_for_every_completed_request() -> None:
+    source = (ROOT / "native" / "src" / "plugin-main.cpp").read_text(encoding="utf-8")
+    completion = source.split("void execute_ui_operation", maxsplit=1)[1].split(
+        "bool run_ui_operation", maxsplit=1
+    )[0]
+
+    increment = completion.index("g_event_sequence.fetch_add(1) + 1;")
+    identity = completion.index("set_identity(result, response_sequence);")
+    publish = completion.index("state->result = result;")
+    assert increment < identity < publish
+
+
 def test_native_error_state_cannot_be_overwritten_by_identity_readback() -> None:
     source = (ROOT / "native" / "src" / "plugin-main.cpp").read_text(encoding="utf-8")
 

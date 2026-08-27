@@ -79,8 +79,10 @@ dcc-mcp-obs --host-pid <obs-pid>
 ## Agent discovery
 
 The bundled `obs-control` skill includes English and Chinese discovery aliases
-for OBS, Open Broadcaster Software, recording, streaming, 录屏, 录制视频, 直播,
-and 场景切换. Agents search and load the skill before calling its typed tools.
+for OBS, Open Broadcaster Software, recording, scene/source inspection, pause,
+resume, 录屏, and 录制视频. Agents search and load the skill before calling the
+exact eight tools in this first slice. Streaming and scene switching remain
+roadmap capabilities, not shipped native controls.
 
 OBS control is native-plugin/WebSocket first. Unsupported visual-only actions
 may use DCC-MCP `ui-control` with project-owned DCC-CUA only after exact PID

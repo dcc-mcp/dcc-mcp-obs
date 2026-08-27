@@ -22,10 +22,19 @@ IDENTITY = {
 class FakeTransport:
     def __init__(self, *_args: Any, **_kwargs: Any) -> None:
         self.closed = False
+        self.event_sequence = 0
 
-    def vendor_request(self, request_type: str, _data: dict[str, object]) -> dict[str, object]:
+    def vendor_request(
+        self,
+        request_type: str,
+        _data: dict[str, object],
+        *,
+        deadline: float | None = None,
+    ) -> dict[str, object]:
         assert request_type == "GetPluginStatus"
-        return dict(IDENTITY)
+        assert deadline is not None
+        self.event_sequence += 1
+        return {**IDENTITY, "eventSequence": self.event_sequence}
 
     def close(self) -> None:
         self.closed = True
