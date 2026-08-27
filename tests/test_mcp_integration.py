@@ -121,6 +121,7 @@ def test_real_mcp_search_load_describe_and_call_path(monkeypatch, tmp_path) -> N
         )
         envelope = called["result"]["structuredContent"]
         if "job_id" in envelope:
+            job_id = envelope["job_id"]
             deadline = time.monotonic() + 5
             while time.monotonic() < deadline:
                 called = post(
@@ -131,14 +132,15 @@ def test_real_mcp_search_load_describe_and_call_path(monkeypatch, tmp_path) -> N
                         "params": {
                             "name": "jobs_get_status",
                             "arguments": {
-                                "job_id": envelope["job_id"],
+                                "job_id": job_id,
                                 "include_result": True,
                             },
                         },
                     }
                 )
                 envelope = called["result"]["structuredContent"]
-                if envelope["status"] in {"completed", "failed", "cancelled", "interrupted"}:
+                status = envelope.get("status")
+                if status in {"completed", "failed", "cancelled", "interrupted"}:
                     break
                 time.sleep(0.05)
         assert envelope["status"] == "completed"
