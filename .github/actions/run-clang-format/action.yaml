@@ -57,5 +57,12 @@ runs:
 
         print ::group::Run clang-format-19
         local -a changes=(${(s:,:)CHANGED_FILES//[\[\]\'\"]/})
-        ./build-aux/run-clang-format --fail-${{ inputs.failCondition }} --check ${changes}
+        local -a owned_changes
+        local path
+        for path in ${changes}; do
+          [[ ${path} == native/vendor/* ]] || owned_changes+=(${path})
+        done
+        if (( ${#owned_changes} )); then
+          ./build-aux/run-clang-format --fail-${{ inputs.failCondition }} --check ${owned_changes}
+        fi
         print ::endgroup::
