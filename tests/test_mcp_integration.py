@@ -120,6 +120,7 @@ def test_real_mcp_search_load_describe_and_call_path(monkeypatch, tmp_path) -> N
             }
         )
         envelope = called["result"]["structuredContent"]
+        result = envelope
         if "job_id" in envelope:
             job_id = envelope["job_id"]
             deadline = time.monotonic() + 5
@@ -143,7 +144,10 @@ def test_real_mcp_search_load_describe_and_call_path(monkeypatch, tmp_path) -> N
                 if status in {"completed", "failed", "cancelled", "interrupted"}:
                     break
                 time.sleep(0.05)
-        assert envelope["status"] == "completed"
-        assert "obs-integration" in json.dumps(envelope["result"])
+            assert envelope["status"] == "completed"
+            result = envelope["result"]
+        else:
+            assert envelope["success"] is True
+        assert "obs-integration" in json.dumps(result)
     finally:
         instance.stop()
