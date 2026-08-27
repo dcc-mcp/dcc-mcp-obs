@@ -55,10 +55,20 @@ jobs:
         run: python -m ruff check .
       - name: Format
         run: python -m ruff format --check .
+
+  skill-contract:
+    name: Bundled Skill contract
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Skill contract
-        shell: bash
         run: |
-          dcc-mcp-cli lint src/dcc_mcp_obs/skills/obs-control \
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --output "$RUNNER_TEMP/dcc-mcp-cli.zip" \
+            https://github.com/dcc-mcp/dcc-mcp-core/releases/download/v0.20.21/dcc-mcp-cli-0.20.21-linux-x86_64.zip
+          echo "ada852953c71df7682dc9a3d5ddabf351d421d58d00ed1ee40acb63b49949afe  $RUNNER_TEMP/dcc-mcp-cli.zip" | sha256sum --check --strict
+          unzip -q "$RUNNER_TEMP/dcc-mcp-cli.zip" -d "$RUNNER_TEMP/dcc-mcp-cli"
+          "$RUNNER_TEMP/dcc-mcp-cli/dcc-mcp-cli" lint src/dcc_mcp_obs/skills/obs-control \
             --warnings-as-errors --output json
 
   python-package:
