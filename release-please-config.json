@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "package-name": "dcc-mcp-obs",
+      "include-component-in-tag": false,
+      "extra-files": [
+        "pyproject.toml",
+        {"type": "json", "path": "buildspec.json", "jsonpath": "$.version"},
+        "native/src/plugin-main.cpp",
+        "src/dcc_mcp_obs/__version__.py",
+        "src/dcc_mcp_obs/skills/obs-control/SKILL.md"
+      ]
+    }
+  }
+}

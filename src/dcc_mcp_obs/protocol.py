@@ -1,0 +1,199 @@
+"""Minimal OBS WebSocket 5.x transport for native vendor requests."""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import threading
+import uuid
+from collections.abc import Callable, Mapping
+from contextlib import suppress
+from typing import Any, Protocol
+
+import websocket
+
+from .config import ObsEndpointConfig
+
+MAX_FRAME_BYTES = 1_048_576
+MAX_INTERLEAVED_EVENTS = 64
+
+
+class ProtocolError(RuntimeError):
+    """Stable protocol error without server comments or secret material."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+class SocketLike(Protocol):
+    def recv(self) -> str | bytes: ...
+
+    def send(self, payload: str) -> object: ...
+
+    def close(self) -> object: ...
+
+
+class ObsWebSocketTransport:
+    """One authenticated, serialized WebSocket session bound to one endpoint."""
+
+    def __init__(
+        self,
+        config: ObsEndpointConfig,
+        *,
+        connector: Callable[[str, float], SocketLike] | None = None,
+    ) -> None:
+        self._config = config
+        self._connector = connector or self._connect
+        self._socket: SocketLike | None = None
+        self._lock = threading.Lock()
+
+    def close(self) -> None:
+        with self._lock:
+            socket, self._socket = self._socket, None
+            if socket is not None:
+                with suppress(Exception):
+                    socket.close()
+
+    def vendor_request(self, request_type: str, data: Mapping[str, object]) -> dict[str, object]:
+        if (
+            not isinstance(request_type, str)
+            or not request_type
+            or len(request_type) > 128
+            or not isinstance(data, Mapping)
+        ):
+            raise ProtocolError("OBS_REQUEST_INVALID")
+        with self._lock:
+            try:
+                socket = self._ensure_connected()
+                request_id = uuid.uuid4().hex
+                self._send_json(
+                    socket,
+                    {
+                        "op": 6,
+                        "d": {
+                            "requestType": "CallVendorRequest",
+                            "requestId": request_id,
+                            "requestData": {
+                                "vendorName": "dcc-mcp-obs",
+                                "requestType": request_type,
+                                "requestData": dict(data),
+                            },
+                        },
+                    },
+                )
+                response = self._receive_response(socket, request_id)
+                status = response.get("requestStatus")
+                if not isinstance(status, dict) or status.get("result") is not True:
+                    raise ProtocolError("OBS_REQUEST_FAILED")
+                payload = response.get("responseData")
+                if not isinstance(payload, dict):
+                    raise ProtocolError("OBS_RESPONSE_INVALID")
+                vendor_payload = payload.get("responseData")
+                if not isinstance(vendor_payload, dict):
+                    raise ProtocolError("OBS_RESPONSE_INVALID")
+                return vendor_payload
+            except ProtocolError:
+                self._disconnect_locked()
+                raise
+            except Exception as exc:
+                self._disconnect_locked()
+                raise ProtocolError("OBS_CONNECTION_FAILED") from exc
+
+    def _ensure_connected(self) -> SocketLike:
+        if self._socket is not None:
+            return self._socket
+        url = f"ws://{self._config.host}:{self._config.port}"
+        socket = self._connector(url, self._config.timeout_seconds)
+        try:
+            hello = self._read_json(socket)
+            if hello.get("op") != 0 or not isinstance(hello.get("d"), dict):
+                raise ProtocolError("OBS_HANDSHAKE_INVALID")
+            details = hello["d"]
+            rpc_version = details.get("rpcVersion")
+            if not isinstance(rpc_version, int) or isinstance(rpc_version, bool) or rpc_version < 1:
+                raise ProtocolError("OBS_VERSION_UNSUPPORTED")
+            identify: dict[str, object] = {"rpcVersion": 1, "eventSubscriptions": 0}
+            authentication = details.get("authentication")
+            if authentication is not None:
+                identify["authentication"] = self._authentication(authentication)
+            self._send_json(socket, {"op": 1, "d": identify})
+            identified = self._read_json(socket)
+            if identified.get("op") != 2:
+                raise ProtocolError("OBS_AUTHENTICATION_FAILED")
+        except Exception:
+            with suppress(Exception):
+                socket.close()
+            raise
+        self._socket = socket
+        return socket
+
+    def _authentication(self, raw: object) -> str:
+        if not isinstance(raw, dict):
+            raise ProtocolError("OBS_HANDSHAKE_INVALID")
+        challenge = raw.get("challenge")
+        salt = raw.get("salt")
+        if not isinstance(challenge, str) or not challenge or not isinstance(salt, str) or not salt:
+            raise ProtocolError("OBS_HANDSHAKE_INVALID")
+        secret = base64.b64encode(
+            hashlib.sha256((self._config.password + salt).encode("utf-8")).digest()
+        ).decode("ascii")
+        return base64.b64encode(
+            hashlib.sha256((secret + challenge).encode("utf-8")).digest()
+        ).decode("ascii")
+
+    def _receive_response(self, socket: SocketLike, request_id: str) -> dict[str, Any]:
+        for _ in range(MAX_INTERLEAVED_EVENTS + 1):
+            message = self._read_json(socket)
+            if message.get("op") == 5:
+                continue
+            if message.get("op") != 7 or not isinstance(message.get("d"), dict):
+                raise ProtocolError("OBS_RESPONSE_INVALID")
+            response = message["d"]
+            if response.get("requestId") != request_id:
+                raise ProtocolError("OBS_RESPONSE_MISMATCH")
+            if response.get("requestType") != "CallVendorRequest":
+                raise ProtocolError("OBS_RESPONSE_MISMATCH")
+            return response
+        raise ProtocolError("OBS_EVENT_OVERFLOW")
+
+    @staticmethod
+    def _read_json(socket: SocketLike) -> dict[str, Any]:
+        raw = socket.recv()
+        if isinstance(raw, bytes):
+            if len(raw) > MAX_FRAME_BYTES:
+                raise ProtocolError("OBS_FRAME_TOO_LARGE")
+            try:
+                raw = raw.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ProtocolError("OBS_RESPONSE_INVALID") from exc
+        if not isinstance(raw, str) or len(raw.encode("utf-8")) > MAX_FRAME_BYTES:
+            raise ProtocolError("OBS_FRAME_TOO_LARGE")
+        try:
+            value = json.loads(raw)
+        except (TypeError, ValueError) as exc:
+            raise ProtocolError("OBS_RESPONSE_INVALID") from exc
+        if not isinstance(value, dict):
+            raise ProtocolError("OBS_RESPONSE_INVALID")
+        return value
+
+    @staticmethod
+    def _send_json(socket: SocketLike, value: Mapping[str, object]) -> None:
+        encoded = json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+        if len(encoded.encode("utf-8")) > MAX_FRAME_BYTES:
+            raise ProtocolError("OBS_FRAME_TOO_LARGE")
+        socket.send(encoded)
+
+    @staticmethod
+    def _connect(url: str, timeout: float) -> SocketLike:
+        return websocket.create_connection(url, timeout=timeout, enable_multithread=True)
+
+    def _disconnect_locked(self) -> None:
+        socket, self._socket = self._socket, None
+        if socket is not None:
+            with suppress(Exception):
+                socket.close()
+
+
+__all__ = ["MAX_FRAME_BYTES", "ObsWebSocketTransport", "ProtocolError"]

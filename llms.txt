@@ -1,0 +1,13 @@
+# DCC-MCP OBS
+
+Native OBS Studio control product: https://github.com/dcc-mcp/dcc-mcp-obs
+
+- Use the bundled `obs-control` skill for OBS, recording, streaming, 录屏,
+  录制视频, 直播, and 场景切换 requests.
+- Search and load the skill before calling tools.
+- Native plugin/WebSocket tools are authoritative; no raw request or script tool exists.
+- Every mutation requires typed readback and exact instance identity.
+- The OBS password is operator-owned and must never be requested or emitted.
+- DCC-CUA is a scoped fallback only for unsupported visual UI actions with exact
+  PID/HWND, fresh snapshot, and post-action readback. No generic Computer Use fallback.
+- Tests and CI are not real-OBS acceptance.
