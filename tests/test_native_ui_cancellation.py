@@ -1,0 +1,59 @@
+from __future__ import annotations
+
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).parents[1]
+
+
+def test_delayed_native_ui_mutation_is_cancelled_before_execution(tmp_path: Path) -> None:
+    compiler = next(
+        (candidate for name in ("c++", "g++", "clang++") if (candidate := shutil.which(name))),
+        None,
+    )
+    if compiler is None:
+        pytest.skip("a standalone C++ compiler is unavailable")
+    source = ROOT / "native" / "tests" / "ui-task-gate-test.cpp"
+    executable = tmp_path / "ui-task-gate-test"
+    subprocess.run(
+        [compiler, "-std=c++17", "-pthread", str(source), "-o", str(executable)],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    subprocess.run([str(executable)], check=True, timeout=10)
+
+
+def test_every_destructive_obs_mutation_claims_after_state_probes() -> None:
+    source = (ROOT / "native" / "src" / "plugin-main.cpp").read_text(encoding="utf-8")
+    cases = (
+        ("StartRecording", "obs_frontend_recording_start();"),
+        ("StopRecording", "obs_frontend_recording_stop();"),
+        ("PauseRecording", "obs_frontend_recording_pause(true);"),
+        ("ResumeRecording", "obs_frontend_recording_pause(false);"),
+    )
+    for index, (operation, mutation) in enumerate(cases):
+        start = source.index(f"case UiOperation::{operation}:")
+        end = (
+            source.index(f"case UiOperation::{cases[index + 1][0]}:", start)
+            if index + 1 < len(cases)
+            else source.index("\n\t\t}", source.index(mutation, start)) + 4
+        )
+        branch = source[start:end]
+        probe = branch.index("obs_frontend_recording_active()")
+        claim = branch.index("claim_mutation")
+        mutate = branch.index(mutation)
+        assert probe < claim < mutate
+        assert "run_mutation" not in branch
+
+    timeout = source.split("if (!state->condition.wait_for", maxsplit=1)[1].split(
+        "obs_data_apply", maxsplit=1
+    )[0]
+    assert timeout.index("state->gate.cancel_pending();") < timeout.index(
+        'set_error(response, "OBS_UI_TIMEOUT");'
+    )

@@ -15,6 +15,10 @@ class ScriptedSocket:
         self.incoming = list(incoming)
         self.sent: list[dict[str, object]] = []
         self.closed = False
+        self.timeouts: list[float] = []
+
+    def settimeout(self, timeout: float) -> None:
+        self.timeouts.append(timeout)
 
     def recv(self) -> str | bytes:
         raw = self.incoming.pop(0)
@@ -120,3 +124,77 @@ def test_oversized_or_malformed_frame_is_stably_rejected() -> None:
 
     with pytest.raises(ProtocolError, match="OBS_FRAME_TOO_LARGE"):
         transport.vendor_request("GetPluginStatus", {})
+
+
+class ManualClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class TimedSocket(ScriptedSocket):
+    def __init__(
+        self,
+        incoming: list[dict[str, object] | str | bytes],
+        clock: ManualClock,
+        advances: list[float],
+    ) -> None:
+        super().__init__(incoming)
+        self.clock = clock
+        self.advances = list(advances)
+
+    def recv(self) -> str | bytes:
+        self.clock.now += self.advances.pop(0)
+        return super().recv()
+
+
+@pytest.mark.parametrize("response_advance, succeeds", [(5.0, True), (5.001, False)])
+def test_protocol_uses_one_deadline_across_handshake_and_response(
+    response_advance: float, succeeds: bool
+) -> None:
+    clock = ManualClock()
+    socket = TimedSocket(
+        [_hello(), {"op": 2, "d": {"negotiatedRpcVersion": 1}}, _response()],
+        clock,
+        [0, 0, response_advance],
+    )
+    transport = ObsWebSocketTransport(
+        ObsEndpointConfig(password="secret"),
+        connector=lambda _url, _timeout: socket,
+        clock=clock,
+    )
+
+    if succeeds:
+        assert transport.vendor_request("GetPluginStatus", {}, deadline=5)["ready"] is True
+    else:
+        with pytest.raises(ProtocolError, match="OBS_TIMEOUT"):
+            transport.vendor_request("GetPluginStatus", {}, deadline=5)
+
+    assert socket.timeouts
+    assert socket.timeouts[-1] <= socket.timeouts[0]
+
+
+def test_interleaved_events_cannot_refresh_the_receive_deadline() -> None:
+    clock = ManualClock()
+    events = [{"op": 5, "d": {"eventType": "VendorEvent"}} for _ in range(64)]
+    socket = TimedSocket(
+        [_hello(), {"op": 2, "d": {"negotiatedRpcVersion": 1}}, *events, _response()],
+        clock,
+        [0, 0, *([0.11] * 64), 0],
+    )
+    transport = ObsWebSocketTransport(
+        ObsEndpointConfig(password="secret"),
+        connector=lambda _url, _timeout: socket,
+        clock=clock,
+    )
+
+    with pytest.raises(ProtocolError, match="OBS_TIMEOUT"):
+        transport.vendor_request("GetPluginStatus", {}, deadline=1)
+
+    assert len(socket.incoming) > 50
+    assert all(
+        later <= earlier
+        for earlier, later in zip(socket.timeouts, socket.timeouts[1:], strict=False)
+    )

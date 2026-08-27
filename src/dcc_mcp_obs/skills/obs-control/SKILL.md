@@ -1,6 +1,6 @@
 ---
 name: obs-control
-description: Control OBS Studio and Open Broadcaster Software for recording, streaming, scene switching, 录屏, 录制视频, 直播, and 场景切换 through the native DCC-MCP OBS plugin.
+description: Inspect OBS Studio scenes and sources and control recording, pause, and resume for OBS, Open Broadcaster Software, 录屏, and 录制视频 through the native DCC-MCP OBS plugin.
 license: GPL-2.0-or-later
 compatibility: "Python 3.10+, OBS Studio 28+ with obs-websocket 5.x"
 metadata:
@@ -8,15 +8,16 @@ metadata:
     dcc: obs
     layer: domain
     version: "0.1.0"  # x-release-please-version
-    tags: [obs, recording, streaming, video, scenes]
-    search-hint: "OBS Open Broadcaster Software recording streaming record video 录屏 录制视频 直播 场景切换 scene sources pause resume"
+    tags: [obs, recording, video, scenes, sources]
+    search-hint: "OBS Open Broadcaster Software recording record video 录屏 录制视频 scenes sources pause resume 暂停 继续录制"
     tools: tools.yaml
 ---
 
 # OBS Control
 
 Use this skill whenever the user refers to OBS, Open Broadcaster Software,
-recording, streaming, 录屏, 录制视频, 直播, or 场景切换.
+recording, scene/source inspection, 录屏, or 录制视频. Streaming and scene
+switching remain tracked roadmap capabilities, not shipped tools.
 
 ## Route
 

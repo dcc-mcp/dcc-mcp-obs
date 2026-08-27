@@ -8,8 +8,12 @@ pass its published SHA-256 to the installer. The bundle contains a manifest
 that binds product, version, platform, every target path, and every file hash.
 
 The installer rejects path traversal, links, multi-link receipts, mismatched
-platforms, member drift, and unmanaged upgrades. It stages files beside the
-target and restores the prior managed installation if publication fails.
+platforms, member drift, and non-portable Windows aliases. The receipt records
+the exact managed file paths. Verify ignores unrelated entries while still
+failing closed on any managed-path drift; upgrade and uninstall mutate only
+those verified managed files, preserve operator-owned entries, and prune a
+managed directory only when it is empty. Files are staged beside the target,
+and a failed publication restores the prior managed installation.
 
 ## Commands
 

@@ -21,6 +21,7 @@
 #endif
 
 #include "obs-websocket-api.h"
+#include "ui-task-gate.hpp"
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE("dcc-mcp-obs", "en-US")
@@ -55,6 +56,7 @@ struct UiState {
 	std::condition_variable condition;
 	bool complete = false;
 	obs_data_t *result = nullptr;
+	dcc_mcp_obs::UiTaskGate gate;
 
 	~UiState()
 	{
@@ -81,18 +83,19 @@ std::string make_instance_id()
 	return value.str();
 }
 
-void set_identity(obs_data_t *data)
+void set_identity(obs_data_t *data, uint64_t event_sequence)
 {
 	obs_data_set_string(data, "instanceId", g_instance_id.c_str());
 	obs_data_set_string(data, "pluginVersion", kPluginVersion);
 	obs_data_set_string(data, "obsVersion", obs_get_version_string());
 	obs_data_set_int(data, "hostPid", static_cast<long long>(current_pid()));
-	obs_data_set_int(data, "eventSequence", static_cast<long long>(g_event_sequence.load()));
+	obs_data_set_int(data, "eventSequence", static_cast<long long>(event_sequence));
 }
 
 void set_error(obs_data_t *data, const char *code)
 {
-	set_identity(data);
+	const uint64_t event_sequence = g_event_sequence.fetch_add(1) + 1;
+	set_identity(data, event_sequence);
 	obs_data_set_bool(data, "ok", false);
 	obs_data_set_string(data, "errorCode", code);
 }
@@ -183,56 +186,88 @@ void execute_ui_operation(void *private_data)
 	std::unique_ptr<std::shared_ptr<UiState>> holder(static_cast<std::shared_ptr<UiState> *>(private_data));
 	std::shared_ptr<UiState> state = *holder;
 	obs_data_t *result = nullptr;
-
-	switch (state->operation) {
-	case UiOperation::Status:
+	const bool is_mutation =
+		state->operation == UiOperation::StartRecording || state->operation == UiOperation::StopRecording ||
+		state->operation == UiOperation::PauseRecording || state->operation == UiOperation::ResumeRecording;
+	if (!is_mutation && !state->gate.try_start()) {
 		result = obs_data_create();
-		obs_data_set_bool(result, "ready", true);
-		break;
-	case UiOperation::ListScenes:
-		result = list_scenes();
-		break;
-	case UiOperation::ListSources:
-		result = list_sources(state->scene_name);
-		break;
-	case UiOperation::RecordingStatus:
-		result = recording_status();
-		break;
-	case UiOperation::StartRecording:
-		result = obs_data_create();
-		if (!obs_frontend_recording_active())
-			obs_frontend_recording_start();
-		obs_data_set_bool(result, "accepted", true);
-		break;
-	case UiOperation::StopRecording:
-		result = obs_data_create();
-		if (obs_frontend_recording_active())
-			obs_frontend_recording_stop();
-		obs_data_set_bool(result, "accepted", true);
-		break;
-	case UiOperation::PauseRecording:
-		result = obs_data_create();
-		if (!obs_frontend_recording_active()) {
-			set_error(result, "OBS_RECORDING_NOT_ACTIVE");
-		} else {
-			if (!obs_frontend_recording_paused())
-				obs_frontend_recording_pause(true);
-			obs_data_set_bool(result, "accepted", true);
-		}
-		break;
-	case UiOperation::ResumeRecording:
-		result = obs_data_create();
-		if (!obs_frontend_recording_active()) {
-			set_error(result, "OBS_RECORDING_NOT_ACTIVE");
-		} else {
-			if (obs_frontend_recording_paused())
-				obs_frontend_recording_pause(false);
-			obs_data_set_bool(result, "accepted", true);
-		}
-		break;
+		set_error(result, "OBS_UI_TIMEOUT");
 	}
 
-	set_identity(result);
+	if (result == nullptr) {
+		switch (state->operation) {
+		case UiOperation::Status:
+			result = obs_data_create();
+			obs_data_set_bool(result, "ready", true);
+			break;
+		case UiOperation::ListScenes:
+			result = list_scenes();
+			break;
+		case UiOperation::ListSources:
+			result = list_sources(state->scene_name);
+			break;
+		case UiOperation::RecordingStatus:
+			result = recording_status();
+			break;
+		case UiOperation::StartRecording: {
+			result = obs_data_create();
+			const bool recording_active = obs_frontend_recording_active();
+			if (!state->gate.claim_mutation()) {
+				set_error(result, "OBS_UI_TIMEOUT");
+			} else {
+				if (!recording_active)
+					obs_frontend_recording_start();
+				obs_data_set_bool(result, "accepted", true);
+			}
+			break;
+		}
+		case UiOperation::StopRecording: {
+			result = obs_data_create();
+			const bool recording_active = obs_frontend_recording_active();
+			if (!state->gate.claim_mutation()) {
+				set_error(result, "OBS_UI_TIMEOUT");
+			} else {
+				if (recording_active)
+					obs_frontend_recording_stop();
+				obs_data_set_bool(result, "accepted", true);
+			}
+			break;
+		}
+		case UiOperation::PauseRecording: {
+			result = obs_data_create();
+			const bool recording_active = obs_frontend_recording_active();
+			const bool recording_paused = recording_active && obs_frontend_recording_paused();
+			if (!state->gate.claim_mutation()) {
+				set_error(result, "OBS_UI_TIMEOUT");
+			} else if (!recording_active) {
+				set_error(result, "OBS_RECORDING_NOT_ACTIVE");
+			} else {
+				if (!recording_paused)
+					obs_frontend_recording_pause(true);
+				obs_data_set_bool(result, "accepted", true);
+			}
+			break;
+		}
+		case UiOperation::ResumeRecording: {
+			result = obs_data_create();
+			const bool recording_active = obs_frontend_recording_active();
+			const bool recording_paused = recording_active && obs_frontend_recording_paused();
+			if (!state->gate.claim_mutation()) {
+				set_error(result, "OBS_UI_TIMEOUT");
+			} else if (!recording_active) {
+				set_error(result, "OBS_RECORDING_NOT_ACTIVE");
+			} else {
+				if (recording_paused)
+					obs_frontend_recording_pause(false);
+				obs_data_set_bool(result, "accepted", true);
+			}
+			break;
+		}
+		}
+	}
+
+	const uint64_t response_sequence = g_event_sequence.fetch_add(1) + 1;
+	set_identity(result, response_sequence);
 	if (!obs_data_has_user_value(result, "ok"))
 		obs_data_set_bool(result, "ok", true);
 	{
@@ -253,6 +288,7 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, obs_
 
 	std::unique_lock<std::mutex> lock(state->mutex);
 	if (!state->condition.wait_for(lock, kUiTimeout, [&state] { return state->complete; })) {
+		state->gate.cancel_pending();
 		set_error(response, "OBS_UI_TIMEOUT");
 		return false;
 	}
@@ -297,10 +333,10 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 
 void frontend_event(enum obs_frontend_event, void *)
 {
-	g_event_sequence.fetch_add(1);
+	const uint64_t event_sequence = g_event_sequence.fetch_add(1) + 1;
 	if (g_vendor != nullptr) {
 		obs_data_t *event = obs_data_create();
-		set_identity(event);
+		set_identity(event, event_sequence);
 		obs_websocket_vendor_emit_event(g_vendor, "HostStateChanged", event);
 		obs_data_release(event);
 	}
