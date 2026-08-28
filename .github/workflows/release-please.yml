@@ -12,6 +12,6 @@ jobs:
   release-please:
     runs-on: ubuntu-24.04
     steps:
-      - uses: googleapis/release-please-action@cc61a07e2da466bebbc19af50461e02817a9d8be
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
