@@ -7,7 +7,7 @@ metadata:
   dcc-mcp:
     dcc: obs
     layer: domain
-    version: "0.1.0"  # x-release-please-version
+    version: "1.0.0"  # x-release-please-version
     tags: [obs, recording, video, scenes, sources]
     search-hint: "OBS Open Broadcaster Software recording record video 录屏 录制视频 scenes sources pause resume 暂停 继续录制"
     tools: tools.yaml
