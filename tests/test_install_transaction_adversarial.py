@@ -52,6 +52,11 @@ def _replace_same_object_bytes(path: Path) -> None:
     replacement.replace(path)
 
 
+def _replace_same_bytes_and_return_inode(path: Path) -> int:
+    _replace_same_object_bytes(path)
+    return path.stat().st_ino
+
+
 def _replace_parent_with_same_content(parent: Path) -> None:
     original = parent.with_name(f".{parent.name}.prior")
     parent.replace(original)
@@ -440,3 +445,123 @@ def test_recovery_retirement_preserves_independently_replaced_objects(
     assert (target / "bin" / "dcc-mcp-obs.plugin").read_bytes() == original
     assert run(["status", "--plugin-dir", str(target)])[0] == 0
     assert (recovery / "bin" / "dcc-mcp-obs.plugin").read_bytes() == original
+
+
+def test_mid_retirement_publication_swap_preserves_complete_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = b"transaction-original"
+    archive, digest = _bundle(tmp_path, payload=original, name="install.zip")
+    target = tmp_path / "installed"
+    assert run(["install", *_args(archive, digest, target)])[0] == 0
+    old_receipt = (target / RECEIPT_NAME).read_bytes()
+    backup = target.with_name(f".{target.name}.backup")
+    published = target / "bin" / "dcc-mcp-obs.plugin"
+    original_inventory = install_cli._require_exact_recovery_inventory
+    injected = False
+    contender_inode = 0
+
+    def drift_after_publication_check(
+        recovery: Path, expected: dict[str, install_cli._FileIdentity]
+    ) -> None:
+        nonlocal injected, contender_inode
+        original_inventory(recovery, expected)
+        if (
+            not injected
+            and isinstance(expected, install_cli._RecoveryIdentity)
+            and expected.publication_guard_active
+            and Path(recovery) == backup
+        ):
+            contender_inode = _replace_same_bytes_and_return_inode(published)
+            injected = True
+
+    monkeypatch.setattr(
+        install_cli, "_require_exact_recovery_inventory", drift_after_publication_check
+    )
+    upgrade, upgrade_digest = _bundle(tmp_path, payload=b"transaction-upgrade", name="upgrade.zip")
+
+    code, report = run(["upgrade", *_args(upgrade, upgrade_digest, target)])
+
+    assert injected
+    assert code != 0
+    assert published.stat().st_ino == contender_inode
+    assert backup.is_dir()
+    assert (backup / "bin" / "dcc-mcp-obs.plugin").read_bytes() == original
+    assert (backup / RECEIPT_NAME).read_bytes() == old_receipt
+    assert report["verify"]["failure_reason"] == "OBS_RECOVERY_REQUIRED"
+
+
+def test_drift_after_rollback_readback_preserves_complete_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = b"transaction-original"
+    archive, digest = _bundle(tmp_path, payload=original, name="install.zip")
+    target = tmp_path / "installed"
+    assert run(["install", *_args(archive, digest, target)])[0] == 0
+    backup = target.with_name(f".{target.name}.backup")
+    published = target / "bin" / "dcc-mcp-obs.plugin"
+    original_retire = install_cli._retire_owned_recovery
+    original_verify = install_cli._verify
+    retire_failed = False
+    verify_calls = 0
+    contender_inode = 0
+
+    def fail_first_retirement(
+        recovery: Path, expected: dict[str, install_cli._FileIdentity]
+    ) -> None:
+        nonlocal retire_failed
+        if Path(recovery) == backup and not retire_failed:
+            retire_failed = True
+            raise OSError("force rollback before retirement")
+        original_retire(recovery, expected)
+
+    def drift_after_rollback_readback(path: Path) -> install_cli._VerifiedReceipt:
+        nonlocal verify_calls, contender_inode
+        receipt = original_verify(path)
+        verify_calls += 1
+        if verify_calls == 4:
+            contender_inode = _replace_same_bytes_and_return_inode(published)
+        return receipt
+
+    monkeypatch.setattr(install_cli, "_retire_owned_recovery", fail_first_retirement)
+    monkeypatch.setattr(install_cli, "_verify", drift_after_rollback_readback)
+    upgrade, upgrade_digest = _bundle(tmp_path, payload=b"transaction-upgrade", name="upgrade.zip")
+
+    code, report = run(["upgrade", *_args(upgrade, upgrade_digest, target)])
+
+    assert retire_failed and contender_inode
+    assert code != 0
+    assert published.stat().st_ino == contender_inode
+    assert backup.is_dir()
+    assert (backup / "bin" / "dcc-mcp-obs.plugin").read_bytes() == original
+    assert report["verify"]["failure_reason"] == "OBS_RECOVERY_REQUIRED"
+
+
+def test_terminal_success_rejects_post_verify_identity_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive, digest = _bundle(tmp_path, payload=b"transaction-original", name="install.zip")
+    target = tmp_path / "installed"
+    assert run(["install", *_args(archive, digest, target)])[0] == 0
+    published = target / "bin" / "dcc-mcp-obs.plugin"
+    original_verify = install_cli._verify
+    verify_calls = 0
+    contender_inode = 0
+
+    def replace_after_terminal_verify(path: Path) -> install_cli._VerifiedReceipt:
+        nonlocal verify_calls, contender_inode
+        receipt = original_verify(path)
+        verify_calls += 1
+        if verify_calls == 4:
+            contender_inode = _replace_same_bytes_and_return_inode(published)
+        return receipt
+
+    monkeypatch.setattr(install_cli, "_verify", replace_after_terminal_verify)
+    upgrade, upgrade_digest = _bundle(tmp_path, payload=b"transaction-upgrade", name="upgrade.zip")
+
+    code, report = run(["upgrade", *_args(upgrade, upgrade_digest, target)])
+
+    assert contender_inode
+    assert code != 0, (code, report, contender_inode)
+    assert published.stat().st_ino == contender_inode
+    assert report["verify"]["failure_reason"] == "OBS_PLUGIN_DRIFT"
