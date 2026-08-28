@@ -7,7 +7,7 @@ import json
 import pytest
 
 from dcc_mcp_obs.config import ObsEndpointConfig
-from dcc_mcp_obs.protocol import ObsWebSocketTransport, ProtocolError
+from dcc_mcp_obs.protocol import VENDOR_REQUESTS, ObsWebSocketTransport, ProtocolError
 
 
 class ScriptedSocket:
@@ -78,6 +78,50 @@ def test_authenticates_and_uses_only_call_vendor_request() -> None:
     assert socket.sent[1]["d"]["requestData"]["vendorName"] == "dcc-mcp-obs"
     assert result == {"instanceId": "one", "ready": True}
     assert "PRIVATE_OBS_PASSWORD" not in json.dumps(socket.sent)
+
+
+def test_rejects_hello_without_authentication_before_identify() -> None:
+    hello = _hello()
+    del hello["d"]["authentication"]
+    socket = ScriptedSocket([hello])
+    transport = ObsWebSocketTransport(
+        ObsEndpointConfig(password="secret"), connector=lambda _url, _timeout: socket
+    )
+
+    with pytest.raises(ProtocolError, match="OBS_AUTHENTICATION_REQUIRED"):
+        transport.vendor_request("GetPluginStatus", {})
+
+    assert socket.sent == []
+    assert socket.closed is True
+
+
+def test_unknown_vendor_request_is_rejected_locally() -> None:
+    connected = False
+
+    def connect(_url: str, _timeout: float) -> ScriptedSocket:
+        nonlocal connected
+        connected = True
+        return ScriptedSocket([])
+
+    transport = ObsWebSocketTransport(ObsEndpointConfig(password="secret"), connector=connect)
+
+    with pytest.raises(ProtocolError, match="OBS_REQUEST_INVALID"):
+        transport.vendor_request("DeleteEverything", {})
+
+    assert connected is False
+
+
+def test_transport_allowlist_is_exactly_the_public_eight_requests() -> None:
+    assert {
+        "GetPluginStatus",
+        "ListScenes",
+        "ListSources",
+        "GetRecordingStatus",
+        "StartRecording",
+        "StopRecording",
+        "PauseRecording",
+        "ResumeRecording",
+    } == VENDOR_REQUESTS
 
 
 def test_bounded_events_are_reconciled_before_response() -> None:

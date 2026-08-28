@@ -25,7 +25,8 @@ switching remain tracked roadmap capabilities, not shipped tools.
 2. Ask for confirmation before start/stop/pause/resume recording when the user
    did not explicitly request that state change.
 3. Treat a mutation response as provisional. Require its typed readback with
-   `verified=true` and retain the exact OBS instance identity.
+   `postcondition.verified=true` and retain the exact OBS instance identity
+   from `context`.
 4. Never request, print, log, or return the OBS WebSocket password. The operator
    owns `DCC_MCP_OBS_WEBSOCKET_PASSWORD`.
 5. Never construct a raw OBS WebSocket request or execute arbitrary script/code.

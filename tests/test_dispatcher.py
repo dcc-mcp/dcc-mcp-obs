@@ -13,6 +13,7 @@ IDENTITY = {
     "obsVersion": "31.1.1",
     "hostPid": 4242,
     "eventSequence": 7,
+    "ok": True,
 }
 
 

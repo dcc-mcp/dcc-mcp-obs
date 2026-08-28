@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import jsonschema
 import yaml
+from dcc_mcp_core.skill import skill_success
 
 ROOT = Path(__file__).parents[1]
 
@@ -70,6 +72,175 @@ def test_ui_fallback_is_explicitly_scoped_to_dcc_cua() -> None:
     assert "fresh snapshot" in skill
     assert "post-action readback" in skill
     assert "generic Computer Use" in skill
+
+
+def test_skill_outputs_publish_strict_typed_envelopes_with_context_parity() -> None:
+    tools = yaml.safe_load(
+        (ROOT / "src" / "dcc_mcp_obs" / "skills" / "obs-control" / "tools.yaml").read_text(
+            encoding="utf-8"
+        )
+    )["tools"]
+
+    expected_context_keys = {
+        "get_status": {
+            "instanceId",
+            "pluginVersion",
+            "obsVersion",
+            "hostPid",
+            "eventSequence",
+            "ok",
+            "ready",
+        },
+        "list_scenes": {
+            "instanceId",
+            "pluginVersion",
+            "obsVersion",
+            "hostPid",
+            "eventSequence",
+            "ok",
+            "currentSceneName",
+            "scenes",
+            "truncated",
+        },
+        "list_sources": {
+            "instanceId",
+            "pluginVersion",
+            "obsVersion",
+            "hostPid",
+            "eventSequence",
+            "ok",
+            "sceneName",
+            "sources",
+            "truncated",
+        },
+        "get_recording_status": {
+            "instanceId",
+            "pluginVersion",
+            "obsVersion",
+            "hostPid",
+            "eventSequence",
+            "ok",
+            "outputActive",
+            "outputPaused",
+        },
+    }
+    mutation_context_keys = {
+        "instanceId",
+        "pluginVersion",
+        "obsVersion",
+        "hostPid",
+        "eventSequence",
+        "ok",
+        "outputActive",
+        "outputPaused",
+    }
+    mutation_names = {
+        "start_recording",
+        "stop_recording",
+        "pause_recording",
+        "resume_recording",
+    }
+    for name in mutation_names:
+        expected_context_keys[name] = mutation_context_keys
+
+    for tool in tools:
+        schema = tool["output_schema"]
+        assert schema["additionalProperties"] is False
+        required = {"success", "message", "error", "prompt", "context"}
+        if tool["name"] in mutation_names:
+            required.add("postcondition")
+            assert schema["properties"]["postcondition"] == {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["verified"],
+                "properties": {"verified": {"const": True}},
+            }
+        assert set(schema["required"]) == required
+        assert set(schema["properties"]) == required
+        context = schema["properties"]["context"]
+        assert context["additionalProperties"] is False
+        assert set(context["properties"]) == expected_context_keys[tool["name"]]
+
+
+def test_every_skill_output_schema_accepts_the_real_core_success_envelope() -> None:
+    tools = yaml.safe_load(
+        (ROOT / "src" / "dcc_mcp_obs" / "skills" / "obs-control" / "tools.yaml").read_text(
+            encoding="utf-8"
+        )
+    )["tools"]
+    identity = {
+        "instanceId": "obs-contract",
+        "pluginVersion": "0.1.0",
+        "obsVersion": "31.1.1",
+        "hostPid": 4242,
+        "eventSequence": 7,
+        "ok": True,
+    }
+    results = {
+        "get_status": {**identity, "ready": True},
+        "list_scenes": {
+            **identity,
+            "currentSceneName": "Main",
+            "scenes": [{"sceneName": "Main"}],
+            "truncated": False,
+        },
+        "list_sources": {
+            **identity,
+            "sceneName": "Main",
+            "sources": [
+                {
+                    "sceneItemId": 1,
+                    "sourceName": "Camera",
+                    "sourceKind": "video_capture_device",
+                    "enabled": True,
+                }
+            ],
+            "truncated": False,
+        },
+        "get_recording_status": {
+            **identity,
+            "outputActive": False,
+            "outputPaused": False,
+        },
+        "start_recording": {
+            **identity,
+            "outputActive": True,
+            "outputPaused": False,
+            "verified": True,
+        },
+        "stop_recording": {
+            **identity,
+            "outputActive": False,
+            "outputPaused": False,
+            "verified": True,
+        },
+        "pause_recording": {
+            **identity,
+            "outputActive": True,
+            "outputPaused": True,
+            "verified": True,
+        },
+        "resume_recording": {
+            **identity,
+            "outputActive": True,
+            "outputPaused": False,
+            "verified": True,
+        },
+    }
+
+    failures: dict[str, list[str]] = {}
+    for tool in tools:
+        envelope = skill_success("OBS action completed.", **results[tool["name"]])
+        errors = sorted(
+            error.message
+            for error in jsonschema.Draft202012Validator(tool["output_schema"]).iter_errors(
+                envelope
+            )
+        )
+        if errors:
+            failures[tool["name"]] = errors
+
+    assert failures == {}
 
 
 def test_public_discovery_docs_distinguish_delivered_tools_from_roadmap() -> None:

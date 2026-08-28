@@ -89,11 +89,14 @@ jobs:
         shell: bash
         run: |
           python -m venv "$RUNNER_TEMP/obs-wheel-smoke"
-          "$RUNNER_TEMP/obs-wheel-smoke/bin/python" -m pip install dist/*.whl
+          "$RUNNER_TEMP/obs-wheel-smoke/bin/python" -m pip install \
+            dist/*.whl 'jsonschema>=4.23,<5' 'pyyaml>=6,<7'
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/obs-wheel-smoke/bin/dcc-mcp-obs" --version
           "$RUNNER_TEMP/obs-wheel-smoke/bin/python" -c \
             "from pathlib import Path; import dcc_mcp_obs; p=Path(dcc_mcp_obs.__file__).parent/'skills'/'obs-control'/'tools.yaml'; assert p.is_file()"
+          "$RUNNER_TEMP/obs-wheel-smoke/bin/python" \
+            "$GITHUB_WORKSPACE/tests/verify_installed_skill_contract.py"
 
   native:
     name: Native plugin / ${{ matrix.platform }}
