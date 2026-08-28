@@ -34,6 +34,7 @@ MAX_COMPRESSION_RATIO = 100
 MAX_PORTABLE_COMPONENT_BYTES = 255
 MAX_PORTABLE_PATH_BYTES = 1024
 RECEIPT_NAME = ".dcc-mcp-obs-install.json"
+POSIX_REVERIFY_NEXT_STEP = "POSIX_REVERIFY_BEFORE_USE"
 FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 RECEIPT_KEYS = frozenset({"schema_version", "product", "version", "platform", "files"})
 RECEIPT_FILE_KEYS = frozenset({"path", "sha256", "size"})
@@ -181,19 +182,26 @@ class _PhysicalIdentityLease:
             (relative, stream, guarded[relative]) for relative, stream, _ in self._streams
         ]
 
-    def close(self) -> None:
+    def close(self, *, require_restored: bool = False) -> None:
+        restore_error: OSError | None = None
         if self._posix_guard_active:
             for relative, stream, _ in self._streams:
-                with suppress(OSError):
+                try:
                     os.fchmod(stream.fileno(), self._file_original_modes[relative])
+                except OSError as exc:
+                    restore_error = restore_error or exc
             for descriptor, original_mode in reversed(self._directory_fds):
-                with suppress(OSError):
+                try:
                     os.fchmod(descriptor, original_mode)
+                except OSError as exc:
+                    restore_error = restore_error or exc
             self._posix_guard_active = False
         while self._streams:
             self._streams.pop()[1].close()
         while self._directory_fds:
             os.close(self._directory_fds.pop()[0])
+        if require_restored and restore_error is not None:
+            raise restore_error
 
 
 class _LeasedReport(dict[str, Any]):
@@ -211,7 +219,7 @@ class _LeasedReport(dict[str, Any]):
             return
         if _ACTIVE_RESULT_LEASES.get(lease.target) is lease:
             _ACTIVE_RESULT_LEASES.pop(lease.target, None)
-        lease.close()
+        lease.close(require_restored=True)
 
 
 _ACTIVE_RESULT_LEASES: dict[Path, _PhysicalIdentityLease] = {}
@@ -459,6 +467,17 @@ def _report(
     }
 
 
+def _posix_reverify_next_step(target: Path) -> dict[str, Any]:
+    return {
+        "id": POSIX_REVERIFY_NEXT_STEP,
+        "description": "Re-verify the managed OBS plugin immediately before use.",
+        "why": (
+            "POSIX verification is point-in-time and cannot retain namespace or writer ownership."
+        ),
+        "command": ["dcc-mcp-obs-install", "verify", "--plugin-dir", str(target)],
+    }
+
+
 def _commit_verified_report(
     target: Path,
     receipt: _VerifiedReceipt,
@@ -468,7 +487,7 @@ def _commit_verified_report(
     directly_usable: bool,
     failure_stage: str | None = None,
     failure_reason: str | None = None,
-) -> _LeasedReport:
+) -> dict[str, Any]:
     try:
         _require_verified_receipt_current(target, receipt)
         lease = _PhysicalIdentityLease(
@@ -480,18 +499,21 @@ def _commit_verified_report(
         raise InstallError("OBS_PLUGIN_DRIFT", "verify", EXIT_VERIFY) from exc
     try:
         lease.require_current()
-        report = _LeasedReport(
-            _report(
-                status,
-                [*steps, {"id": "verify", "status": "ok"}],
-                target,
-                directly_usable=directly_usable,
-                failure_stage=failure_stage,
-                failure_reason=failure_reason,
-            ),
-            lease,
+        report = _report(
+            status,
+            [*steps, {"id": "verify", "status": "ok"}],
+            target,
+            directly_usable=directly_usable,
+            failure_stage=failure_stage,
+            failure_reason=failure_reason,
         )
+        if sys.platform == "win32":
+            leased_report = _LeasedReport(report, lease)
+            lease.require_current()
+            return leased_report
         lease.require_current()
+        lease.close(require_restored=True)
+        report["next_steps"].append(_posix_reverify_next_step(target))
         return report
     except OSError as exc:
         lease.close()

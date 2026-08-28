@@ -29,6 +29,12 @@ dcc-mcp-obs-install uninstall
 在 sidecar 观察到精确的真实 OBS 插件会话前，两者都保持
 `verify.directly_usable=false` 和 `LIVE_OBS_VERIFICATION_REQUIRED`。
 
+在 Linux 和 macOS 上，成功的文件系统验证是同步的时间点验证，不代表持久锁。
+未特权 POSIX 进程既不能撤销已打开写描述符的能力，也不能在操作者自有父目录保持
+可写时固定受管理根目录名称。因此安装器会在返回前恢复内部验证 guard，并在
+`next_steps` 中发布 `POSIX_REVERIFY_BEFORE_USE`。依赖已安装文件前应立即重新运行
+`status` 或 `verify`；之后发生的任何命名空间或内容漂移都会在该后续命令中失败关闭。
+
 安装、升级或卸载已加载的原生插件前应关闭 OBS。安装完成后启用 OBS WebSocket，
 只通过 `DCC_MCP_OBS_WEBSOCKET_PASSWORD` 设置密码，重启 OBS，再用精确 OBS PID
 启动 sidecar。

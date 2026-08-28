@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import stat
 import sys
 import zipfile
@@ -767,45 +768,126 @@ def test_retained_success_reports_do_not_block_later_lifecycle_actions(tmp_path:
     assert not target.exists()
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX namespace replacement semantics")
-@pytest.mark.parametrize("command", ["install", "status", "verify", "upgrade"])
-def test_posix_terminal_result_blocks_replacement_after_final_readback(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX synchronous verification contract")
+def test_posix_status_is_point_in_time_and_follow_up_fails_after_root_rename(
+    tmp_path: Path,
 ) -> None:
     initial, initial_digest = _bundle(tmp_path, payload=b"transaction-initial", name="initial.zip")
     target = tmp_path / "installed"
     assert run(["install", *_args(initial, initial_digest, target)])[0] == 0
-    published = target / "bin" / "dcc-mcp-obs.plugin"
+    original_modes = [stat.S_IMODE(path.stat().st_mode) for path in (target, target / "bin")]
+
+    code, report = run(["status", "--plugin-dir", str(target)])
+
+    assert code == 0, report
+    assert report["next_steps"][0]["id"] == install_cli.POSIX_REVERIFY_NEXT_STEP
+    assert [
+        stat.S_IMODE(path.stat().st_mode) for path in (target, target / "bin")
+    ] == original_modes
+    displaced = tmp_path / "displaced"
+    target.rename(displaced)
+    follow_up_code, follow_up = run(["status", "--plugin-dir", str(target)])
+    assert follow_up_code != 0, follow_up
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX synchronous verification contract")
+def test_posix_verify_is_point_in_time_and_follow_up_detects_preopened_writer(
+    tmp_path: Path,
+) -> None:
+    initial, initial_digest = _bundle(tmp_path, payload=b"transaction-initial", name="initial.zip")
+    target = tmp_path / "installed"
+    assert run(["install", *_args(initial, initial_digest, target)])[0] == 0
+    payload = target / "bin" / "dcc-mcp-obs.plugin"
+    writer = os.open(payload, os.O_WRONLY)
+    try:
+        code, report = run(["verify", "--plugin-dir", str(target)])
+        assert code == 0, report
+        assert report["next_steps"][0]["id"] == install_cli.POSIX_REVERIFY_NEXT_STEP
+        os.pwrite(writer, b"ATTACK", 0)
+        os.fsync(writer)
+    finally:
+        os.close(writer)
+
+    follow_up_code, follow_up = run(["verify", "--plugin-dir", str(target)])
+    assert follow_up_code == install_cli.EXIT_VERIFY, follow_up
+    assert follow_up["verify"]["failure_reason"] == "OBS_PLUGIN_DRIFT"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX synchronous verification contract")
+def test_posix_synchronous_guard_never_restores_a_foreign_root_after_final_readback_swap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    initial, initial_digest = _bundle(tmp_path, payload=b"transaction-initial", name="initial.zip")
+    target = tmp_path / "installed"
+    assert run(["install", *_args(initial, initial_digest, target)])[0] == 0
+    original_paths = (target, target / "bin", target / "bin" / "dcc-mcp-obs.plugin")
+    original_modes = [stat.S_IMODE(path.stat().st_mode) for path in original_paths]
+    displaced = tmp_path / "displaced"
     original_require_current = install_cli._PhysicalIdentityLease.require_current
     calls = 0
-    replacement_blocked = False
+    rename_blocked = False
+    foreign_modes: tuple[int, int] | None = None
 
-    def replace_after_final_readback(lease: install_cli._PhysicalIdentityLease) -> None:
-        nonlocal calls, replacement_blocked
+    def swap_after_final_readback(lease: install_cli._PhysicalIdentityLease) -> None:
+        nonlocal calls, foreign_modes, rename_blocked
         original_require_current(lease)
         calls += 1
         if calls == 3:
             try:
-                _replace_same_bytes_and_return_inode(published)
+                target.rename(displaced)
             except OSError:
-                replacement_blocked = True
+                rename_blocked = True
+                return
+            target.mkdir(mode=0o700)
+            foreign = target / "foreign"
+            foreign.write_bytes(b"foreign")
+            foreign.chmod(0o600)
+            foreign_modes = (target.stat().st_mode, foreign.stat().st_mode)
 
     monkeypatch.setattr(
-        install_cli._PhysicalIdentityLease, "require_current", replace_after_final_readback
+        install_cli._PhysicalIdentityLease, "require_current", swap_after_final_readback
     )
 
-    if command == "install":
-        target = tmp_path / "fresh-installed"
-        archive, digest = _bundle(tmp_path, payload=b"transaction-fresh", name="fresh.zip")
-        published = target / "bin" / "dcc-mcp-obs.plugin"
-        argv = ["install", *_args(archive, digest, target)]
-    elif command == "upgrade":
-        archive, digest = _bundle(tmp_path, payload=b"transaction-upgraded", name="upgrade.zip")
-        argv = ["upgrade", *_args(archive, digest, target)]
+    code, report = run(["status", "--plugin-dir", str(target)])
+
+    assert calls == 3
+    if rename_blocked:
+        assert code == 0, report
+        assert [stat.S_IMODE(path.stat().st_mode) for path in original_paths] == original_modes
+        assert not displaced.exists()
+        return
+    displaced_paths = (
+        displaced,
+        displaced / "bin",
+        displaced / "bin" / "dcc-mcp-obs.plugin",
+    )
+    if code == 0:
+        assert report["next_steps"][0]["id"] == install_cli.POSIX_REVERIFY_NEXT_STEP
+        assert [stat.S_IMODE(path.stat().st_mode) for path in displaced_paths] == original_modes
     else:
-        argv = [command, "--plugin-dir", str(target)]
+        assert code == install_cli.EXIT_VERIFY, report
+        assert report["verify"]["failure_reason"] == "OBS_PLUGIN_DRIFT"
+    assert foreign_modes is not None
+    assert (target.stat().st_mode, (target / "foreign").stat().st_mode) == foreign_modes
 
-    code, report = run(argv)
 
-    assert calls == 3, (calls, code, report)
-    assert replacement_blocked or code != 0, (code, report)
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX synchronous verification contract")
+def test_posix_synchronous_guard_fails_closed_when_permissions_cannot_be_restored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    initial, initial_digest = _bundle(tmp_path, payload=b"transaction-initial", name="initial.zip")
+    target = tmp_path / "installed"
+    assert run(["install", *_args(initial, initial_digest, target)])[0] == 0
+    original_fchmod = os.fchmod
+
+    def reject_write_restoration(descriptor: int, mode: int) -> None:
+        if mode & 0o222:
+            raise OSError("injected permission restoration failure")
+        original_fchmod(descriptor, mode)
+
+    monkeypatch.setattr(os, "fchmod", reject_write_restoration)
+
+    code, report = run(["status", "--plugin-dir", str(target)])
+
+    assert code == install_cli.EXIT_VERIFY, report
+    assert report["verify"]["failure_reason"] == "OBS_PLUGIN_DRIFT"
