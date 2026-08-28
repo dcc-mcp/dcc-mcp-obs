@@ -9,7 +9,7 @@ from pathlib import Path
 import jsonschema
 import pytest
 
-from dcc_mcp_obs import install_cli
+from dcc_mcp_obs import __version__, install_cli
 from dcc_mcp_obs.install_cli import RECEIPT_NAME, run
 
 ROOT = Path(__file__).parents[1]
@@ -32,7 +32,7 @@ def _bundle(
     manifest = {
         "schema_version": 1,
         "product": "dcc-mcp-obs",
-        "version": "0.1.0",
+        "version": __version__,
         "platform": platform,
         "files": [
             {
