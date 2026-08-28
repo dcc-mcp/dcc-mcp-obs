@@ -6,6 +6,8 @@ from pathlib import Path
 
 from tools.create_plugin_bundle import create_bundle
 
+from dcc_mcp_obs import __version__
+
 
 def test_windows_plugin_bundle_is_install_contract_compatible(tmp_path: Path) -> None:
     root = tmp_path / "release"
@@ -17,7 +19,7 @@ def test_windows_plugin_bundle_is_install_contract_compatible(tmp_path: Path) ->
     locale.write_text('Plugin.Name="DCC-MCP OBS"', encoding="utf-8")
     output = tmp_path / "bundle.zip"
 
-    create_bundle(root, "windows", "0.1.0", output)
+    create_bundle(root, "windows", __version__, output)
 
     with zipfile.ZipFile(output) as bundle:
         manifest = json.loads(bundle.read("dcc-mcp-obs-plugin.json"))

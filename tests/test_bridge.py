@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from dcc_mcp_core import HostExecutionBridge
 
+from dcc_mcp_obs import __version__
 from dcc_mcp_obs.bridge import BridgeError, ObsControlBridge
 from dcc_mcp_obs.dispatcher import ObsBridgeDispatcher
 
@@ -55,7 +56,7 @@ class ManualClock:
 
 IDENTITY = {
     "instanceId": "obs-instance-1",
-    "pluginVersion": "0.1.0",
+    "pluginVersion": __version__,
     "obsVersion": "31.1.1",
     "hostPid": 4242,
     "eventSequence": 7,

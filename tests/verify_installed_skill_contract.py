@@ -16,7 +16,7 @@ def main() -> None:
     tools = yaml.safe_load((skill_root / "tools.yaml").read_text(encoding="utf-8"))["tools"]
     identity = {
         "instanceId": "obs-wheel-contract",
-        "pluginVersion": "0.1.0",
+        "pluginVersion": dcc_mcp_obs.__version__,
         "obsVersion": "31.1.1",
         "hostPid": 4242,
         "eventSequence": 7,

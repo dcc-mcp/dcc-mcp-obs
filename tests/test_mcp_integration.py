@@ -6,12 +6,12 @@ import time
 import urllib.request
 from typing import Any
 
-from dcc_mcp_obs import server
+from dcc_mcp_obs import __version__, server
 from dcc_mcp_obs.skills.obs_control.scripts import _client
 
 IDENTITY = {
     "instanceId": "obs-integration",
-    "pluginVersion": "0.1.0",
+    "pluginVersion": __version__,
     "obsVersion": "31.1.1",
     "hostPid": os.getpid(),
     "eventSequence": 1,

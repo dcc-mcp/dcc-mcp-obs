@@ -7,6 +7,8 @@ import jsonschema
 import yaml
 from dcc_mcp_core.skill import skill_success
 
+from dcc_mcp_obs import __version__
+
 ROOT = Path(__file__).parents[1]
 
 
@@ -170,7 +172,7 @@ def test_every_skill_output_schema_accepts_the_real_core_success_envelope() -> N
     )["tools"]
     identity = {
         "instanceId": "obs-contract",
-        "pluginVersion": "0.1.0",
+        "pluginVersion": __version__,
         "obsVersion": "31.1.1",
         "hostPid": 4242,
         "eventSequence": 7,
