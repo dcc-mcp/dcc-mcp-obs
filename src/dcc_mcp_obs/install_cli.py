@@ -69,6 +69,111 @@ class _VerifiedReceipt(dict[str, Any]):
         self.ownership_identity = ownership_identity
 
 
+def _open_shared_identity_stream(path: Path, *, share_delete: bool) -> Any:
+    if sys.platform != "win32":
+        return path.open("rb")
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    create_file = ctypes.windll.kernel32.CreateFileW
+    create_file.argtypes = (
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    )
+    create_file.restype = wintypes.HANDLE
+    sharing = 0x00000001 | 0x00000002
+    if share_delete:
+        sharing |= 0x00000004
+    handle = create_file(
+        str(path),
+        0x80000000,
+        sharing,
+        None,
+        3,
+        0x00000080,
+        None,
+    )
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError()
+    try:
+        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+    except BaseException:
+        ctypes.windll.kernel32.CloseHandle(handle)
+        raise
+    return os.fdopen(descriptor, "rb")
+
+
+class _PhysicalIdentityLease:
+    def __init__(
+        self,
+        target: Path,
+        relatives: Sequence[str],
+        expected: dict[str, _FileIdentity],
+    ) -> None:
+        self.target = target
+        self.relatives = tuple(relatives)
+        self.expected = dict(expected)
+        self._streams: list[tuple[Any, _FileIdentity]] = []
+        try:
+            for relative, identity in self.expected.items():
+                if stat.S_ISDIR(identity.mode):
+                    continue
+                path = target / Path(*relative.split("/"))
+                stream = _open_shared_identity_stream(path, share_delete=False)
+                self._streams.append((stream, identity))
+                if _identity_from_stat(os.fstat(stream.fileno())) != identity:
+                    raise OSError("leased file identity changed")
+            self.require_current()
+        except BaseException:
+            self.close()
+            raise
+
+    def require_current(self) -> None:
+        for stream, expected in self._streams:
+            if _identity_from_stat(os.fstat(stream.fileno())) != expected:
+                raise InstallError("OBS_PLUGIN_DRIFT", "verify", EXIT_VERIFY)
+        observed = dict(_capture_owned_install_identity_raw(self.target, self.relatives))
+        if not _identity_maps_match(self.expected, observed):
+            raise InstallError("OBS_PLUGIN_DRIFT", "verify", EXIT_VERIFY)
+
+    def close(self) -> None:
+        while self._streams:
+            self._streams.pop()[0].close()
+
+
+class _LeasedReport(dict[str, Any]):
+    def __init__(self, report: dict[str, Any], lease: _PhysicalIdentityLease) -> None:
+        super().__init__(report)
+        self._physical_identity_lease = lease
+        previous = _ACTIVE_RESULT_LEASES.setdefault(lease.target, lease)
+        if previous is not lease:
+            lease.close()
+            raise OSError("a terminal result lease is already active")
+
+    def __del__(self) -> None:
+        lease = getattr(self, "_physical_identity_lease", None)
+        if lease is None:
+            return
+        if _ACTIVE_RESULT_LEASES.get(lease.target) is lease:
+            _ACTIVE_RESULT_LEASES.pop(lease.target, None)
+        lease.close()
+
+
+_ACTIVE_RESULT_LEASES: dict[Path, _PhysicalIdentityLease] = {}
+
+
+def _release_active_result_lease(target: Path) -> None:
+    lease = _ACTIVE_RESULT_LEASES.pop(target, None)
+    if lease is not None:
+        lease.close()
+
+
 class _VerifiedBundle(dict[str, Any]):
     def __init__(
         self,
@@ -113,6 +218,83 @@ class _RecoveryIdentity(dict[str, _FileIdentity]):
         self.publication_guard_active = False
 
 
+class _RecoveryRetirementLease:
+    def __init__(self, recovery: Path, expected: dict[str, _FileIdentity]) -> None:
+        self.recovery = recovery
+        self.original_expected = dict(expected)
+        self.file_relatives = tuple(
+            relative
+            for relative, identity in self.original_expected.items()
+            if relative != "." and not stat.S_ISDIR(identity.mode)
+        )
+        self.snapshots = _snapshot_owned_files(recovery, self.file_relatives, expected)
+        self._streams: dict[str, Any] = {}
+        try:
+            for relative in self.file_relatives:
+                stream = _open_shared_identity_stream(
+                    recovery / Path(*relative.split("/")), share_delete=True
+                )
+                self._streams[relative] = stream
+                if (
+                    _identity_from_stat(os.fstat(stream.fileno()))
+                    != self.original_expected[relative]
+                ):
+                    raise OSError("recovery lease identity changed")
+        except BaseException:
+            self.close()
+            raise
+
+    def release_file(self, relative: str) -> None:
+        stream = self._streams.pop(relative, None)
+        if stream is not None:
+            stream.close()
+
+    def close(self) -> None:
+        while self._streams:
+            _, stream = self._streams.popitem()
+            stream.close()
+
+    def restore_complete(self, expected: dict[str, _FileIdentity]) -> None:
+        self.close()
+        directories = sorted(
+            (
+                (relative, identity)
+                for relative, identity in self.original_expected.items()
+                if stat.S_ISDIR(identity.mode)
+            ),
+            key=lambda item: 0 if item[0] == "." else len(item[0].split("/")),
+        )
+        try:
+            for relative, identity in directories:
+                path = (
+                    self.recovery if relative == "." else self.recovery / Path(*relative.split("/"))
+                )
+                if os.path.lexists(path):
+                    if not _same_directory_object(_file_identity(path), identity):
+                        raise OSError("foreign recovery directory occupies restore path")
+                else:
+                    path.mkdir()
+                    path.chmod(stat.S_IMODE(identity.mode))
+            for relative in self.file_relatives:
+                path = self.recovery / Path(*relative.split("/"))
+                if os.path.lexists(path):
+                    if _file_identity(path) != self.original_expected[relative]:
+                        raise OSError("foreign recovery file occupies restore path")
+                else:
+                    _restore_owned_snapshot(path, self.snapshots[relative])
+            restored = {
+                relative: _file_identity(
+                    self.recovery if relative == "." else self.recovery / Path(*relative.split("/"))
+                )
+                for relative in self.original_expected
+            }
+            expected.clear()
+            expected.update(restored)
+            _require_exact_recovery_inventory(self.recovery, expected)
+        except (InstallError, OSError) as exc:
+            raise InstallError("OBS_RECOVERY_REQUIRED", "install", EXIT_INSTALL) from exc
+
+
 def default_plugin_dir() -> Path:
     if sys.platform == "win32":
         root = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
@@ -143,6 +325,7 @@ def run(argv: Sequence[str]) -> tuple[int, dict[str, Any]]:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(list(argv))
     target = Path(os.path.abspath(args.plugin_dir.expanduser()))
+    _release_active_result_lease(target)
     steps: list[dict[str, str]] = []
     try:
         _require_safe_target_path(target)
@@ -156,12 +339,11 @@ def run(argv: Sequence[str]) -> tuple[int, dict[str, Any]]:
             _install(plan, target, allow_existing=args.command == "upgrade")
             steps.append({"id": "plugin", "status": "ok"})
             verified_receipt = _verify(target)
-            _require_verified_receipt_current(target, verified_receipt)
-            steps.append({"id": "verify", "status": "ok"})
-            return EXIT_OK, _report(
-                "requires_restart",
-                steps,
+            return EXIT_OK, _commit_verified_report(
                 target,
+                verified_receipt,
+                steps,
+                status="requires_restart",
                 directly_usable=False,
                 failure_stage="host-readiness",
                 failure_reason="LIVE_OBS_VERIFICATION_REQUIRED",
@@ -171,12 +353,11 @@ def run(argv: Sequence[str]) -> tuple[int, dict[str, Any]]:
                 steps.append({"id": "verify", "status": "planned"})
                 return EXIT_OK, _report("planned", steps, target, directly_usable=False)
             verified_receipt = _verify(target)
-            _require_verified_receipt_current(target, verified_receipt)
-            steps.append({"id": "verify", "status": "ok"})
-            return EXIT_OK, _report(
-                "partial",
-                steps,
+            return EXIT_OK, _commit_verified_report(
                 target,
+                verified_receipt,
+                steps,
+                status="partial",
                 directly_usable=False,
                 failure_stage="host-readiness",
                 failure_reason="LIVE_OBS_VERIFICATION_REQUIRED",
@@ -227,6 +408,48 @@ def _report(
             "failure_reason": failure_reason,
         },
     }
+
+
+def _commit_verified_report(
+    target: Path,
+    receipt: _VerifiedReceipt,
+    steps: list[dict[str, str]],
+    *,
+    status: str,
+    directly_usable: bool,
+    failure_stage: str | None = None,
+    failure_reason: str | None = None,
+) -> _LeasedReport:
+    try:
+        lease = _PhysicalIdentityLease(
+            target,
+            _receipt_relatives(receipt),
+            dict(receipt.ownership_identity),
+        )
+    except OSError as exc:
+        raise InstallError("OBS_PLUGIN_DRIFT", "verify", EXIT_VERIFY) from exc
+    try:
+        _require_verified_receipt_current(target, receipt)
+        lease.require_current()
+        report = _LeasedReport(
+            _report(
+                status,
+                [*steps, {"id": "verify", "status": "ok"}],
+                target,
+                directly_usable=directly_usable,
+                failure_stage=failure_stage,
+                failure_reason=failure_reason,
+            ),
+            lease,
+        )
+        lease.require_current()
+        return report
+    except OSError as exc:
+        lease.close()
+        raise InstallError("OBS_PLUGIN_DRIFT", "verify", EXIT_VERIFY) from exc
+    except BaseException:
+        lease.close()
+        raise
 
 
 def _acquire_archive(archive: Path) -> tuple[Path, _FileIdentity, bytes]:
@@ -942,50 +1165,61 @@ def _retire_owned_recovery(
     recovery: Path,
     expected: dict[str, _FileIdentity],
 ) -> None:
-    for relative in sorted(
-        (
-            relative
-            for relative, identity in expected.items()
-            if relative != "." and not stat.S_ISDIR(identity.mode)
-        ),
-        key=lambda value: len(value.split("/")),
-        reverse=True,
-    ):
+    lease = _RecoveryRetirementLease(recovery, expected)
+    try:
+        for relative in sorted(
+            (
+                relative
+                for relative, identity in expected.items()
+                if relative != "." and not stat.S_ISDIR(identity.mode)
+            ),
+            key=lambda value: len(value.split("/")),
+            reverse=True,
+        ):
+            _require_published_identity(expected)
+            _require_exact_recovery_inventory(recovery, expected)
+            _require_published_identity(expected)
+            path = recovery / Path(*relative.split("/"))
+            if _file_identity(path) != expected[relative]:
+                raise InstallError("OBS_RECOVERY_REQUIRED", "install", EXIT_INSTALL)
+            _require_published_identity(expected)
+            lease.release_file(relative)
+            path.unlink()
+            _require_published_identity(expected)
+            expected.pop(relative)
+        for relative in sorted(
+            (
+                relative
+                for relative, identity in expected.items()
+                if relative != "." and stat.S_ISDIR(identity.mode)
+            ),
+            key=lambda value: len(value.split("/")),
+            reverse=True,
+        ):
+            _require_published_identity(expected)
+            _require_exact_recovery_inventory(recovery, expected)
+            _require_published_identity(expected)
+            path = recovery / Path(*relative.split("/"))
+            if not _same_directory_object(_file_identity(path), expected[relative]):
+                raise InstallError("OBS_RECOVERY_REQUIRED", "install", EXIT_INSTALL)
+            _require_published_identity(expected)
+            path.rmdir()
+            _require_published_identity(expected)
+            expected.pop(relative)
         _require_published_identity(expected)
         _require_exact_recovery_inventory(recovery, expected)
         _require_published_identity(expected)
-        path = recovery / Path(*relative.split("/"))
-        if _file_identity(path) != expected[relative]:
+        if not _same_directory_object(_file_identity(recovery), expected["."]):
             raise InstallError("OBS_RECOVERY_REQUIRED", "install", EXIT_INSTALL)
         _require_published_identity(expected)
-        path.unlink()
-        expected.pop(relative)
-    for relative in sorted(
-        (
-            relative
-            for relative, identity in expected.items()
-            if relative != "." and stat.S_ISDIR(identity.mode)
-        ),
-        key=lambda value: len(value.split("/")),
-        reverse=True,
-    ):
+        recovery.rmdir()
         _require_published_identity(expected)
-        _require_exact_recovery_inventory(recovery, expected)
-        _require_published_identity(expected)
-        path = recovery / Path(*relative.split("/"))
-        if not _same_directory_object(_file_identity(path), expected[relative]):
-            raise InstallError("OBS_RECOVERY_REQUIRED", "install", EXIT_INSTALL)
-        _require_published_identity(expected)
-        path.rmdir()
-        expected.pop(relative)
-    _require_published_identity(expected)
-    _require_exact_recovery_inventory(recovery, expected)
-    _require_published_identity(expected)
-    if not _same_directory_object(_file_identity(recovery), expected["."]):
-        raise InstallError("OBS_RECOVERY_REQUIRED", "install", EXIT_INSTALL)
-    _require_published_identity(expected)
-    recovery.rmdir()
-    expected.pop(".")
+        expected.pop(".")
+    except BaseException:
+        lease.restore_complete(expected)
+        raise
+    finally:
+        lease.close()
 
 
 def _file_identity(path: Path) -> _FileIdentity:
