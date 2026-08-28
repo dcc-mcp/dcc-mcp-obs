@@ -119,32 +119,81 @@ class _PhysicalIdentityLease:
         self.target = target
         self.relatives = tuple(relatives)
         self.expected = dict(expected)
-        self._streams: list[tuple[Any, _FileIdentity]] = []
+        self._streams: list[tuple[str, Any, _FileIdentity]] = []
+        self._file_original_modes: dict[str, int] = {}
+        self._directory_fds: list[tuple[int, int]] = []
+        self._posix_guard_active = False
         try:
             for relative, identity in self.expected.items():
                 if stat.S_ISDIR(identity.mode):
                     continue
                 path = target / Path(*relative.split("/"))
                 stream = _open_shared_identity_stream(path, share_delete=False)
-                self._streams.append((stream, identity))
+                self._streams.append((relative, stream, identity))
+                self._file_original_modes[relative] = stat.S_IMODE(identity.mode)
                 if _identity_from_stat(os.fstat(stream.fileno())) != identity:
                     raise OSError("leased file identity changed")
             self.require_current()
+            if sys.platform != "win32":
+                self._acquire_posix_namespace_guard()
         except BaseException:
             self.close()
             raise
 
     def require_current(self) -> None:
-        for stream, expected in self._streams:
+        for _, stream, expected in self._streams:
             if _identity_from_stat(os.fstat(stream.fileno())) != expected:
+                raise InstallError("OBS_PLUGIN_DRIFT", "verify", EXIT_VERIFY)
+        for descriptor, _ in self._directory_fds:
+            observed = _identity_from_stat(os.fstat(descriptor))
+            if not any(
+                _same_directory_object(observed, expected)
+                for expected in self.expected.values()
+                if stat.S_ISDIR(expected.mode)
+            ):
                 raise InstallError("OBS_PLUGIN_DRIFT", "verify", EXIT_VERIFY)
         observed = dict(_capture_owned_install_identity_raw(self.target, self.relatives))
         if not _identity_maps_match(self.expected, observed):
             raise InstallError("OBS_PLUGIN_DRIFT", "verify", EXIT_VERIFY)
 
+    def _acquire_posix_namespace_guard(self) -> None:
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+        for relative, identity in self.expected.items():
+            if not stat.S_ISDIR(identity.mode):
+                continue
+            path = self.target if relative == "." else self.target / Path(*relative.split("/"))
+            descriptor = os.open(path, directory_flags)
+            self._directory_fds.append((descriptor, stat.S_IMODE(identity.mode)))
+            if not _same_directory_object(_identity_from_stat(os.fstat(descriptor)), identity):
+                raise OSError("leased directory identity changed")
+        self._posix_guard_active = True
+        for _, stream, identity in self._streams:
+            os.fchmod(stream.fileno(), stat.S_IMODE(identity.mode) & ~0o222)
+        for descriptor, original_mode in self._directory_fds:
+            os.fchmod(descriptor, original_mode & ~0o222)
+        guarded = dict(_capture_owned_install_identity_raw(self.target, self.relatives))
+        if not all(
+            _same_physical_object(guarded[key], value) for key, value in self.expected.items()
+        ):
+            raise OSError("owned identity changed while acquiring namespace guard")
+        self.expected = guarded
+        self._streams = [
+            (relative, stream, guarded[relative]) for relative, stream, _ in self._streams
+        ]
+
     def close(self) -> None:
+        if self._posix_guard_active:
+            for relative, stream, _ in self._streams:
+                with suppress(OSError):
+                    os.fchmod(stream.fileno(), self._file_original_modes[relative])
+            for descriptor, original_mode in reversed(self._directory_fds):
+                with suppress(OSError):
+                    os.fchmod(descriptor, original_mode)
+            self._posix_guard_active = False
         while self._streams:
-            self._streams.pop()[0].close()
+            self._streams.pop()[1].close()
+        while self._directory_fds:
+            os.close(self._directory_fds.pop()[0])
 
 
 class _LeasedReport(dict[str, Any]):
@@ -421,6 +470,7 @@ def _commit_verified_report(
     failure_reason: str | None = None,
 ) -> _LeasedReport:
     try:
+        _require_verified_receipt_current(target, receipt)
         lease = _PhysicalIdentityLease(
             target,
             _receipt_relatives(receipt),
@@ -429,7 +479,6 @@ def _commit_verified_report(
     except OSError as exc:
         raise InstallError("OBS_PLUGIN_DRIFT", "verify", EXIT_VERIFY) from exc
     try:
-        _require_verified_receipt_current(target, receipt)
         lease.require_current()
         report = _LeasedReport(
             _report(
@@ -955,6 +1004,15 @@ def _same_directory_object(actual: _FileIdentity, expected: _FileIdentity) -> bo
         and actual.device == expected.device
         and actual.inode == expected.inode
         and actual.mode == expected.mode
+        and actual.attributes == expected.attributes
+    )
+
+
+def _same_physical_object(actual: _FileIdentity, expected: _FileIdentity) -> bool:
+    return (
+        stat.S_IFMT(actual.mode) == stat.S_IFMT(expected.mode)
+        and actual.device == expected.device
+        and actual.inode == expected.inode
         and actual.attributes == expected.attributes
     )
 
