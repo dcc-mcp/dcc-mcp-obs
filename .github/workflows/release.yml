@@ -2,17 +2,64 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
 
 permissions:
   contents: read
 
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
 jobs:
+  release-please:
+    uses: ./.github/workflows/release-please.yml
+    permissions:
+      contents: write
+      pull-requests: write
+
+  identity:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_TAG: ${{ needs.release-please.outputs.tag }}
+      RELEASE_SHA: ${{ needs.release-please.outputs.sha }}
+      RELEASE_ID: ${{ needs.release-please.outputs.release_id }}
+    outputs:
+      tag: ${{ needs.release-please.outputs.tag }}
+      sha: ${{ needs.release-please.outputs.sha }}
+      release_id: ${{ needs.release-please.outputs.release_id }}
+    steps:
+      - name: Validate caller before checkout
+        shell: bash
+        run: |
+          test "$GITHUB_REPOSITORY" = "dcc-mcp/dcc-mcp-obs"
+          test "$GITHUB_EVENT_NAME" = "push"
+          test "$GITHUB_REF" = "refs/heads/main"
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          test "$RELEASE_SHA" = "$GITHUB_SHA"
+          [[ "$RELEASE_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        with:
+          python-version: "3.12"
+      - name: Verify Release Please handoff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python tools/release_delivery.py check
+
   python-artifacts:
+    needs: identity
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
+          ref: ${{ needs.identity.outputs.sha }}
           persist-credentials: false
       - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
         with:
@@ -30,6 +77,10 @@ jobs:
           retention-days: 3
 
   native-artifacts:
+    needs: identity
+    env:
+      RELEASE_TAG: ${{ needs.identity.outputs.tag }}
+      RELEASE_SHA: ${{ needs.identity.outputs.sha }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -47,6 +98,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
+          ref: ${{ needs.identity.outputs.sha }}
           persist-credentials: false
       - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
         with:
@@ -54,8 +106,8 @@ jobs:
       - name: Bind tag to source and version
         shell: bash
         run: |
-          python tools/check_release_version.py
-          test "$(git rev-list -n 1 "$GITHUB_REF")" = "$GITHUB_SHA"
+          GITHUB_REF_NAME="$RELEASE_TAG" python tools/check_release_version.py
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
       - name: Build native plugin
         uses: ./.github/actions/build-plugin
         with:
@@ -74,7 +126,11 @@ jobs:
           retention-days: 3
 
   publish:
-    needs: [python-artifacts, native-artifacts]
+    needs: [identity, python-artifacts, native-artifacts]
+    env:
+      RELEASE_TAG: ${{ needs.identity.outputs.tag }}
+      RELEASE_SHA: ${{ needs.identity.outputs.sha }}
+      RELEASE_ID: ${{ needs.identity.outputs.release_id }}
     runs-on: ubuntu-24.04
     environment: pypi
     permissions:
@@ -83,7 +139,11 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
+          ref: ${{ needs.identity.outputs.sha }}
           persist-credentials: false
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        with:
+          python-version: "3.12"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           path: release-artifacts
@@ -97,44 +157,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          python tools/check_release_version.py
-          test "$(git rev-list -n 1 "$GITHUB_REF")" = "$GITHUB_SHA"
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "release already exists" >&2
-            exit 1
-          fi
-          python - <<'PY'
-          from pathlib import Path
-          import tarfile
-          import zipfile
-
-          artifacts = sorted(Path("release-artifacts").rglob("*"))
-          files = [path for path in artifacts if path.is_file()]
-          wheels = [path for path in files if path.suffix == ".whl"]
-          sdists = [path for path in files if path.name.endswith(".tar.gz")]
-          native = [path for path in files if path.suffix == ".zip"]
-          if len(wheels) != 1 or len(sdists) != 1 or len(native) != 3:
-              raise SystemExit("release artifact set is not exact")
-          with zipfile.ZipFile(wheels[0]) as archive:
-              if not any(name.endswith(".dist-info/METADATA") for name in archive.namelist()):
-                  raise SystemExit("wheel metadata is missing")
-          with tarfile.open(sdists[0]) as archive:
-              if not any(member.name.endswith("/PKG-INFO") for member in archive.getmembers()):
-                  raise SystemExit("sdist metadata is missing")
-          PY
+          python tools/release_delivery.py check
+      - name: Attach artifacts to the exact Release Please release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python tools/release_delivery.py upload
       - name: Publish Python distributions
         uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc
         with:
           packages-dir: release-artifacts/python-dist
           attestations: true
           print-hash: true
-      - name: Publish no-clobber GitHub Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          python tools/check_release_version.py
-          test "$(git rev-list -n 1 "$GITHUB_REF")" = "$GITHUB_SHA"
-          gh release create "$GITHUB_REF_NAME" \
-            --verify-tag --title "$GITHUB_REF_NAME" --generate-notes \
-            SHA256SUMS release-artifacts/native-*/*.zip release-artifacts/python-dist/*
