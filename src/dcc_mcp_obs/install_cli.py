@@ -98,7 +98,14 @@ class _RecoveryIdentity(dict[str, _FileIdentity]):
         self.published_identity: dict[str, _FileIdentity] = {}
         self.publication_guard_active = False
 
-    def activate_publication_guard(self, published_identity: dict[str, _FileIdentity]) -> None:
+    def activate_publication_guard(
+        self,
+        published_identity: dict[str, _FileIdentity],
+        *,
+        published_relatives: Sequence[str] | None = None,
+    ) -> None:
+        if published_relatives is not None:
+            self.published_relatives = tuple(published_relatives)
         self.published_identity = dict(published_identity)
         self.publication_guard_active = True
 
@@ -148,7 +155,8 @@ def run(argv: Sequence[str]) -> tuple[int, dict[str, Any]]:
                 return EXIT_OK, _report("planned", steps, target, directly_usable=False)
             _install(plan, target, allow_existing=args.command == "upgrade")
             steps.append({"id": "plugin", "status": "ok"})
-            _verify(target)
+            verified_receipt = _verify(target)
+            _require_verified_receipt_current(target, verified_receipt)
             steps.append({"id": "verify", "status": "ok"})
             return EXIT_OK, _report(
                 "requires_restart",
@@ -162,7 +170,8 @@ def run(argv: Sequence[str]) -> tuple[int, dict[str, Any]]:
             if args.dry_run:
                 steps.append({"id": "verify", "status": "planned"})
                 return EXIT_OK, _report("planned", steps, target, directly_usable=False)
-            _verify(target)
+            verified_receipt = _verify(target)
+            _require_verified_receipt_current(target, verified_receipt)
             steps.append({"id": "verify", "status": "ok"})
             return EXIT_OK, _report(
                 "partial",
@@ -482,9 +491,8 @@ def _replace_owned_install(
                         _record_owned_destination(target, relative, restored_ownership)
                         recovery_expected.pop(relative, None)
                     elif _recovery_source_matches(backup, relative, recovery_expected):
-                        source.replace(destination)
+                        _restore_owned_snapshot(destination, snapshot[relative])
                         _record_owned_destination(target, relative, restored_ownership)
-                        recovery_expected.pop(relative)
                     else:
                         _restore_owned_snapshot(destination, snapshot[relative])
                         rollback_failed = True
@@ -501,7 +509,11 @@ def _replace_owned_install(
                     subset=True,
                 ):
                     raise InstallError("OBS_PLUGIN_DRIFT", "verify", EXIT_VERIFY)
-                recovery_expected.release_publication_guard()
+                _require_verified_receipt_current(target, restored_receipt)
+                recovery_expected.activate_publication_guard(
+                    dict(restored_receipt.ownership_identity),
+                    published_relatives=_receipt_relatives(restored_receipt),
+                )
             except (InstallError, OSError):
                 rollback_failed = True
         elif not transaction_started:
@@ -882,6 +894,17 @@ def _require_published_identity(expected: dict[str, _FileIdentity]) -> None:
         raise InstallError("OBS_PLUGIN_DRIFT", "verify", EXIT_VERIFY)
 
 
+def _require_verified_receipt_current(target: Path, receipt: _VerifiedReceipt) -> None:
+    observed = dict(
+        _capture_owned_install_identity_raw(
+            target,
+            _receipt_relatives(receipt),
+        )
+    )
+    if not _identity_maps_match(dict(receipt.ownership_identity), observed):
+        raise InstallError("OBS_PLUGIN_DRIFT", "verify", EXIT_VERIFY)
+
+
 def _published_objects_owned(expected: _RecoveryIdentity) -> bool:
     try:
         observed = dict(
@@ -930,9 +953,11 @@ def _retire_owned_recovery(
     ):
         _require_published_identity(expected)
         _require_exact_recovery_inventory(recovery, expected)
+        _require_published_identity(expected)
         path = recovery / Path(*relative.split("/"))
         if _file_identity(path) != expected[relative]:
             raise InstallError("OBS_RECOVERY_REQUIRED", "install", EXIT_INSTALL)
+        _require_published_identity(expected)
         path.unlink()
         expected.pop(relative)
     for relative in sorted(
@@ -946,15 +971,19 @@ def _retire_owned_recovery(
     ):
         _require_published_identity(expected)
         _require_exact_recovery_inventory(recovery, expected)
+        _require_published_identity(expected)
         path = recovery / Path(*relative.split("/"))
         if not _same_directory_object(_file_identity(path), expected[relative]):
             raise InstallError("OBS_RECOVERY_REQUIRED", "install", EXIT_INSTALL)
+        _require_published_identity(expected)
         path.rmdir()
         expected.pop(relative)
     _require_published_identity(expected)
     _require_exact_recovery_inventory(recovery, expected)
+    _require_published_identity(expected)
     if not _same_directory_object(_file_identity(recovery), expected["."]):
         raise InstallError("OBS_RECOVERY_REQUIRED", "install", EXIT_INSTALL)
+    _require_published_identity(expected)
     recovery.rmdir()
     expected.pop(".")
 
