@@ -58,6 +58,11 @@ The installer emits one Install SOP v1 JSON object. `--dry-run` performs bundle
 and ownership preflight without changing the OBS plugin directory. See
 [installation details](docs/install.md).
 
+On POSIX systems, a successful filesystem result is a synchronous point-in-time
+verification, not a persistent namespace or writer lock. The report publishes
+`POSIX_REVERIFY_BEFORE_USE` in `next_steps`; re-run `status` or `verify`
+immediately before relying on the files.
+
 ## Password and endpoint
 
 Configure the OBS WebSocket password in the operator-owned environment:

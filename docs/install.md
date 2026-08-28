@@ -34,6 +34,15 @@ File installation returns `requires_restart`; file-only status/verify returns
 `LIVE_OBS_VERIFICATION_REQUIRED` until an exact live OBS plugin session is
 observed through the sidecar.
 
+On Linux and macOS, successful filesystem verification is synchronous and
+point-in-time. Unprivileged POSIX processes cannot revoke already-open writable
+descriptors or pin the managed root name while its operator-owned parent stays
+writable. The installer therefore restores its internal verification guard
+before returning and publishes `POSIX_REVERIFY_BEFORE_USE` in `next_steps`.
+It does not claim a persistent lease: re-run `status` or `verify` immediately
+before relying on the installed files. Any subsequent namespace or content
+drift fails closed on that follow-up command.
+
 Close OBS before installing, upgrading, or uninstalling a loaded native
 plugin. After installation, enable OBS WebSocket, set the password only in
 `DCC_MCP_OBS_WEBSOCKET_PASSWORD`, restart OBS, and start the sidecar with the
