@@ -16,6 +16,7 @@ IDENTITY = {
     "hostPid": os.getpid(),
     "eventSequence": 1,
     "ready": True,
+    "ok": True,
 }
 
 

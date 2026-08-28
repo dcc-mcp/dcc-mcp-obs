@@ -3,7 +3,27 @@ tools:
     description: Get exact native OBS plugin and host readiness.
     source_file: scripts/get_status.py
     input_schema: {type: object, properties: {}, additionalProperties: false}
-    output_schema: {type: object}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context:
+          type: object
+          additionalProperties: false
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, ready]
+          properties:
+            instanceId: {type: string, minLength: 1, maxLength: 128}
+            pluginVersion: {type: string, minLength: 1}
+            obsVersion: {type: string, minLength: 1}
+            hostPid: {type: integer, minimum: 1}
+            eventSequence: {type: integer, minimum: 0}
+            ok: {const: true}
+            ready: {const: true}
     execution: sync
     affinity: any
     enforce_thread_affinity: true
@@ -15,7 +35,36 @@ tools:
     description: List bounded scenes and identify the current scene.
     source_file: scripts/list_scenes.py
     input_schema: {type: object, properties: {}, additionalProperties: false}
-    output_schema: {type: object}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context:
+          type: object
+          additionalProperties: false
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, scenes, truncated]
+          properties:
+            instanceId: {type: string, minLength: 1, maxLength: 128}
+            pluginVersion: {type: string, minLength: 1}
+            obsVersion: {type: string, minLength: 1}
+            hostPid: {type: integer, minimum: 1}
+            eventSequence: {type: integer, minimum: 0}
+            ok: {const: true}
+            currentSceneName: {type: string, maxLength: 256}
+            scenes:
+              type: array
+              maxItems: 256
+              items:
+                type: object
+                additionalProperties: false
+                required: [sceneName]
+                properties: {sceneName: {type: string, minLength: 1, maxLength: 256}}
+            truncated: {type: boolean}
     execution: sync
     affinity: any
     enforce_thread_affinity: true
@@ -30,7 +79,40 @@ tools:
       type: object
       properties: {scene_name: {type: string, minLength: 1, maxLength: 256}}
       additionalProperties: false
-    output_schema: {type: object}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context:
+          type: object
+          additionalProperties: false
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sceneName, sources, truncated]
+          properties:
+            instanceId: {type: string, minLength: 1, maxLength: 128}
+            pluginVersion: {type: string, minLength: 1}
+            obsVersion: {type: string, minLength: 1}
+            hostPid: {type: integer, minimum: 1}
+            eventSequence: {type: integer, minimum: 0}
+            ok: {const: true}
+            sceneName: {type: string, minLength: 1, maxLength: 256}
+            sources:
+              type: array
+              maxItems: 512
+              items:
+                type: object
+                additionalProperties: false
+                required: [sceneItemId, sourceName, sourceKind, enabled]
+                properties:
+                  sceneItemId: {type: integer}
+                  sourceName: {type: string, minLength: 1, maxLength: 256}
+                  sourceKind: {type: string, minLength: 1, maxLength: 256}
+                  enabled: {type: boolean}
+            truncated: {type: boolean}
     execution: sync
     affinity: any
     enforce_thread_affinity: true
@@ -42,7 +124,28 @@ tools:
     description: Get recording active and paused state.
     source_file: scripts/get_recording_status.py
     input_schema: {type: object, properties: {}, additionalProperties: false}
-    output_schema: {type: object}
+    output_schema: &recording_status_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context:
+          type: object
+          additionalProperties: false
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, outputActive, outputPaused]
+          properties:
+            instanceId: {type: string, minLength: 1, maxLength: 128}
+            pluginVersion: {type: string, minLength: 1}
+            obsVersion: {type: string, minLength: 1}
+            hostPid: {type: integer, minimum: 1}
+            eventSequence: {type: integer, minimum: 0}
+            ok: {const: true}
+            outputActive: {type: boolean}
+            outputPaused: {type: boolean}
     execution: sync
     affinity: any
     enforce_thread_affinity: true
@@ -54,7 +157,34 @@ tools:
     description: Start recording and require exact active-state readback.
     source_file: scripts/start_recording.py
     input_schema: {type: object, properties: {}, additionalProperties: false}
-    output_schema: {type: object}
+    output_schema: &recording_mutation_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context, postcondition]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        postcondition:
+          type: object
+          additionalProperties: false
+          required: [verified]
+          properties:
+            verified: {const: true}
+        context:
+          type: object
+          additionalProperties: false
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, outputActive, outputPaused]
+          properties:
+            instanceId: {type: string, minLength: 1, maxLength: 128}
+            pluginVersion: {type: string, minLength: 1}
+            obsVersion: {type: string, minLength: 1}
+            hostPid: {type: integer, minimum: 1}
+            eventSequence: {type: integer, minimum: 0}
+            ok: {const: true}
+            outputActive: {type: boolean}
+            outputPaused: {type: boolean}
     execution: sync
     affinity: any
     enforce_thread_affinity: true
@@ -66,7 +196,7 @@ tools:
     description: Stop recording and require exact inactive-state readback.
     source_file: scripts/stop_recording.py
     input_schema: {type: object, properties: {}, additionalProperties: false}
-    output_schema: {type: object}
+    output_schema: *recording_mutation_output
     execution: sync
     affinity: any
     enforce_thread_affinity: true
@@ -78,7 +208,7 @@ tools:
     description: Pause active recording and require exact paused-state readback.
     source_file: scripts/pause_recording.py
     input_schema: {type: object, properties: {}, additionalProperties: false}
-    output_schema: {type: object}
+    output_schema: *recording_mutation_output
     execution: sync
     affinity: any
     enforce_thread_affinity: true
@@ -90,7 +220,7 @@ tools:
     description: Resume paused recording and require exact unpaused-state readback.
     source_file: scripts/resume_recording.py
     input_schema: {type: object, properties: {}, additionalProperties: false}
-    output_schema: {type: object}
+    output_schema: *recording_mutation_output
     execution: sync
     affinity: any
     enforce_thread_affinity: true

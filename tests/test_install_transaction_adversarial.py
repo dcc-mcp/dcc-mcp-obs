@@ -150,6 +150,140 @@ def test_partial_retirement_failure_restores_complete_previous_install(
     assert not backup.exists()
 
 
+def test_corrupt_published_payload_is_verified_before_backup_retirement_and_rolls_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = b"transaction-original"
+    archive, digest = _bundle(tmp_path, payload=original, name="install.zip")
+    target = tmp_path / "installed"
+    assert run(["install", *_args(archive, digest, target)])[0] == 0
+    previous_receipt = (target / RECEIPT_NAME).read_bytes()
+    unrelated = target / "operator-owned.txt"
+    unrelated.write_bytes(b"preserve-me")
+    original_prune = install_cli._prune_empty_owned_directories
+    corrupted = False
+
+    def corrupt_after_publication(prune_target: Path, relatives: list[str]) -> None:
+        nonlocal corrupted
+        original_prune(prune_target, relatives)
+        if prune_target == target and not corrupted:
+            (target / "bin" / "dcc-mcp-obs.plugin").write_bytes(b"corrupt-published")
+            corrupted = True
+
+    monkeypatch.setattr(install_cli, "_prune_empty_owned_directories", corrupt_after_publication)
+    upgrade, upgrade_digest = _bundle(tmp_path, payload=b"transaction-upgrade", name="upgrade.zip")
+
+    code, report = run(["upgrade", *_args(upgrade, upgrade_digest, target)])
+
+    assert corrupted
+    assert code != 0
+    assert report["verify"]["failure_reason"] == "OBS_PLUGIN_DRIFT"
+    assert (target / "bin" / "dcc-mcp-obs.plugin").read_bytes() == original
+    assert (target / RECEIPT_NAME).read_bytes() == previous_receipt
+    assert unrelated.read_bytes() == b"preserve-me"
+    assert run(["status", "--plugin-dir", str(target)])[0] == 0
+    assert not target.with_name(f".{target.name}.backup").exists()
+
+
+@pytest.mark.parametrize("swap", ["payload", "receipt"])
+@pytest.mark.parametrize("window", ["before-retire", "post-verify"])
+def test_upgrade_keeps_recovery_when_verified_publication_is_replaced(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    swap: str,
+    window: str,
+) -> None:
+    original = b"transaction-original"
+    archive, digest = _bundle(tmp_path, payload=original, name="install.zip")
+    target = tmp_path / "installed"
+    assert run(["install", *_args(archive, digest, target)])[0] == 0
+    previous_receipt = (target / RECEIPT_NAME).read_bytes()
+    backup = target.with_name(f".{target.name}.backup")
+    published_path = (
+        target / "bin" / "dcc-mcp-obs.plugin" if swap == "payload" else target / RECEIPT_NAME
+    )
+    replacement_identity = 0
+    replaced = False
+
+    def replace_publication() -> None:
+        nonlocal replacement_identity, replaced
+        _replace_same_object_bytes(published_path)
+        replacement_identity = published_path.stat().st_ino
+        replaced = True
+
+    if window == "before-retire":
+        original_retire = install_cli._retire_owned_recovery
+
+        def replace_before_retirement(
+            path: Path, expected: dict[str, install_cli._FileIdentity]
+        ) -> None:
+            if Path(path) == backup and not replaced:
+                replace_publication()
+            original_retire(path, expected)
+
+        monkeypatch.setattr(install_cli, "_retire_owned_recovery", replace_before_retirement)
+    else:
+        original_verify = install_cli._verify
+        verification_count = 0
+
+        def replace_after_published_verification(path: Path) -> install_cli._VerifiedReceipt:
+            nonlocal verification_count
+            receipt = original_verify(path)
+            verification_count += 1
+            if verification_count == 3:
+                replace_publication()
+            return receipt
+
+        monkeypatch.setattr(install_cli, "_verify", replace_after_published_verification)
+
+    upgrade, upgrade_digest = _bundle(tmp_path, payload=b"transaction-upgrade", name="upgrade.zip")
+
+    code, report = run(["upgrade", *_args(upgrade, upgrade_digest, target)])
+
+    assert replaced
+    assert code == install_cli.EXIT_INSTALL
+    assert report["verify"]["failure_reason"] == "OBS_RECOVERY_REQUIRED"
+    assert published_path.stat().st_ino == replacement_identity
+    assert backup.is_dir()
+    assert (backup / "bin" / "dcc-mcp-obs.plugin").read_bytes() == original
+    assert (backup / RECEIPT_NAME).read_bytes() == previous_receipt
+
+
+def test_upgrade_rolls_back_in_place_drift_after_published_verification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = b"transaction-original"
+    archive, digest = _bundle(tmp_path, payload=original, name="install.zip")
+    target = tmp_path / "installed"
+    assert run(["install", *_args(archive, digest, target)])[0] == 0
+    published_path = target / "bin" / "dcc-mcp-obs.plugin"
+    backup = target.with_name(f".{target.name}.backup")
+    original_verify = install_cli._verify
+    verification_count = 0
+    corrupted = False
+
+    def corrupt_after_published_verification(path: Path) -> install_cli._VerifiedReceipt:
+        nonlocal corrupted, verification_count
+        receipt = original_verify(path)
+        verification_count += 1
+        if verification_count == 3:
+            published_path.write_bytes(b"corrupt-after-verify")
+            corrupted = True
+        return receipt
+
+    monkeypatch.setattr(install_cli, "_verify", corrupt_after_published_verification)
+    upgrade, upgrade_digest = _bundle(tmp_path, payload=b"transaction-upgrade", name="upgrade.zip")
+
+    code, report = run(["upgrade", *_args(upgrade, upgrade_digest, target)])
+
+    assert corrupted
+    assert code == install_cli.EXIT_VERIFY
+    assert report["verify"]["failure_reason"] == "OBS_PLUGIN_DRIFT"
+    assert published_path.read_bytes() == original
+    assert run(["status", "--plugin-dir", str(target)])[0] == 0
+    assert not backup.exists()
+
+
 @pytest.mark.parametrize("replacement_payload", [b"archive-original", b"archive-changed"])
 def test_archive_replacement_after_validation_fails_before_publication(
     tmp_path: Path,

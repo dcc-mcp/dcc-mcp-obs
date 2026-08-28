@@ -288,9 +288,11 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, obs_
 
 	std::unique_lock<std::mutex> lock(state->mutex);
 	if (!state->condition.wait_for(lock, kUiTimeout, [&state] { return state->complete; })) {
-		state->gate.cancel_pending();
-		set_error(response, "OBS_UI_TIMEOUT");
-		return false;
+		if (state->gate.cancel_pending()) {
+			set_error(response, "OBS_UI_TIMEOUT");
+			return false;
+		}
+		state->condition.wait(lock, [&state] { return state->complete; });
 	}
 	obs_data_apply(response, state->result);
 	return obs_data_get_bool(response, "ok");

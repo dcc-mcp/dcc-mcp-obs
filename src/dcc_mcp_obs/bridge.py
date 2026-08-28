@@ -9,9 +9,44 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
+from .__version__ import __version__
 from .deadline import current_deadline
 
 DEFAULT_OPERATION_TIMEOUT_SECONDS = 30.0
+MAX_PUBLIC_ERROR_CODE_LENGTH = 64
+PUBLIC_DOWNSTREAM_ERRORS = frozenset(
+    {
+        "OBS_ARGUMENT_INVALID",
+        "OBS_AUTHENTICATION_FAILED",
+        "OBS_AUTHENTICATION_REQUIRED",
+        "OBS_CONNECTION_FAILED",
+        "OBS_EVENT_OVERFLOW",
+        "OBS_FRAME_TOO_LARGE",
+        "OBS_HANDSHAKE_INVALID",
+        "OBS_RECORDING_NOT_ACTIVE",
+        "OBS_REQUEST_FAILED",
+        "OBS_REQUEST_INVALID",
+        "OBS_RESPONSE_INVALID",
+        "OBS_RESPONSE_MISMATCH",
+        "OBS_SCENE_NOT_FOUND",
+        "OBS_TIMEOUT",
+        "OBS_UI_TIMEOUT",
+        "OBS_VERSION_UNSUPPORTED",
+    }
+)
+_IDENTITY_KEYS = frozenset(
+    {"instanceId", "pluginVersion", "obsVersion", "hostPid", "eventSequence", "ok"}
+)
+
+
+def _public_error_code(raw: object, *, fallback: str) -> str:
+    if (
+        type(raw) is str
+        and 1 <= len(raw) <= MAX_PUBLIC_ERROR_CODE_LENGTH
+        and raw in PUBLIC_DOWNSTREAM_ERRORS
+    ):
+        return raw
+    return fallback
 
 
 class VendorTransport(Protocol):
@@ -82,10 +117,11 @@ class ObsControlBridge:
             status = self._request("GetPluginStatus", deadline=operation_deadline)
         except BridgeError:
             raise
-        except Exception as exc:
-            raise BridgeError("OBS_CONNECTION_FAILED") from exc
+        except Exception:
+            raise BridgeError("OBS_CONNECTION_FAILED") from None
         self._identity = self._parse_identity(status)
         self._event_sequence = self._parse_event_sequence(status)
+        self._validate_read_only_response("GetPluginStatus", status)
         if (
             self._identity.host_pid != expected_pid
             or (
@@ -95,6 +131,8 @@ class ObsControlBridge:
             or status.get("ready") is not True
         ):
             raise BridgeError("OBS_INSTANCE_NOT_READY")
+        if self._identity.plugin_version != __version__:
+            raise BridgeError("OBS_PLUGIN_VERSION_UNSUPPORTED")
 
     def status(self) -> dict[str, object]:
         return self._checked("GetPluginStatus", deadline=self._operation_deadline())
@@ -154,22 +192,22 @@ class ObsControlBridge:
             raise BridgeError("OBS_TIMEOUT")
         try:
             response = self._transport.vendor_request(request_type, data or {}, deadline=deadline)
-        except BridgeError:
-            raise
         except Exception as exc:
-            code = getattr(exc, "code", None)
-            if isinstance(code, str) and code.startswith("OBS_"):
-                raise BridgeError(code) from exc
-            raise BridgeError("OBS_CONNECTION_FAILED") from exc
+            try:
+                raw_code = getattr(exc, "code", None)
+            except Exception:
+                raw_code = None
+            raise BridgeError(
+                _public_error_code(raw_code, fallback="OBS_CONNECTION_FAILED")
+            ) from None
         if self._clock() > deadline:
             raise BridgeError("OBS_TIMEOUT")
         if not isinstance(response, dict):
             raise BridgeError("OBS_RESPONSE_INVALID")
         if response.get("ok") is False:
-            code = response.get("errorCode")
-            if not isinstance(code, str) or not code.startswith("OBS_"):
-                code = "OBS_REQUEST_FAILED"
-            raise BridgeError(code)
+            raise BridgeError(
+                _public_error_code(response.get("errorCode"), fallback="OBS_REQUEST_FAILED")
+            )
         return response
 
     def _checked(
@@ -186,8 +224,90 @@ class ObsControlBridge:
             event_sequence = self._parse_event_sequence(response)
             if event_sequence <= self._event_sequence:
                 raise BridgeError("OBS_EVENT_SEQUENCE_INVALID")
+            self._validate_read_only_response(request_type, response)
             self._event_sequence = event_sequence
             return response
+
+    @staticmethod
+    def _validate_read_only_response(request_type: str, response: Mapping[str, object]) -> None:
+        if request_type in {
+            "GetPluginStatus",
+            "ListScenes",
+            "ListSources",
+            "GetRecordingStatus",
+        } and (not set(response) >= _IDENTITY_KEYS or response.get("ok") is not True):
+            raise BridgeError("OBS_RESPONSE_INVALID")
+        if request_type == "GetPluginStatus":
+            if set(response) - (_IDENTITY_KEYS | {"ready"}) or response.get("ready") is not True:
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type == "ListScenes":
+            allowed = _IDENTITY_KEYS | {"currentSceneName", "scenes", "truncated"}
+            scenes = response.get("scenes")
+            current = response.get("currentSceneName")
+            if (
+                set(response) - allowed
+                or not isinstance(scenes, list)
+                or len(scenes) > 256
+                or type(response.get("truncated")) is not bool
+                or (current is not None and (not isinstance(current, str) or len(current) > 256))
+                or any(
+                    not isinstance(scene, dict)
+                    or set(scene) != {"sceneName"}
+                    or not isinstance(scene.get("sceneName"), str)
+                    or not scene["sceneName"]
+                    or len(scene["sceneName"]) > 256
+                    for scene in scenes
+                )
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type == "ListSources":
+            allowed = _IDENTITY_KEYS | {"sceneName", "sources", "truncated"}
+            sources = response.get("sources")
+            scene_name = response.get("sceneName")
+            if (
+                set(response) - allowed
+                or not isinstance(scene_name, str)
+                or not scene_name
+                or len(scene_name) > 256
+                or not isinstance(sources, list)
+                or len(sources) > 512
+                or type(response.get("truncated")) is not bool
+                or any(not ObsControlBridge._valid_source(source) for source in sources)
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type == "GetRecordingStatus":
+            allowed = _IDENTITY_KEYS | {"outputActive", "outputPaused"}
+            if (
+                set(response) - allowed
+                or type(response.get("outputActive")) is not bool
+                or type(response.get("outputPaused")) is not bool
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+
+    @staticmethod
+    def _valid_source(source: object) -> bool:
+        if not isinstance(source, dict) or set(source) != {
+            "sceneItemId",
+            "sourceName",
+            "sourceKind",
+            "enabled",
+        }:
+            return False
+        scene_item_id = source.get("sceneItemId")
+        return (
+            isinstance(scene_item_id, int)
+            and not isinstance(scene_item_id, bool)
+            and isinstance(source.get("sourceName"), str)
+            and bool(source["sourceName"])
+            and len(source["sourceName"]) <= 256
+            and isinstance(source.get("sourceKind"), str)
+            and bool(source["sourceKind"])
+            and len(source["sourceKind"]) <= 256
+            and type(source.get("enabled")) is bool
+        )
 
     def _operation_deadline(self) -> float:
         if self._bound_deadline is not None:

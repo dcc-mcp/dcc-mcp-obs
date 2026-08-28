@@ -84,6 +84,28 @@ class _VerifiedBundle(dict[str, Any]):
         self.archive_bytes = archive_bytes
 
 
+class _RecoveryIdentity(dict[str, _FileIdentity]):
+    def __init__(
+        self,
+        identities: dict[str, _FileIdentity],
+        *,
+        published_target: Path,
+        published_relatives: Sequence[str],
+    ) -> None:
+        super().__init__(identities)
+        self.published_target = published_target
+        self.published_relatives = tuple(published_relatives)
+        self.published_identity: dict[str, _FileIdentity] = {}
+        self.publication_guard_active = False
+
+    def activate_publication_guard(self, published_identity: dict[str, _FileIdentity]) -> None:
+        self.published_identity = dict(published_identity)
+        self.publication_guard_active = True
+
+    def release_publication_guard(self) -> None:
+        self.publication_guard_active = False
+
+
 def default_plugin_dir() -> Path:
     if sys.platform == "win32":
         root = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
@@ -392,7 +414,11 @@ def _replace_owned_install(
     moved_previous: list[str] = []
     installed: list[str] = []
     installed_ownership: dict[str, _FileIdentity] = {".": expected["."]}
-    recovery_expected: dict[str, _FileIdentity] = {".": _file_identity(backup)}
+    recovery_expected = _RecoveryIdentity(
+        {".": _file_identity(backup)},
+        published_target=target,
+        published_relatives=upcoming,
+    )
     try:
         for relative in [*previous, RECEIPT_NAME]:
             source = _owned_path(target, relative)
@@ -413,35 +439,73 @@ def _replace_owned_install(
             _record_owned_destination(target, relative, installed_ownership)
             installed.append(relative)
         _prune_empty_owned_directories(target, previous)
+        published_receipt = _verify(target)
+        if dict(published_receipt) != next_receipt or not _identity_maps_match(
+            installed_ownership,
+            dict(published_receipt.ownership_identity),
+        ):
+            raise InstallError("OBS_PLUGIN_DRIFT", "verify", EXIT_VERIFY)
+        recovery_expected.activate_publication_guard(dict(published_receipt.ownership_identity))
+        _require_published_identity(recovery_expected)
         _retire_owned_recovery(backup, recovery_expected)
+        _require_published_identity(recovery_expected)
     except BaseException as exc:
         rollback_failed = False
-        for relative in reversed(installed):
+        transaction_started = bool(moved_previous or installed)
+        restored_ownership: dict[str, _FileIdentity] = {".": expected["."]}
+        if recovery_expected.publication_guard_active and not _published_objects_owned(
+            recovery_expected
+        ):
+            rollback_failed = True
+        if not rollback_failed:
+            for relative in reversed(installed):
+                try:
+                    path = _owned_path(target, relative)
+                    observed = _file_identity(path)
+                    published = installed_ownership[relative]
+                    if observed != published and not _same_file_object(observed, published):
+                        raise InstallError("OBS_PLUGIN_DRIFT", "verify", EXIT_VERIFY)
+                    path.unlink()
+                except (InstallError, OSError):
+                    rollback_failed = True
+            _prune_empty_owned_directories(target, upcoming)
+        if not rollback_failed:
+            for relative in reversed(moved_previous):
+                try:
+                    source = _owned_path(backup, relative)
+                    destination = _prepare_owned_destination(target, relative)
+                    if os.path.lexists(destination):
+                        rollback_failed = True
+                        continue
+                    if relative not in recovery_expected or not os.path.lexists(source):
+                        _restore_owned_snapshot(destination, snapshot[relative])
+                        _record_owned_destination(target, relative, restored_ownership)
+                        recovery_expected.pop(relative, None)
+                    elif _recovery_source_matches(backup, relative, recovery_expected):
+                        source.replace(destination)
+                        _record_owned_destination(target, relative, restored_ownership)
+                        recovery_expected.pop(relative)
+                    else:
+                        _restore_owned_snapshot(destination, snapshot[relative])
+                        rollback_failed = True
+                except (InstallError, OSError):
+                    rollback_failed = True
+        if not rollback_failed and transaction_started:
             try:
-                path = _owned_path(target, relative)
-                _require_owned_source_identity(target, relative, installed_ownership)
-                path.unlink()
+                restored_receipt = _verify(target)
+                if dict(restored_receipt) != dict(
+                    previous_receipt
+                ) or not _identity_maps_same_objects(
+                    restored_ownership,
+                    dict(restored_receipt.ownership_identity),
+                    subset=True,
+                ):
+                    raise InstallError("OBS_PLUGIN_DRIFT", "verify", EXIT_VERIFY)
+                recovery_expected.release_publication_guard()
             except (InstallError, OSError):
                 rollback_failed = True
-        _prune_empty_owned_directories(target, upcoming)
-        for relative in reversed(moved_previous):
-            try:
-                source = _owned_path(backup, relative)
-                destination = _prepare_owned_destination(target, relative)
-                if os.path.lexists(destination):
-                    rollback_failed = True
-                    continue
-                if relative not in recovery_expected or not os.path.lexists(source):
-                    _restore_owned_snapshot(destination, snapshot[relative])
-                    recovery_expected.pop(relative, None)
-                elif _recovery_source_matches(backup, relative, recovery_expected):
-                    source.replace(destination)
-                    recovery_expected.pop(relative)
-                else:
-                    _restore_owned_snapshot(destination, snapshot[relative])
-                    rollback_failed = True
-            except (InstallError, OSError):
-                rollback_failed = True
+        elif not transaction_started:
+            recovery_expected.release_publication_guard()
         try:
             _retire_owned_recovery(backup, recovery_expected)
         except (InstallError, OSError):
@@ -660,6 +724,16 @@ def _same_directory_object(actual: _FileIdentity, expected: _FileIdentity) -> bo
     )
 
 
+def _same_file_object(actual: _FileIdentity, expected: _FileIdentity) -> bool:
+    return (
+        stat.S_ISREG(actual.mode)
+        and stat.S_ISREG(expected.mode)
+        and actual.device == expected.device
+        and actual.inode == expected.inode
+        and actual.attributes == expected.attributes
+    )
+
+
 def _snapshot_owned_files(
     target: Path,
     relatives: Sequence[str],
@@ -795,6 +869,52 @@ def _require_exact_recovery_inventory(
         raise InstallError("OBS_RECOVERY_REQUIRED", "install", EXIT_INSTALL) from exc
 
 
+def _require_published_identity(expected: dict[str, _FileIdentity]) -> None:
+    if not isinstance(expected, _RecoveryIdentity) or not expected.publication_guard_active:
+        return
+    observed = dict(
+        _capture_owned_install_identity_raw(
+            expected.published_target,
+            expected.published_relatives,
+        )
+    )
+    if not _identity_maps_match(expected.published_identity, observed):
+        raise InstallError("OBS_PLUGIN_DRIFT", "verify", EXIT_VERIFY)
+
+
+def _published_objects_owned(expected: _RecoveryIdentity) -> bool:
+    try:
+        observed = dict(
+            _capture_owned_install_identity_raw(
+                expected.published_target,
+                expected.published_relatives,
+            )
+        )
+    except (InstallError, OSError):
+        return False
+    return _identity_maps_same_objects(expected.published_identity, observed)
+
+
+def _identity_maps_same_objects(
+    expected: dict[str, _FileIdentity],
+    observed: dict[str, _FileIdentity],
+    *,
+    subset: bool = False,
+) -> bool:
+    if (not subset and expected.keys() != observed.keys()) or (
+        subset and not expected.keys() <= observed.keys()
+    ):
+        return False
+    for relative, prior in expected.items():
+        current = observed[relative]
+        if stat.S_ISDIR(prior.mode):
+            if not _same_directory_object(current, prior):
+                return False
+        elif not _same_file_object(current, prior):
+            return False
+    return True
+
+
 def _retire_owned_recovery(
     recovery: Path,
     expected: dict[str, _FileIdentity],
@@ -808,6 +928,7 @@ def _retire_owned_recovery(
         key=lambda value: len(value.split("/")),
         reverse=True,
     ):
+        _require_published_identity(expected)
         _require_exact_recovery_inventory(recovery, expected)
         path = recovery / Path(*relative.split("/"))
         if _file_identity(path) != expected[relative]:
@@ -823,12 +944,14 @@ def _retire_owned_recovery(
         key=lambda value: len(value.split("/")),
         reverse=True,
     ):
+        _require_published_identity(expected)
         _require_exact_recovery_inventory(recovery, expected)
         path = recovery / Path(*relative.split("/"))
         if not _same_directory_object(_file_identity(path), expected[relative]):
             raise InstallError("OBS_RECOVERY_REQUIRED", "install", EXIT_INSTALL)
         path.rmdir()
         expected.pop(relative)
+    _require_published_identity(expected)
     _require_exact_recovery_inventory(recovery, expected)
     if not _same_directory_object(_file_identity(recovery), expected["."]):
         raise InstallError("OBS_RECOVERY_REQUIRED", "install", EXIT_INSTALL)

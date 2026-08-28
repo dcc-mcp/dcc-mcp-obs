@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
+import logging
 import threading
 from collections.abc import Mapping
 from typing import Any
 
 import pytest
+from dcc_mcp_core import HostExecutionBridge
 
 from dcc_mcp_obs.bridge import BridgeError, ObsControlBridge
+from dcc_mcp_obs.dispatcher import ObsBridgeDispatcher
 
 
 class FakeTransport:
@@ -55,6 +59,7 @@ IDENTITY = {
     "obsVersion": "31.1.1",
     "hostPid": 4242,
     "eventSequence": 7,
+    "ok": True,
 }
 
 
@@ -160,6 +165,223 @@ def test_transport_failure_is_stable_and_redacts_password() -> None:
     assert "PRIVATE_OBS_PASSWORD" not in str(caught.value)
 
 
+@pytest.mark.parametrize(
+    ("downstream", "public"),
+    [
+        ("OBS_UI_TIMEOUT", "OBS_UI_TIMEOUT"),
+        ("OBS_RECORDING_NOT_ACTIVE", "OBS_RECORDING_NOT_ACTIVE"),
+        ("OBS_PRIVATE_PASSWORD_leak", "OBS_CONNECTION_FAILED"),
+    ],
+)
+def test_downstream_exception_codes_are_allowlisted(downstream: str, public: str) -> None:
+    class FailingTransport:
+        def vendor_request(
+            self,
+            request_type: str,
+            data: Mapping[str, object],
+            *,
+            deadline: float | None = None,
+        ) -> dict[str, object]:
+            del request_type, data, deadline
+            error = RuntimeError("private downstream detail")
+            error.code = downstream  # type: ignore[attr-defined]
+            raise error
+
+    with pytest.raises(BridgeError) as caught:
+        ObsControlBridge(FailingTransport(), expected_pid=4242)
+
+    assert caught.value.code == public
+    assert downstream not in str(caught.value) or downstream == public
+
+
+def test_transport_raised_private_bridge_error_is_redacted() -> None:
+    private_code = "OBS_PRIVATE_PASSWORD_LEAK"
+
+    class FailingTransport:
+        def vendor_request(
+            self,
+            request_type: str,
+            data: Mapping[str, object],
+            *,
+            deadline: float | None = None,
+        ) -> dict[str, object]:
+            del request_type, data, deadline
+            raise BridgeError(private_code)
+
+    with pytest.raises(BridgeError) as caught:
+        ObsControlBridge(FailingTransport(), expected_pid=4242)
+
+    assert caught.value.code == "OBS_CONNECTION_FAILED"
+    assert private_code not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "downstream",
+    [
+        pytest.param(RuntimeError("PRIVATE_OBS_PASSWORD"), id="private-message"),
+        pytest.param(BridgeError("OBS_PRIVATE_PASSWORD_LEAK"), id="private-code"),
+    ],
+)
+def test_private_transport_details_do_not_escape_real_core_public_boundary(
+    caplog, downstream: BaseException
+) -> None:
+    private_message = "PRIVATE_OBS_PASSWORD"
+    private_code = "OBS_PRIVATE_PASSWORD_LEAK"
+
+    class FailingTransport:
+        def vendor_request(
+            self,
+            request_type: str,
+            data: Mapping[str, object],
+            *,
+            deadline: float | None = None,
+        ) -> dict[str, object]:
+            del request_type, data, deadline
+            raise downstream
+
+    execution_bridge = HostExecutionBridge(
+        dispatcher=ObsBridgeDispatcher(),
+        default_thread_affinity="any",
+        default_execution="sync",
+        default_timeout_hint_secs=30,
+    )
+
+    with caplog.at_level(logging.ERROR, logger="dcc_mcp_core._server.inprocess_executor"):
+        envelope = execution_bridge.dispatch_callable(
+            lambda: ObsControlBridge(FailingTransport(), expected_pid=4242),
+            action_name="obs_control__get_status",
+            skill_name="obs-control",
+        )
+
+    public_payload = json.dumps(envelope, sort_keys=True)
+    assert "OBS_CONNECTION_FAILED" in public_payload
+    for private_value in (private_message, private_code):
+        assert private_value not in public_payload
+        assert private_value not in caplog.text
+
+
+@pytest.mark.parametrize("raw_code", [["OBS_UI_TIMEOUT"], {"code": "OBS_UI_TIMEOUT"}])
+def test_unhashable_transport_error_code_is_redacted(raw_code: object) -> None:
+    class FailingTransport:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def vendor_request(
+            self,
+            request_type: str,
+            data: Mapping[str, object],
+            *,
+            deadline: float | None = None,
+        ) -> dict[str, object]:
+            del request_type, data, deadline
+            self.calls += 1
+            if self.calls == 1:
+                return {**IDENTITY, "ready": True}
+            error = RuntimeError("private downstream detail")
+            error.code = raw_code  # type: ignore[attr-defined]
+            raise error
+
+    bridge = ObsControlBridge(FailingTransport(), expected_pid=4242)
+
+    with pytest.raises(BridgeError) as caught:
+        bridge.list_scenes()
+
+    assert caught.value.code == "OBS_CONNECTION_FAILED"
+
+
+def test_unknown_vendor_error_code_is_redacted() -> None:
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {**IDENTITY, "ok": False, "errorCode": "OBS_PRIVATE_PATH_C_USERS", "eventSequence": 8},
+        ]
+    )
+    bridge = ObsControlBridge(transport, expected_pid=4242)
+
+    with pytest.raises(BridgeError) as caught:
+        bridge.list_scenes()
+
+    assert caught.value.code == "OBS_REQUEST_FAILED"
+    assert "PRIVATE_PATH" not in str(caught.value)
+
+
+@pytest.mark.parametrize("raw_code", [["OBS_UI_TIMEOUT"], {"code": "OBS_UI_TIMEOUT"}])
+def test_unhashable_vendor_error_code_is_redacted(raw_code: object) -> None:
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {**IDENTITY, "ok": False, "errorCode": raw_code, "eventSequence": 8},
+        ]
+    )
+    bridge = ObsControlBridge(transport, expected_pid=4242)
+
+    with pytest.raises(BridgeError) as caught:
+        bridge.list_scenes()
+
+    assert caught.value.code == "OBS_REQUEST_FAILED"
+
+
+def test_incompatible_native_plugin_version_is_not_ready() -> None:
+    status = {**IDENTITY, "pluginVersion": "999.0.0", "ready": True}
+
+    with pytest.raises(BridgeError, match="OBS_PLUGIN_VERSION_UNSUPPORTED"):
+        ObsControlBridge(FakeTransport([status]), expected_pid=4242)
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {**IDENTITY, "scenes": "not-an-array", "truncated": False},
+        {**IDENTITY, "scenes": [], "truncated": "false"},
+        {**IDENTITY, "scenes": [{"sceneName": 7}], "truncated": False},
+        {**IDENTITY, "scenes": [], "truncated": False, "privateExtra": "leak"},
+    ],
+)
+def test_list_scenes_response_has_strict_typed_schema(response: dict[str, object]) -> None:
+    transport = FakeTransport([{**IDENTITY, "ready": True}, {**response, "eventSequence": 8}])
+    bridge = ObsControlBridge(transport, expected_pid=4242)
+
+    with pytest.raises(BridgeError, match="OBS_RESPONSE_INVALID"):
+        bridge.list_scenes()
+
+
+@pytest.mark.parametrize(
+    ("request_type", "response"),
+    [
+        ("GetPluginStatus", {**IDENTITY, "ready": True, "eventSequence": 8}),
+        ("ListScenes", {**IDENTITY, "scenes": [], "truncated": False, "eventSequence": 8}),
+        (
+            "ListSources",
+            {
+                **IDENTITY,
+                "sceneName": "Main",
+                "sources": [],
+                "truncated": False,
+                "eventSequence": 8,
+            },
+        ),
+        (
+            "GetRecordingStatus",
+            {
+                **IDENTITY,
+                "outputActive": False,
+                "outputPaused": False,
+                "eventSequence": 8,
+            },
+        ),
+    ],
+)
+def test_read_only_success_requires_explicit_ok_true(
+    request_type: str, response: dict[str, object]
+) -> None:
+    response.pop("ok")
+    transport = FakeTransport([{**IDENTITY, "ready": True}, response])
+    bridge = ObsControlBridge(transport, expected_pid=4242)
+
+    with pytest.raises(BridgeError, match="OBS_RESPONSE_INVALID"):
+        bridge._checked(request_type, deadline=bridge._operation_deadline())
+
+
 def test_event_sequence_regression_fails_closed_before_verified_readback() -> None:
     transport = FakeTransport(
         [
@@ -235,7 +457,12 @@ def test_concurrent_responses_commit_event_sequence_in_request_order(
                 if request_type == "GetPluginStatus" and self.sequence == 7:
                     return {**IDENTITY, "ready": True}
                 self.sequence += 1
-                return {**IDENTITY, "eventSequence": self.sequence, "scenes": []}
+                return {
+                    **IDENTITY,
+                    "eventSequence": self.sequence,
+                    "scenes": [],
+                    "truncated": False,
+                }
 
     transport = ConcurrentTransport()
     bridge = ObsControlBridge(transport, expected_pid=4242)
