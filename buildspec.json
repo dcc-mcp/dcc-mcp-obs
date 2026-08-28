@@ -31,10 +31,14 @@
       }
     }
   },
-  "platformConfig": {"macos": {"bundleId": "org.dcc-mcp.obs"}},
+  "platformConfig": {
+    "macos": {
+      "bundleId": "org.dcc-mcp.obs"
+    }
+  },
   "name": "dcc-mcp-obs",
   "displayName": "DCC-MCP OBS",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "author": "Long Hao",
   "website": "https://github.com/dcc-mcp/dcc-mcp-obs",
   "email": "hal.long@outlook.com"
