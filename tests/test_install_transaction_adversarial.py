@@ -565,3 +565,202 @@ def test_terminal_success_rejects_post_verify_identity_replacement(
     assert code != 0, (code, report, contender_inode)
     assert published.stat().st_ino == contender_inode
     assert report["verify"]["failure_reason"] == "OBS_PLUGIN_DRIFT"
+
+
+def test_publication_swap_at_backup_unlink_preserves_complete_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old_payload = b"transaction-old-payload"
+    initial, initial_digest = _bundle(tmp_path, payload=old_payload, name="initial.zip")
+    target = tmp_path / "installed"
+    assert run(["install", *_args(initial, initial_digest, target)])[0] == 0
+    old_receipt = (target / RECEIPT_NAME).read_bytes()
+    backup = target.with_name(f".{target.name}.backup")
+    backup_payload = backup / "bin" / "dcc-mcp-obs.plugin"
+    published_payload = target / "bin" / "dcc-mcp-obs.plugin"
+    original_unlink = Path.unlink
+    injected = False
+    contender_inode = 0
+
+    def replace_publication_then_unlink_recovery(path: Path, missing_ok: bool = False) -> None:
+        nonlocal injected, contender_inode
+        if path == backup_payload and not injected:
+            injected = True
+            contender_inode = _replace_same_bytes_and_return_inode(published_payload)
+        original_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", replace_publication_then_unlink_recovery)
+    upgrade, upgrade_digest = _bundle(
+        tmp_path, payload=b"transaction-new-payload", name="upgrade.zip"
+    )
+
+    code, report = run(["upgrade", *_args(upgrade, upgrade_digest, target)])
+
+    assert injected
+    assert code == install_cli.EXIT_INSTALL
+    assert report["verify"]["failure_reason"] == "OBS_RECOVERY_REQUIRED"
+    assert published_payload.stat().st_ino == contender_inode
+    assert backup.is_dir()
+    assert backup_payload.read_bytes() == old_payload
+    assert (backup / RECEIPT_NAME).read_bytes() == old_receipt
+
+
+@pytest.mark.parametrize("command", ["upgrade", "status", "verify"])
+def test_terminal_result_rejects_replacement_after_final_identity_readback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+) -> None:
+    initial, initial_digest = _bundle(
+        tmp_path, payload=b"transaction-initial-payload", name="initial.zip"
+    )
+    target = tmp_path / "installed"
+    assert run(["install", *_args(initial, initial_digest, target)])[0] == 0
+    published_payload = target / "bin" / "dcc-mcp-obs.plugin"
+    original_require_current = install_cli._require_verified_receipt_current
+    injected = False
+    contender_inode = 0
+    replacement_blocked = False
+    contender_path = published_payload.with_name(f".{published_payload.name}.contender")
+
+    def replace_after_final_readback(
+        checked_target: Path, receipt: install_cli._VerifiedReceipt
+    ) -> None:
+        nonlocal injected, contender_inode, replacement_blocked
+        original_require_current(checked_target, receipt)
+        if not injected:
+            injected = True
+            try:
+                contender_inode = _replace_same_bytes_and_return_inode(published_payload)
+            except OSError:
+                replacement_blocked = True
+                raise
+
+    monkeypatch.setattr(
+        install_cli, "_require_verified_receipt_current", replace_after_final_readback
+    )
+    if command == "upgrade":
+        upgrade, upgrade_digest = _bundle(
+            tmp_path, payload=b"transaction-upgraded-payload", name="upgrade.zip"
+        )
+        argv = ["upgrade", *_args(upgrade, upgrade_digest, target)]
+    else:
+        argv = [command, "--plugin-dir", str(target)]
+
+    code, report = run(argv)
+
+    assert injected
+    assert code == install_cli.EXIT_VERIFY, (code, report)
+    assert report["verify"]["failure_reason"] == "OBS_PLUGIN_DRIFT"
+    if contender_inode:
+        assert published_payload.stat().st_ino == contender_inode
+    else:
+        assert replacement_blocked
+        assert contender_path.is_file()
+
+
+@pytest.mark.parametrize(
+    ("recovery_relative", "published_relative"),
+    [
+        ("bin/dcc-mcp-obs.plugin", "bin/dcc-mcp-obs.plugin"),
+        (RECEIPT_NAME, RECEIPT_NAME),
+    ],
+)
+def test_late_recovery_unlink_drift_restores_payload_and_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    recovery_relative: str,
+    published_relative: str,
+) -> None:
+    old_payload = b"transaction-old-payload"
+    initial, initial_digest = _bundle(tmp_path, payload=old_payload, name="initial.zip")
+    target = tmp_path / "installed"
+    assert run(["install", *_args(initial, initial_digest, target)])[0] == 0
+    old_receipt = (target / RECEIPT_NAME).read_bytes()
+    backup = target.with_name(f".{target.name}.backup")
+    recovery_path = backup / Path(*recovery_relative.split("/"))
+    published_path = target / Path(*published_relative.split("/"))
+    original_unlink = Path.unlink
+    injected = False
+    contender_inode = 0
+
+    def replace_publication_at_unlink(path: Path, missing_ok: bool = False) -> None:
+        nonlocal injected, contender_inode
+        if path == recovery_path and not injected:
+            injected = True
+            contender_inode = _replace_same_bytes_and_return_inode(published_path)
+        original_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", replace_publication_at_unlink)
+    upgrade, upgrade_digest = _bundle(
+        tmp_path, payload=b"transaction-new-payload", name="upgrade.zip"
+    )
+
+    code, report = run(["upgrade", *_args(upgrade, upgrade_digest, target)])
+
+    assert injected
+    assert code == install_cli.EXIT_INSTALL
+    assert report["verify"]["failure_reason"] == "OBS_RECOVERY_REQUIRED"
+    assert published_path.stat().st_ino == contender_inode
+    assert (backup / "bin" / "dcc-mcp-obs.plugin").read_bytes() == old_payload
+    assert (backup / RECEIPT_NAME).read_bytes() == old_receipt
+
+
+def test_late_recovery_parent_rmdir_drift_restores_complete_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old_payload = b"transaction-old-payload"
+    initial, initial_digest = _bundle(tmp_path, payload=old_payload, name="initial.zip")
+    target = tmp_path / "installed"
+    assert run(["install", *_args(initial, initial_digest, target)])[0] == 0
+    old_receipt = (target / RECEIPT_NAME).read_bytes()
+    backup = target.with_name(f".{target.name}.backup")
+    backup_parent = backup / "bin"
+    published_parent = target / "bin"
+    original_rmdir = Path.rmdir
+    injected = False
+    contender_inode = 0
+
+    def replace_publication_at_rmdir(path: Path) -> None:
+        nonlocal injected, contender_inode
+        if path == backup_parent and not injected:
+            injected = True
+            _replace_parent_with_same_content(published_parent)
+            contender_inode = published_parent.stat().st_ino
+        original_rmdir(path)
+
+    monkeypatch.setattr(Path, "rmdir", replace_publication_at_rmdir)
+    upgrade, upgrade_digest = _bundle(
+        tmp_path, payload=b"transaction-new-payload", name="upgrade.zip"
+    )
+
+    code, report = run(["upgrade", *_args(upgrade, upgrade_digest, target)])
+
+    assert injected
+    assert code == install_cli.EXIT_INSTALL
+    assert report["verify"]["failure_reason"] == "OBS_RECOVERY_REQUIRED"
+    assert published_parent.stat().st_ino == contender_inode
+    assert (backup / "bin" / "dcc-mcp-obs.plugin").read_bytes() == old_payload
+    assert (backup / RECEIPT_NAME).read_bytes() == old_receipt
+
+
+def test_retained_success_reports_do_not_block_later_lifecycle_actions(tmp_path: Path) -> None:
+    initial, initial_digest = _bundle(
+        tmp_path, payload=b"transaction-initial-payload", name="initial.zip"
+    )
+    target = tmp_path / "installed"
+    install_code, install_report = run(["install", *_args(initial, initial_digest, target)])
+    assert install_code == 0
+
+    upgrade, upgrade_digest = _bundle(
+        tmp_path, payload=b"transaction-upgraded-payload", name="upgrade.zip"
+    )
+    upgrade_code, upgrade_report = run(["upgrade", *_args(upgrade, upgrade_digest, target)])
+    assert upgrade_code == 0, upgrade_report
+
+    uninstall_code, uninstall_report = run(["uninstall", "--plugin-dir", str(target)])
+
+    assert install_report["status"] == "requires_restart"
+    assert upgrade_report["status"] == "requires_restart"
+    assert uninstall_code == 0, uninstall_report
+    assert not target.exists()
