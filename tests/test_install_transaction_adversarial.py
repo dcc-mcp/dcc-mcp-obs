@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import stat
+import sys
 import zipfile
 from dataclasses import replace
 from pathlib import Path
@@ -764,3 +765,47 @@ def test_retained_success_reports_do_not_block_later_lifecycle_actions(tmp_path:
     assert upgrade_report["status"] == "requires_restart"
     assert uninstall_code == 0, uninstall_report
     assert not target.exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX namespace replacement semantics")
+@pytest.mark.parametrize("command", ["install", "status", "verify", "upgrade"])
+def test_posix_terminal_result_blocks_replacement_after_final_readback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    initial, initial_digest = _bundle(tmp_path, payload=b"transaction-initial", name="initial.zip")
+    target = tmp_path / "installed"
+    assert run(["install", *_args(initial, initial_digest, target)])[0] == 0
+    published = target / "bin" / "dcc-mcp-obs.plugin"
+    original_require_current = install_cli._PhysicalIdentityLease.require_current
+    calls = 0
+    replacement_blocked = False
+
+    def replace_after_final_readback(lease: install_cli._PhysicalIdentityLease) -> None:
+        nonlocal calls, replacement_blocked
+        original_require_current(lease)
+        calls += 1
+        if calls == 3:
+            try:
+                _replace_same_bytes_and_return_inode(published)
+            except OSError:
+                replacement_blocked = True
+
+    monkeypatch.setattr(
+        install_cli._PhysicalIdentityLease, "require_current", replace_after_final_readback
+    )
+
+    if command == "install":
+        target = tmp_path / "fresh-installed"
+        archive, digest = _bundle(tmp_path, payload=b"transaction-fresh", name="fresh.zip")
+        published = target / "bin" / "dcc-mcp-obs.plugin"
+        argv = ["install", *_args(archive, digest, target)]
+    elif command == "upgrade":
+        archive, digest = _bundle(tmp_path, payload=b"transaction-upgraded", name="upgrade.zip")
+        argv = ["upgrade", *_args(archive, digest, target)]
+    else:
+        argv = [command, "--plugin-dir", str(target)]
+
+    code, report = run(argv)
+
+    assert calls == 3, (calls, code, report)
+    assert replacement_blocked or code != 0, (code, report)
