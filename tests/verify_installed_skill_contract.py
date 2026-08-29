@@ -137,7 +137,6 @@ def main() -> None:
             **identity,
             "hotkeyName": "start_streaming",
             "accepted": True,
-            "verified": True,
         },
         "capture_source_screenshot": {
             **identity,
@@ -145,7 +144,6 @@ def main() -> None:
             "screenshotId": "shot-1",
             "imageFormat": "png",
             "pathRedacted": True,
-            "verified": True,
         },
         "get_operator_status": {
             **identity,
@@ -161,6 +159,8 @@ def main() -> None:
     assert "`postcondition.verified=true`" in skill_text
     for tool in tools:
         envelope = skill_success("OBS action completed.", **results[tool["name"]])
+        if tool["name"] in {"trigger_allowlisted_hotkey", "capture_source_screenshot"}:
+            assert "postcondition" not in envelope
         jsonschema.Draft202012Validator(tool["output_schema"]).validate(envelope)
 
 
