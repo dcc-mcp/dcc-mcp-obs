@@ -56,6 +56,28 @@ VENDOR_REQUESTS = frozenset(
         "CaptureSourceScreenshot",
     }
 )
+MUTATING_VENDOR_REQUESTS = frozenset(
+    {
+        "StartRecording",
+        "StopRecording",
+        "PauseRecording",
+        "ResumeRecording",
+        "StartStreaming",
+        "StopStreaming",
+        "StartReplayBuffer",
+        "StopReplayBuffer",
+        "SaveReplayBuffer",
+        "StartVirtualCamera",
+        "StopVirtualCamera",
+        "StartOutput",
+        "StopOutput",
+        "SetCurrentProfile",
+        "SetCurrentSceneCollection",
+        "TriggerAllowlistedHotkey",
+        "CaptureScreenshot",
+        "CaptureSourceScreenshot",
+    }
+)
 
 
 class ProtocolError(RuntimeError):
@@ -120,6 +142,7 @@ class ObsWebSocketTransport:
         if not self._lock.acquire(timeout=remaining):
             raise ProtocolError("OBS_TIMEOUT")
         try:
+            request_sent = False
             try:
                 socket = self._ensure_connected(deadline)
                 request_id = uuid.uuid4().hex
@@ -128,9 +151,11 @@ class ObsWebSocketTransport:
                 # vendor boundary as bounded relative milliseconds.  Native
                 # UI work must never wait on a fixed timeout after the caller
                 # has already expired.
-                request_payload["__dccDeadlineMs"] = max(
-                    1, math.ceil(self._remaining(deadline) * 1000)
+                request_payload["__dccDeadlineAtMs"] = math.ceil(
+                    (time.time() + self._remaining(deadline)) * 1000
                 )
+                self._remaining(deadline)
+                request_sent = True
                 self._send_json(
                     socket,
                     {
@@ -158,12 +183,23 @@ class ObsWebSocketTransport:
                 if not isinstance(vendor_payload, dict):
                     raise ProtocolError("OBS_RESPONSE_INVALID")
                 return vendor_payload
-            except ProtocolError:
+            except ProtocolError as exc:
                 self._disconnect_locked()
+                if (
+                    exc.code == "OBS_TIMEOUT"
+                    and request_sent
+                    and request_type in MUTATING_VENDOR_REQUESTS
+                ):
+                    raise ProtocolError("OBS_UI_INDETERMINATE") from exc
                 raise
             except (TimeoutError, websocket.WebSocketTimeoutException) as exc:
                 self._disconnect_locked()
-                raise ProtocolError("OBS_TIMEOUT") from exc
+                code = (
+                    "OBS_UI_INDETERMINATE"
+                    if request_sent and request_type in MUTATING_VENDOR_REQUESTS
+                    else "OBS_TIMEOUT"
+                )
+                raise ProtocolError(code) from exc
             except Exception as exc:
                 self._disconnect_locked()
                 raise ProtocolError("OBS_CONNECTION_FAILED") from exc

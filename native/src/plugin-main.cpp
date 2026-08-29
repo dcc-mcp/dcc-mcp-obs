@@ -795,7 +795,7 @@ void execute_ui_operation(void *private_data)
 
 bool run_ui_operation(UiOperation operation, const std::string &scene_name, const std::string &output_name,
 		      const std::string &target_name, const std::string &hotkey_name, const std::string &image_format,
-		      uint64_t deadline_ms, obs_data_t *response)
+		      uint64_t deadline_at_ms, obs_data_t *response)
 {
 	auto state = std::make_shared<UiState>();
 	state->operation = operation;
@@ -804,8 +804,13 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, cons
 	state->target_name = target_name;
 	state->hotkey_name = hotkey_name;
 	state->image_format = image_format;
-	state->deadline =
-		std::chrono::steady_clock::now() + std::chrono::milliseconds(deadline_ms == 0 ? 5000 : deadline_ms);
+	const auto steady_now = std::chrono::steady_clock::now();
+	const auto system_now = std::chrono::system_clock::now();
+	const auto system_deadline =
+		deadline_at_ms == 0 ? system_now + kUiTimeout
+				    : std::chrono::system_clock::time_point(std::chrono::milliseconds(deadline_at_ms));
+	const auto remaining = system_deadline - system_now;
+	state->deadline = steady_now + std::max(remaining, std::chrono::system_clock::duration::zero());
 	auto *holder = new std::shared_ptr<UiState>(state);
 	obs_queue_task(OBS_TASK_UI, execute_ui_operation, holder, false);
 
@@ -912,14 +917,18 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 	std::string output_name;
 	std::string target_name;
 	std::string hotkey_name;
-	uint64_t deadline_ms = 5000;
-	if (request_data != nullptr && obs_data_has_user_value(request_data, "__dccDeadlineMs")) {
-		const long long requested_deadline_ms = obs_data_get_int(request_data, "__dccDeadlineMs");
-		if (requested_deadline_ms <= 0 || requested_deadline_ms > 120000) {
+	const uint64_t now_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+							      std::chrono::system_clock::now().time_since_epoch())
+							      .count());
+	uint64_t deadline_at_ms = now_ms + 5000;
+	if (request_data != nullptr && obs_data_has_user_value(request_data, "__dccDeadlineAtMs")) {
+		const long long requested_deadline_at_ms = obs_data_get_int(request_data, "__dccDeadlineAtMs");
+		if (requested_deadline_at_ms <= 0 ||
+		    static_cast<uint64_t>(requested_deadline_at_ms) > now_ms + 120000) {
 			set_error(response_data, "OBS_ARGUMENT_INVALID");
 			return;
 		}
-		deadline_ms = static_cast<uint64_t>(requested_deadline_ms);
+		deadline_at_ms = static_cast<uint64_t>(requested_deadline_at_ms);
 	}
 	if (std::string(request) == "ListSources" && request_data != nullptr) {
 		const char *value = obs_data_get_string(request_data, "sceneName");
@@ -987,7 +996,7 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 		}
 	}
 	run_ui_operation(operation_for(request), scene_name, output_name, target_name, hotkey_name, image_format,
-			 deadline_ms, response_data);
+			 deadline_at_ms, response_data);
 }
 
 void frontend_event(enum obs_frontend_event, void *)

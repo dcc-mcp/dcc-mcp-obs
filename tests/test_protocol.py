@@ -88,7 +88,41 @@ def test_vendor_request_carries_bounded_deadline_metadata_to_native() -> None:
     )
     transport.vendor_request("StartStreaming", {}, deadline=5)
     request_data = socket.sent[1]["d"]["requestData"]["requestData"]
-    assert 1 <= request_data["__dccDeadlineMs"] <= 5000
+    assert isinstance(request_data["__dccDeadlineAtMs"], int)
+
+
+def test_post_send_mutation_timeout_is_indeterminate() -> None:
+    clock = ManualClock()
+
+    class DelayedSendSocket(ScriptedSocket):
+        def send(self, payload: str) -> None:
+            value = json.loads(payload)
+            if value.get("op") == 6:
+                clock.now += 0.01
+            super().send(payload)
+
+    socket = DelayedSendSocket([_hello(), {"op": 2, "d": {"negotiatedRpcVersion": 1}}, _response()])
+    transport = ObsWebSocketTransport(
+        ObsEndpointConfig(password="secret"), connector=lambda _url, _timeout: socket, clock=clock
+    )
+
+    with pytest.raises(ProtocolError, match="OBS_UI_INDETERMINATE"):
+        transport.vendor_request("StartRecording", {}, deadline=0.005)
+
+
+def test_late_mutation_response_is_indeterminate() -> None:
+    clock = ManualClock()
+    socket = TimedSocket(
+        [_hello(), {"op": 2, "d": {"negotiatedRpcVersion": 1}}, _response()],
+        clock,
+        [0, 0, 0.01],
+    )
+    transport = ObsWebSocketTransport(
+        ObsEndpointConfig(password="secret"), connector=lambda _url, _timeout: socket, clock=clock
+    )
+
+    with pytest.raises(ProtocolError, match="OBS_UI_INDETERMINATE"):
+        transport.vendor_request("SetCurrentProfile", {"profileName": "Main"}, deadline=0.005)
 
 
 def test_rejects_hello_without_authentication_before_identify() -> None:

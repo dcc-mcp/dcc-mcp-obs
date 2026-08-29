@@ -34,7 +34,7 @@ def test_issue3_native_hotkeys_and_screenshots_redact_untrusted_surfaces() -> No
 
 def test_native_deadline_and_response_contracts_are_explicit() -> None:
     source = (ROOT / "native" / "src" / "plugin-main.cpp").read_text(encoding="utf-8")
-    assert "deadline_ms" in source
+    assert "deadline_at_ms" in source
     assert "claim_mutation(state->deadline)" in source
     assert 'obs_data_set_string(result, "hotkeyName"' in source
     assert "OBS_SCREENSHOT_UNVERIFIED" in source
@@ -44,3 +44,5 @@ def test_native_deadline_and_response_contracts_are_explicit() -> None:
     assert "count > kMaxProfiles" in source
     assert "count <= kMaxSceneCollections" in source
     assert "count > kMaxSceneCollections" in source
+    assert "__dccDeadlineAtMs" in source
+    assert "system_clock" in source
