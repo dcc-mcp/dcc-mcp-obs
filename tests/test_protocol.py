@@ -111,7 +111,7 @@ def test_unknown_vendor_request_is_rejected_locally() -> None:
     assert connected is False
 
 
-def test_transport_allowlist_is_exactly_the_public_eight_requests() -> None:
+def test_transport_allowlist_is_exactly_the_typed_public_requests() -> None:
     assert {
         "GetPluginStatus",
         "ListScenes",
@@ -121,6 +121,20 @@ def test_transport_allowlist_is_exactly_the_public_eight_requests() -> None:
         "StopRecording",
         "PauseRecording",
         "ResumeRecording",
+        "GetStreamingStatus",
+        "StartStreaming",
+        "StopStreaming",
+        "GetReplayBufferStatus",
+        "StartReplayBuffer",
+        "StopReplayBuffer",
+        "SaveReplayBuffer",
+        "GetVirtualCameraStatus",
+        "StartVirtualCamera",
+        "StopVirtualCamera",
+        "ListOutputs",
+        "GetOutputStatus",
+        "StartOutput",
+        "StopOutput",
     } == VENDOR_REQUESTS
 
 

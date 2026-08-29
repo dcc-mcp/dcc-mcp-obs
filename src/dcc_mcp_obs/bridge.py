@@ -29,6 +29,9 @@ PUBLIC_DOWNSTREAM_ERRORS = frozenset(
         "OBS_RESPONSE_INVALID",
         "OBS_RESPONSE_MISMATCH",
         "OBS_SCENE_NOT_FOUND",
+        "OBS_OUTPUT_NOT_FOUND",
+        "OBS_OUTPUT_NOT_ACTIVE",
+        "OBS_MUTATION_REJECTED",
         "OBS_TIMEOUT",
         "OBS_UI_TIMEOUT",
         "OBS_VERSION_UNSUPPORTED",
@@ -133,6 +136,12 @@ class ObsControlBridge:
             raise BridgeError("OBS_INSTANCE_NOT_READY")
         if self._identity.plugin_version != __version__:
             raise BridgeError("OBS_PLUGIN_VERSION_UNSUPPORTED")
+        try:
+            obs_major = int(self._identity.obs_version.split(".", 1)[0])
+        except (ValueError, TypeError):
+            raise BridgeError("OBS_VERSION_UNSUPPORTED") from None
+        if obs_major < 28:
+            raise BridgeError("OBS_VERSION_UNSUPPORTED")
 
     def status(self) -> dict[str, object]:
         return self._checked("GetPluginStatus", deadline=self._operation_deadline())
@@ -162,6 +171,117 @@ class ObsControlBridge:
 
     def resume_recording(self) -> dict[str, object]:
         return self._recording_mutation("ResumeRecording", active=True, paused=False)
+
+    # The following domains intentionally expose only the small typed contract
+    # implemented by the native plugin.  They never forward arbitrary OBS
+    # WebSocket requests or settings.
+    def streaming_status(self) -> dict[str, object]:
+        return self._checked("GetStreamingStatus", deadline=self._operation_deadline())
+
+    def start_streaming(self) -> dict[str, object]:
+        return self._domain_mutation(
+            "StartStreaming", "GetStreamingStatus", "streamingActive", True
+        )
+
+    def stop_streaming(self) -> dict[str, object]:
+        return self._domain_mutation(
+            "StopStreaming", "GetStreamingStatus", "streamingActive", False
+        )
+
+    # Compatibility spellings used by the capability matrix's early draft.
+    get_stream_status = streaming_status
+    start_stream = start_streaming
+    stop_stream = stop_streaming
+
+    def replay_buffer_status(self) -> dict[str, object]:
+        return self._checked("GetReplayBufferStatus", deadline=self._operation_deadline())
+
+    def start_replay_buffer(self) -> dict[str, object]:
+        return self._domain_mutation(
+            "StartReplayBuffer", "GetReplayBufferStatus", "replayBufferActive", True
+        )
+
+    def stop_replay_buffer(self) -> dict[str, object]:
+        return self._domain_mutation(
+            "StopReplayBuffer", "GetReplayBufferStatus", "replayBufferActive", False
+        )
+
+    def save_replay_buffer(self) -> dict[str, object]:
+        deadline = self._operation_deadline()
+        accepted = self._checked("SaveReplayBuffer", deadline=deadline)
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        readback = self._checked("GetReplayBufferStatus", deadline=deadline)
+        return {**readback, "verified": True}
+
+    def virtual_camera_status(self) -> dict[str, object]:
+        return self._checked("GetVirtualCameraStatus", deadline=self._operation_deadline())
+
+    def start_virtual_camera(self) -> dict[str, object]:
+        return self._domain_mutation(
+            "StartVirtualCamera", "GetVirtualCameraStatus", "virtualCameraActive", True
+        )
+
+    def stop_virtual_camera(self) -> dict[str, object]:
+        return self._domain_mutation(
+            "StopVirtualCamera", "GetVirtualCameraStatus", "virtualCameraActive", False
+        )
+
+    def list_outputs(self) -> dict[str, object]:
+        return self._checked("ListOutputs", deadline=self._operation_deadline())
+
+    def output_status(self, *, output_name: str) -> dict[str, object]:
+        if not isinstance(output_name, str) or not output_name or len(output_name) > 256:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        return self._checked(
+            "GetOutputStatus", {"outputName": output_name}, deadline=self._operation_deadline()
+        )
+
+    def start_output(self, *, output_name: str) -> dict[str, object]:
+        return self._output_mutation("StartOutput", output_name, True)
+
+    def stop_output(self, *, output_name: str) -> dict[str, object]:
+        return self._output_mutation("StopOutput", output_name, False)
+
+    def _domain_mutation(
+        self, request_type: str, status_request: str, field: str, expected: bool
+    ) -> dict[str, object]:
+        deadline = self._operation_deadline()
+        accepted = self._checked(request_type, deadline=deadline)
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        for attempt in range(self._postcondition_attempts):
+            readback = self._checked(status_request, deadline=deadline)
+            if readback.get(field) is expected:
+                return {**readback, "verified": True}
+            if attempt + 1 < self._postcondition_attempts:
+                remaining = deadline - self._clock()
+                if remaining <= 0:
+                    raise BridgeError("OBS_TIMEOUT")
+                self._sleeper(min(self._postcondition_poll_seconds, remaining))
+        raise BridgeError("OBS_POSTCONDITION_FAILED")
+
+    def _output_mutation(
+        self, request_type: str, output_name: str, expected: bool
+    ) -> dict[str, object]:
+        if not isinstance(output_name, str) or not output_name or len(output_name) > 256:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        deadline = self._operation_deadline()
+        accepted = self._checked(request_type, {"outputName": output_name}, deadline=deadline)
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        for attempt in range(self._postcondition_attempts):
+            readback = self._checked(
+                "GetOutputStatus", {"outputName": output_name}, deadline=deadline
+            )
+            if readback.get("outputActive") is expected:
+                return {**readback, "verified": True}
+            if attempt + 1 < self._postcondition_attempts:
+                remaining = deadline - self._clock()
+                if remaining <= 0:
+                    raise BridgeError("OBS_TIMEOUT")
+                self._sleeper(min(self._postcondition_poll_seconds, remaining))
+        raise BridgeError("OBS_POSTCONDITION_FAILED")
 
     def _recording_mutation(
         self, request_type: str, *, active: bool, paused: bool
@@ -235,6 +355,11 @@ class ObsControlBridge:
             "ListScenes",
             "ListSources",
             "GetRecordingStatus",
+            "GetStreamingStatus",
+            "GetReplayBufferStatus",
+            "GetVirtualCameraStatus",
+            "ListOutputs",
+            "GetOutputStatus",
         } and (not set(response) >= _IDENTITY_KEYS or response.get("ok") is not True):
             raise BridgeError("OBS_RESPONSE_INVALID")
         if request_type == "GetPluginStatus":
@@ -286,6 +411,75 @@ class ObsControlBridge:
                 or type(response.get("outputPaused")) is not bool
             ):
                 raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        bool_fields = {
+            "GetStreamingStatus": "streamingActive",
+            "GetReplayBufferStatus": "replayBufferActive",
+            "GetVirtualCameraStatus": "virtualCameraActive",
+        }
+        if request_type in bool_fields:
+            field = bool_fields[request_type]
+            allowed = _IDENTITY_KEYS | {field}
+            if set(response) - allowed or type(response.get(field)) is not bool:
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type == "ListOutputs":
+            outputs = response.get("outputs")
+            if (
+                set(response) - (_IDENTITY_KEYS | {"outputs", "truncated"})
+                or not isinstance(outputs, list)
+                or len(outputs) > 64
+                or type(response.get("truncated")) is not bool
+                or any(
+                    not isinstance(item, dict)
+                    or set(item) != {"outputName", "outputKind", "outputActive"}
+                    or not isinstance(item.get("outputName"), str)
+                    or not item["outputName"]
+                    or len(item["outputName"]) > 256
+                    or not isinstance(item.get("outputKind"), str)
+                    or not item["outputKind"]
+                    or len(item["outputKind"]) > 256
+                    or type(item.get("outputActive")) is not bool
+                    for item in outputs
+                )
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type == "GetOutputStatus":
+            allowed = _IDENTITY_KEYS | {"outputName", "outputKind", "outputActive"}
+            if (
+                set(response) - allowed
+                or not isinstance(response.get("outputName"), str)
+                or not response["outputName"]
+                or len(response["outputName"]) > 256
+                or not isinstance(response.get("outputKind"), str)
+                or not response["outputKind"]
+                or len(response["outputKind"]) > 256
+                or type(response.get("outputActive")) is not bool
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type in {
+            "StartRecording",
+            "StopRecording",
+            "PauseRecording",
+            "ResumeRecording",
+            "StartStreaming",
+            "StopStreaming",
+            "StartReplayBuffer",
+            "StopReplayBuffer",
+            "SaveReplayBuffer",
+            "StartVirtualCamera",
+            "StopVirtualCamera",
+            "StartOutput",
+            "StopOutput",
+        }:
+            if (
+                set(response) - (_IDENTITY_KEYS | {"accepted"})
+                or type(response.get("accepted")) is not bool
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
 
     @staticmethod
     def _valid_source(source: object) -> bool:

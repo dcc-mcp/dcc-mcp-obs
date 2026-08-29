@@ -39,7 +39,7 @@ def test_obs_skill_has_bilingual_discovery_aliases_and_no_raw_escape_hatch() -> 
     ):
         assert alias.casefold() in discovery.casefold()
 
-    for unsupported in ("streaming", "scene switching", "直播", "场景切换"):
+    for unsupported in ("scene switching", "场景切换"):
         assert unsupported.casefold() not in discovery.casefold()
 
     assert [tool["name"] for tool in tools["tools"]] == [
@@ -51,6 +51,20 @@ def test_obs_skill_has_bilingual_discovery_aliases_and_no_raw_escape_hatch() -> 
         "stop_recording",
         "pause_recording",
         "resume_recording",
+        "get_streaming_status",
+        "start_streaming",
+        "stop_streaming",
+        "get_replay_buffer_status",
+        "start_replay_buffer",
+        "stop_replay_buffer",
+        "save_replay_buffer",
+        "get_virtual_camera_status",
+        "start_virtual_camera",
+        "stop_virtual_camera",
+        "list_outputs",
+        "get_output_status",
+        "start_output",
+        "stop_output",
     ]
 
     assert "raw_request" not in serialized
@@ -61,7 +75,7 @@ def test_obs_skill_has_bilingual_discovery_aliases_and_no_raw_escape_hatch() -> 
         if tool["name"].startswith("get_") or tool["name"].startswith("list_")
     )
     assert all("call_examples" in tool for tool in tools["tools"])
-    assert all("next-tools" in tool for tool in tools["tools"])
+    assert all("next-tools" in tool for tool in tools["tools"][:8])
 
 
 def test_ui_fallback_is_explicitly_scoped_to_dcc_cua() -> None:
@@ -142,7 +156,52 @@ def test_skill_outputs_publish_strict_typed_envelopes_with_context_parity() -> N
         "pause_recording",
         "resume_recording",
     }
-    for name in mutation_names:
+    expected_context_keys.update(
+        {
+            "get_streaming_status": mutation_context_keys - {"outputActive", "outputPaused"}
+            | {"streamingActive"},
+            "start_streaming": mutation_context_keys - {"outputActive", "outputPaused"}
+            | {"streamingActive"},
+            "stop_streaming": mutation_context_keys - {"outputActive", "outputPaused"}
+            | {"streamingActive"},
+            "get_replay_buffer_status": mutation_context_keys - {"outputActive", "outputPaused"}
+            | {"replayBufferActive"},
+            "start_replay_buffer": mutation_context_keys - {"outputActive", "outputPaused"}
+            | {"replayBufferActive"},
+            "stop_replay_buffer": mutation_context_keys - {"outputActive", "outputPaused"}
+            | {"replayBufferActive"},
+            "save_replay_buffer": mutation_context_keys - {"outputActive", "outputPaused"}
+            | {"replayBufferActive"},
+            "get_virtual_camera_status": mutation_context_keys - {"outputActive", "outputPaused"}
+            | {"virtualCameraActive"},
+            "start_virtual_camera": mutation_context_keys - {"outputActive", "outputPaused"}
+            | {"virtualCameraActive"},
+            "stop_virtual_camera": mutation_context_keys - {"outputActive", "outputPaused"}
+            | {"virtualCameraActive"},
+            "list_outputs": mutation_context_keys - {"outputActive", "outputPaused"}
+            | {"outputs", "truncated"},
+            "get_output_status": mutation_context_keys - {"outputActive", "outputPaused"}
+            | {"outputName", "outputKind", "outputActive"},
+            "start_output": mutation_context_keys - {"outputActive", "outputPaused"}
+            | {"outputName", "outputKind", "outputActive"},
+            "stop_output": mutation_context_keys - {"outputActive", "outputPaused"}
+            | {"outputName", "outputKind", "outputActive"},
+        }
+    )
+    mutation_names.update(
+        {
+            "start_streaming",
+            "stop_streaming",
+            "start_replay_buffer",
+            "stop_replay_buffer",
+            "save_replay_buffer",
+            "start_virtual_camera",
+            "stop_virtual_camera",
+            "start_output",
+            "stop_output",
+        }
+    )
+    for name in {"start_recording", "stop_recording", "pause_recording", "resume_recording"}:
         expected_context_keys[name] = mutation_context_keys
 
     for tool in tools:
@@ -229,6 +288,47 @@ def test_every_skill_output_schema_accepts_the_real_core_success_envelope() -> N
             "verified": True,
         },
     }
+    results.update(
+        {
+            "get_streaming_status": {**identity, "streamingActive": False},
+            "start_streaming": {**identity, "streamingActive": True, "verified": True},
+            "stop_streaming": {**identity, "streamingActive": False, "verified": True},
+            "get_replay_buffer_status": {**identity, "replayBufferActive": False},
+            "start_replay_buffer": {**identity, "replayBufferActive": True, "verified": True},
+            "stop_replay_buffer": {**identity, "replayBufferActive": False, "verified": True},
+            "save_replay_buffer": {**identity, "replayBufferActive": True, "verified": True},
+            "get_virtual_camera_status": {**identity, "virtualCameraActive": False},
+            "start_virtual_camera": {**identity, "virtualCameraActive": True, "verified": True},
+            "stop_virtual_camera": {**identity, "virtualCameraActive": False, "verified": True},
+            "list_outputs": {
+                **identity,
+                "outputs": [
+                    {"outputName": "streaming", "outputKind": "streaming", "outputActive": False}
+                ],
+                "truncated": False,
+            },
+            "get_output_status": {
+                **identity,
+                "outputName": "streaming",
+                "outputKind": "streaming",
+                "outputActive": False,
+            },
+            "start_output": {
+                **identity,
+                "outputName": "streaming",
+                "outputKind": "streaming",
+                "outputActive": True,
+                "verified": True,
+            },
+            "stop_output": {
+                **identity,
+                "outputName": "streaming",
+                "outputKind": "streaming",
+                "outputActive": False,
+                "verified": True,
+            },
+        }
+    )
 
     failures: dict[str, list[str]] = {}
     for tool in tools:
@@ -250,8 +350,8 @@ def test_public_discovery_docs_distinguish_delivered_tools_from_roadmap() -> Non
     chinese = (ROOT / "docs" / "zh" / "README.md").read_text(encoding="utf-8")
     llms = (ROOT / "llms.txt").read_text(encoding="utf-8")
 
-    assert "exact eight tools" in readme
-    assert "Streaming and scene switching remain\nroadmap capabilities" in readme
-    assert "八个类型化工具" in chinese
-    assert "直播与场景切换仍属于路线图" in chinese
-    assert "Streaming and scene switching are roadmap capabilities" in llms
+    assert "typed tools" in readme
+    assert "Scene switching remains" in readme
+    assert "类型化工具" in chinese
+    assert "场景切换仍属于路线图" in chinese
+    assert "Scene switching remains" in llms

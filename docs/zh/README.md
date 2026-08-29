@@ -74,8 +74,8 @@ dcc-mcp-obs --host-pid <obs-pid>
 
 内置 `obs-control` Skill 覆盖 OBS、Open Broadcaster Software、recording、
 场景/source 查看、pause、resume、录屏、录制视频等中英文检索词。Agent 先搜索并
-加载 Skill，再调用首个切片精确交付的八个类型化工具。直播与场景切换仍属于路线图，
-不是当前已发布的原生控制工具。
+加载 Skill，再调用场景、录制、直播、回放缓冲、虚拟摄像头和输出域的类型化工具。
+场景切换仍属于路线图，不是当前已发布的原生控制工具。
 
 OBS 控制始终原生插件/WebSocket 优先。仅当某个纯视觉操作没有类型化契约时，
 才允许通过 DCC-MCP `ui-control` 使用项目自有 DCC-CUA，并且必须绑定精确 PID/HWND、
