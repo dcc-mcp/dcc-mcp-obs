@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.0](https://github.com/dcc-mcp/dcc-mcp-obs/compare/v1.0.0...v1.1.0) (2026-08-29)
+
+
+### Features
+
+* **obs:** add profile and operator status controls ([#15](https://github.com/dcc-mcp/dcc-mcp-obs/issues/15)) ([c31261c](https://github.com/dcc-mcp/dcc-mcp-obs/commit/c31261c7770a52821d2740325872b4fbbbcd19de))
+* **obs:** add typed streaming and output controls ([#13](https://github.com/dcc-mcp/dcc-mcp-obs/issues/13)) ([845ce20](https://github.com/dcc-mcp/dcc-mcp-obs/commit/845ce20e463b7ae3031fa89a871031473ea252c3))
+
 ## 1.0.0 (2026-08-28)
 
 
