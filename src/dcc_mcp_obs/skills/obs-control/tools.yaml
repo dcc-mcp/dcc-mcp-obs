@@ -638,7 +638,7 @@ tools:
             hostPid: {type: integer, minimum: 1}
             eventSequence: {type: integer, minimum: 0}
             ok: {const: true}
-            profiles: {type: array, maxItems: 256, items: {type: object, additionalProperties: false, required: [profileName], properties: {profileName: {type: string, minLength: 1, maxLength: 256}}}}
+            profiles: {type: array, maxItems: 128, items: {type: object, additionalProperties: false, required: [profileName], properties: {profileName: {type: string, minLength: 1, maxLength: 256}}}}
             currentProfileName: {type: string, minLength: 1, maxLength: 256}
             truncated: {type: boolean}
     execution: sync
@@ -705,7 +705,7 @@ tools:
         message: {type: string}
         error: {type: "null"}
         prompt: {type: [string, "null"]}
-        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sceneCollections, truncated], properties: {instanceId: {type: string, minLength: 1, maxLength: 128}, pluginVersion: {type: string, minLength: 1}, obsVersion: {type: string, minLength: 1}, hostPid: {type: integer, minimum: 1}, eventSequence: {type: integer, minimum: 0}, ok: {const: true}, sceneCollections: {type: array, maxItems: 256, items: {type: object, additionalProperties: false, required: [sceneCollectionName], properties: {sceneCollectionName: {type: string, minLength: 1, maxLength: 256}}}}, currentSceneCollectionName: {type: string, minLength: 1, maxLength: 256}, truncated: {type: boolean}}}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sceneCollections, truncated], properties: {instanceId: {type: string, minLength: 1, maxLength: 128}, pluginVersion: {type: string, minLength: 1}, obsVersion: {type: string, minLength: 1}, hostPid: {type: integer, minimum: 1}, eventSequence: {type: integer, minimum: 0}, ok: {const: true}, sceneCollections: {type: array, maxItems: 128, items: {type: object, additionalProperties: false, required: [sceneCollectionName], properties: {sceneCollectionName: {type: string, minLength: 1, maxLength: 256}}}}, currentSceneCollectionName: {type: string, minLength: 1, maxLength: 256}, truncated: {type: boolean}}}
     execution: sync
     affinity: any
     enforce_thread_affinity: true

@@ -20,6 +20,11 @@ int main()
 
 	dcc_mcp_obs::UiTaskGate expired;
 	assert(!expired.claim_mutation(std::chrono::steady_clock::now() - std::chrono::seconds(1)));
+	const auto fake_system_now = std::chrono::system_clock::time_point(std::chrono::milliseconds(1000));
+	const auto fake_steady_now = std::chrono::steady_clock::time_point(std::chrono::milliseconds(500));
+	assert(dcc_mcp_obs::steady_deadline_from_epoch_ms(2500, fake_steady_now, fake_system_now) ==
+	       std::chrono::steady_clock::time_point(std::chrono::milliseconds(2000)));
+	assert(dcc_mcp_obs::steady_deadline_from_epoch_ms(999, fake_steady_now, fake_system_now) == fake_steady_now);
 
 	dcc_mcp_obs::UiTaskGate started;
 	assert(started.claim_mutation());

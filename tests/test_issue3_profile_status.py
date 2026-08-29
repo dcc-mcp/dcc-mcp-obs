@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import jsonschema
@@ -86,6 +87,54 @@ def test_selection_rejects_truncated_discovery_before_mutation():
     with pytest.raises(BridgeError, match="OBS_RESPONSE_INCOMPLETE"):
         bridge.set_current_profile("Main")
     assert len(transport.requests) == 2
+
+
+@pytest.mark.parametrize(
+    "request_type, field",
+    [("ListProfiles", "profiles"), ("ListSceneCollections", "sceneCollections")],
+)
+def test_profile_discovery_rejects_more_than_native_cap(request_type, field):
+    entry_key = "profileName" if field == "profiles" else "sceneCollectionName"
+    entries = [{entry_key: f"Entry-{index}"} for index in range(129)]
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {**IDENTITY, field: entries, "truncated": False, "eventSequence": 2},
+        ]
+    )
+    bridge = ObsControlBridge(transport, expected_pid=1234)
+    with pytest.raises(BridgeError, match="OBS_RESPONSE_INVALID"):
+        getattr(bridge, "list_profiles" if field == "profiles" else "list_scene_collections")()
+
+
+def test_profile_yaml_and_capability_schemas_reject_129_entries():
+    profiles = [{"profileName": f"Profile-{index}"} for index in range(129)]
+    collections = [{"sceneCollectionName": f"Collection-{index}"} for index in range(129)]
+    tools = yaml.safe_load(
+        Path("src/dcc_mcp_obs/skills/obs-control/tools.yaml").read_text(encoding="utf-8")
+    )["tools"]
+    by_name = {tool["name"]: tool for tool in tools}
+    for tool_name, field, entries in (
+        ("list_profiles", "profiles", profiles),
+        ("list_scene_collections", "sceneCollections", collections),
+    ):
+        envelope = {
+            "success": True,
+            "message": "ok",
+            "error": None,
+            "prompt": None,
+            "context": {**IDENTITY, field: entries, "truncated": False},
+        }
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.Draft202012Validator(by_name[tool_name]["output_schema"]).validate(envelope)
+
+    capability_schema = json.loads(
+        Path("contracts/obs-profile-status-v1.schema.json").read_text(encoding="utf-8")
+    )
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.Draft202012Validator(capability_schema).validate(
+            {**IDENTITY, "profiles": profiles}
+        )
 
 
 def test_exact_cap_profile_list_is_complete_and_selectable():

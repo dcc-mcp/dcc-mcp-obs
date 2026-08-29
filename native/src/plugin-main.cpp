@@ -806,11 +806,9 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, cons
 	state->image_format = image_format;
 	const auto steady_now = std::chrono::steady_clock::now();
 	const auto system_now = std::chrono::system_clock::now();
-	const auto system_deadline =
-		deadline_at_ms == 0 ? system_now + kUiTimeout
-				    : std::chrono::system_clock::time_point(std::chrono::milliseconds(deadline_at_ms));
-	const auto remaining_until_deadline = system_deadline - system_now;
-	state->deadline = steady_now + std::max(remaining_until_deadline, std::chrono::system_clock::duration::zero());
+	state->deadline = deadline_at_ms == 0
+				  ? steady_now + kUiTimeout
+				  : dcc_mcp_obs::steady_deadline_from_epoch_ms(deadline_at_ms, steady_now, system_now);
 	auto *holder = new std::shared_ptr<UiState>(state);
 	obs_queue_task(OBS_TASK_UI, execute_ui_operation, holder, false);
 

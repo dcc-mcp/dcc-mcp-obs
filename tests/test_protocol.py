@@ -91,6 +91,21 @@ def test_vendor_request_carries_bounded_deadline_metadata_to_native() -> None:
     assert isinstance(request_data["__dccDeadlineAtMs"], int)
 
 
+def test_absolute_deadline_epoch_uses_ceil_and_stale_deadline_fails_closed(monkeypatch) -> None:
+    clock = ManualClock()
+    monkeypatch.setattr("dcc_mcp_obs.protocol.time.time", lambda: 1000.25)
+    socket = ScriptedSocket([_hello(), {"op": 2, "d": {"negotiatedRpcVersion": 1}}, _response()])
+    transport = ObsWebSocketTransport(
+        ObsEndpointConfig(password="secret"), connector=lambda _url, _timeout: socket, clock=clock
+    )
+    transport.vendor_request("GetPluginStatus", {}, deadline=1.001)
+    request_data = socket.sent[1]["d"]["requestData"]["requestData"]
+    assert request_data["__dccDeadlineAtMs"] == 1001251
+
+    with pytest.raises(ProtocolError, match="OBS_TIMEOUT"):
+        transport.vendor_request("StartRecording", {}, deadline=clock.now)
+
+
 def test_post_send_mutation_timeout_is_indeterminate() -> None:
     clock = ManualClock()
 
@@ -257,6 +272,50 @@ def test_request_id_mismatch_fails_closed_and_disconnects() -> None:
     with pytest.raises(ProtocolError, match="OBS_RESPONSE_MISMATCH"):
         transport.vendor_request("GetPluginStatus", {})
     assert socket.closed is True
+
+
+def test_mutating_request_id_mismatch_is_indeterminate_after_send() -> None:
+    response = _response()
+    socket = ScriptedSocket([_hello(), {"op": 2, "d": {"negotiatedRpcVersion": 1}}, response])
+
+    def break_request_id(payload: str) -> None:
+        value = json.loads(payload)
+        socket.sent.append(value)
+        if value.get("op") == 6:
+            response["d"]["requestId"] = "wrong"
+
+    socket.send = break_request_id  # type: ignore[method-assign]
+    transport = ObsWebSocketTransport(
+        ObsEndpointConfig(password="secret"), connector=lambda _url, _timeout: socket
+    )
+
+    with pytest.raises(ProtocolError, match="OBS_UI_INDETERMINATE"):
+        transport.vendor_request("StartStreaming", {})
+
+
+def test_mutating_event_overflow_is_indeterminate_after_send() -> None:
+    events = [{"op": 5, "d": {"eventType": "VendorEvent"}} for _ in range(65)]
+    socket = ScriptedSocket([_hello(), {"op": 2, "d": {"negotiatedRpcVersion": 1}}, *events])
+    transport = ObsWebSocketTransport(
+        ObsEndpointConfig(password="secret"), connector=lambda _url, _timeout: socket
+    )
+
+    with pytest.raises(ProtocolError, match="OBS_UI_INDETERMINATE"):
+        transport.vendor_request("StartRecording", {})
+
+
+def test_mutation_connection_failure_before_send_remains_connection_failed() -> None:
+    class FailingConnectSocket(ScriptedSocket):
+        def recv(self) -> str | bytes:
+            raise ConnectionResetError("handshake failed")
+
+    transport = ObsWebSocketTransport(
+        ObsEndpointConfig(password="secret"),
+        connector=lambda _url, _timeout: FailingConnectSocket([]),
+    )
+
+    with pytest.raises(ProtocolError, match="OBS_CONNECTION_FAILED"):
+        transport.vendor_request("StartRecording", {})
 
 
 @pytest.mark.parametrize(

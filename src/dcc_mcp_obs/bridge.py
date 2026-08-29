@@ -580,7 +580,7 @@ class ObsControlBridge:
             if (
                 set(response) - allowed
                 or not isinstance(entries, list)
-                or len(entries) > 256
+                or len(entries) > 128
                 or type(response.get("truncated")) is not bool
                 or (
                     current_key in response

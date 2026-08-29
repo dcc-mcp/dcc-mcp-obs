@@ -29,8 +29,8 @@
     "configVersion": {"type": "string", "minLength": 1}
   },
   "$defs": {
-    "namedProfiles": {"type": "array", "maxItems": 256, "items": {"type": "object", "additionalProperties": false, "required": ["profileName"], "properties": {"profileName": {"type": "string", "minLength": 1, "maxLength": 256}}}},
-    "namedCollections": {"type": "array", "maxItems": 256, "items": {"type": "object", "additionalProperties": false, "required": ["sceneCollectionName"], "properties": {"sceneCollectionName": {"type": "string", "minLength": 1, "maxLength": 256}}}},
+    "namedProfiles": {"type": "array", "maxItems": 128, "items": {"type": "object", "additionalProperties": false, "required": ["profileName"], "properties": {"profileName": {"type": "string", "minLength": 1, "maxLength": 256}}}},
+    "namedCollections": {"type": "array", "maxItems": 128, "items": {"type": "object", "additionalProperties": false, "required": ["sceneCollectionName"], "properties": {"sceneCollectionName": {"type": "string", "minLength": 1, "maxLength": 256}}}},
     "hotkey": {"type": "object", "additionalProperties": false, "required": ["hotkeyName"], "properties": {"hotkeyName": {"type": "string", "minLength": 1, "maxLength": 128}, "description": {"type": "string", "maxLength": 256}}}
   }
 }
