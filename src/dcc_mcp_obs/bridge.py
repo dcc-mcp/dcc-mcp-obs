@@ -484,10 +484,7 @@ class ObsControlBridge:
             allowed = _IDENTITY_KEYS | {"accepted"}
             if request_type == "SaveReplayBuffer":
                 allowed |= {"submitted"}
-            if (
-                set(response) - allowed
-                or type(response.get("accepted")) is not bool
-            ):
+            if set(response) - allowed or type(response.get("accepted")) is not bool:
                 raise BridgeError("OBS_RESPONSE_INVALID")
             if (
                 request_type == "SaveReplayBuffer"
