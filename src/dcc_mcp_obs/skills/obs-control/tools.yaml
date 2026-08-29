@@ -613,3 +613,211 @@ tools:
     annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
     call_examples: [{arguments: {output_name: streaming}, note: Stop one typed output only after explicit operator intent.}]
     next-tools: {on-success: [obs_control__get_output_status], on-failure: [obs_control__get_status]}
+
+  - name: list_profiles
+    description: List bounded OBS profiles for the bound instance.
+    source_file: scripts/list_profiles.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context:
+          type: object
+          additionalProperties: false
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, profiles, truncated]
+          properties:
+            instanceId: {type: string, minLength: 1, maxLength: 128}
+            pluginVersion: {type: string, minLength: 1}
+            obsVersion: {type: string, minLength: 1}
+            hostPid: {type: integer, minimum: 1}
+            eventSequence: {type: integer, minimum: 0}
+            ok: {const: true}
+            profiles: {type: array, maxItems: 128, items: {type: object, additionalProperties: false, required: [profileName], properties: {profileName: {type: string, minLength: 1, maxLength: 256}}}}
+            currentProfileName: {type: string, minLength: 1, maxLength: 256}
+            truncated: {type: boolean}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {}, note: Discover profiles before selecting one exact name.}]
+    next-tools: {on-success: [obs_control__get_current_profile], on-failure: [obs_control__get_status]}
+  - name: get_current_profile
+    description: Read the current OBS profile for the bound instance.
+    source_file: scripts/get_current_profile.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, profileName], properties: {instanceId: {type: string, minLength: 1, maxLength: 128}, pluginVersion: {type: string, minLength: 1}, obsVersion: {type: string, minLength: 1}, hostPid: {type: integer, minimum: 1}, eventSequence: {type: integer, minimum: 0}, ok: {const: true}, profileName: {type: string, minLength: 1, maxLength: 256}}}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {}, note: Read the currently active profile.}]
+    next-tools: {on-failure: [obs_control__list_profiles, obs_control__get_status]}
+  - name: set_current_profile
+    description: Select one discovered OBS profile and verify exact readback.
+    source_file: scripts/set_current_profile.py
+    input_schema: {type: object, properties: {profile_name: {type: string, minLength: 1, maxLength: 256}}, required: [profile_name], additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context, postcondition]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        postcondition: {type: object, additionalProperties: false, required: [verified], properties: {verified: {const: true}}}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, profileName], properties: {instanceId: {type: string, minLength: 1, maxLength: 128}, pluginVersion: {type: string, minLength: 1}, obsVersion: {type: string, minLength: 1}, hostPid: {type: integer, minimum: 1}, eventSequence: {type: integer, minimum: 0}, ok: {const: true}, profileName: {type: string, minLength: 1, maxLength: 256}}}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {profile_name: Main}, note: Select only a profile returned by list_profiles.}]
+    next-tools: {on-success: [obs_control__get_current_profile], on-failure: [obs_control__get_status]}
+
+  - name: list_scene_collections
+    description: List bounded OBS scene collections for the bound instance.
+    source_file: scripts/list_scene_collections.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sceneCollections, truncated], properties: {instanceId: {type: string, minLength: 1, maxLength: 128}, pluginVersion: {type: string, minLength: 1}, obsVersion: {type: string, minLength: 1}, hostPid: {type: integer, minimum: 1}, eventSequence: {type: integer, minimum: 0}, ok: {const: true}, sceneCollections: {type: array, maxItems: 128, items: {type: object, additionalProperties: false, required: [sceneCollectionName], properties: {sceneCollectionName: {type: string, minLength: 1, maxLength: 256}}}}, currentSceneCollectionName: {type: string, minLength: 1, maxLength: 256}, truncated: {type: boolean}}}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {}, note: Discover scene collections before selecting one exact name.}]
+    next-tools: {on-success: [obs_control__get_current_scene_collection], on-failure: [obs_control__get_status]}
+  - name: get_current_scene_collection
+    description: Read the current OBS scene collection.
+    source_file: scripts/get_current_scene_collection.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sceneCollectionName], properties: {instanceId: {type: string, minLength: 1, maxLength: 128}, pluginVersion: {type: string, minLength: 1}, obsVersion: {type: string, minLength: 1}, hostPid: {type: integer, minimum: 1}, eventSequence: {type: integer, minimum: 0}, ok: {const: true}, sceneCollectionName: {type: string, minLength: 1, maxLength: 256}}}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {}, note: Read the currently active scene collection.}]
+    next-tools: {on-failure: [obs_control__list_scene_collections, obs_control__get_status]}
+  - name: set_current_scene_collection
+    description: Select one discovered scene collection and verify exact readback.
+    source_file: scripts/set_current_scene_collection.py
+    input_schema: {type: object, properties: {collection_name: {type: string, minLength: 1, maxLength: 256}}, required: [collection_name], additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context, postcondition]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        postcondition: {type: object, additionalProperties: false, required: [verified], properties: {verified: {const: true}}}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sceneCollectionName], properties: {instanceId: {type: string, minLength: 1, maxLength: 128}, pluginVersion: {type: string, minLength: 1}, obsVersion: {type: string, minLength: 1}, hostPid: {type: integer, minimum: 1}, eventSequence: {type: integer, minimum: 0}, ok: {const: true}, sceneCollectionName: {type: string, minLength: 1, maxLength: 256}}}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {collection_name: Main}, note: Select only a collection returned by list_scene_collections.}]
+    next-tools: {on-success: [obs_control__get_current_scene_collection], on-failure: [obs_control__get_status]}
+
+  - name: list_allowlisted_hotkeys
+    description: List the native plugin's bounded hotkey allowlist.
+    source_file: scripts/list_allowlisted_hotkeys.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, hotkeys, truncated], properties: {instanceId: {type: string, minLength: 1, maxLength: 128}, pluginVersion: {type: string, minLength: 1}, obsVersion: {type: string, minLength: 1}, hostPid: {type: integer, minimum: 1}, eventSequence: {type: integer, minimum: 0}, ok: {const: true}, hotkeys: {type: array, maxItems: 128, items: {type: object, additionalProperties: false, required: [hotkeyName], properties: {hotkeyName: {type: string, minLength: 1, maxLength: 128}, description: {type: string, maxLength: 256}}}}, truncated: {type: boolean}}}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {}, note: Discover the allowlist before triggering a named hotkey.}]
+    next-tools: {on-success: [obs_control__trigger_allowlisted_hotkey], on-failure: [obs_control__get_status]}
+  - name: trigger_allowlisted_hotkey
+    description: Trigger one native allowlisted hotkey by name with a bounded deadline.
+    source_file: scripts/trigger_allowlisted_hotkey.py
+    input_schema: {type: object, properties: {hotkey_id: {type: string, minLength: 1, maxLength: 128}}, required: [hotkey_id], additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, hotkeyName, accepted], properties: {instanceId: {type: string, minLength: 1, maxLength: 128}, pluginVersion: {type: string, minLength: 1}, obsVersion: {type: string, minLength: 1}, hostPid: {type: integer, minimum: 1}, eventSequence: {type: integer, minimum: 0}, ok: {const: true}, hotkeyName: {type: string, minLength: 1, maxLength: 128}, accepted: {const: true}}}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: false, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {hotkey_id: start_streaming}, note: Trigger only a name returned by list_allowlisted_hotkeys.}]
+    next-tools: {on-success: [obs_control__get_operator_status], on-failure: [obs_control__get_status]}
+
+  - name: get_operator_status
+    description: Read redacted operator-visible OBS status and configuration readiness.
+    source_file: scripts/get_operator_status.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, ready, uiThreadReady, configPathRedacted], properties: {instanceId: {type: string, minLength: 1, maxLength: 128}, pluginVersion: {type: string, minLength: 1}, obsVersion: {type: string, minLength: 1}, hostPid: {type: integer, minimum: 1}, eventSequence: {type: integer, minimum: 0}, ok: {const: true}, ready: {const: true}, uiThreadReady: {const: true}, configPathRedacted: {const: true}, profileName: {type: string, minLength: 1, maxLength: 256}, sceneCollectionName: {type: string, minLength: 1, maxLength: 256}, configVersion: {type: string, minLength: 1}}}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {}, note: Paths and secrets are redacted from operator status.}]
+    next-tools: {on-failure: [obs_control__get_status]}

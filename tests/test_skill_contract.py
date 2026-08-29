@@ -65,6 +65,15 @@ def test_obs_skill_has_bilingual_discovery_aliases_and_no_raw_escape_hatch() -> 
         "get_output_status",
         "start_output",
         "stop_output",
+        "list_profiles",
+        "get_current_profile",
+        "set_current_profile",
+        "list_scene_collections",
+        "get_current_scene_collection",
+        "set_current_scene_collection",
+        "list_allowlisted_hotkeys",
+        "trigger_allowlisted_hotkey",
+        "get_operator_status",
     ]
 
     assert "raw_request" not in serialized
@@ -198,10 +207,112 @@ def test_skill_outputs_publish_strict_typed_envelopes_with_context_parity() -> N
             "stop_virtual_camera",
             "start_output",
             "stop_output",
+            "set_current_profile",
+            "set_current_scene_collection",
         }
     )
     for name in {"start_recording", "stop_recording", "pause_recording", "resume_recording"}:
         expected_context_keys[name] = mutation_context_keys
+
+    expected_context_keys.update(
+        {
+            "list_profiles": set(
+                identity
+                for identity in (
+                    "instanceId",
+                    "pluginVersion",
+                    "obsVersion",
+                    "hostPid",
+                    "eventSequence",
+                    "ok",
+                    "profiles",
+                    "currentProfileName",
+                    "truncated",
+                )
+            ),
+            "get_current_profile": {
+                "instanceId",
+                "pluginVersion",
+                "obsVersion",
+                "hostPid",
+                "eventSequence",
+                "ok",
+                "profileName",
+            },
+            "set_current_profile": {
+                "instanceId",
+                "pluginVersion",
+                "obsVersion",
+                "hostPid",
+                "eventSequence",
+                "ok",
+                "profileName",
+            },
+            "list_scene_collections": {
+                "instanceId",
+                "pluginVersion",
+                "obsVersion",
+                "hostPid",
+                "eventSequence",
+                "ok",
+                "sceneCollections",
+                "currentSceneCollectionName",
+                "truncated",
+            },
+            "get_current_scene_collection": {
+                "instanceId",
+                "pluginVersion",
+                "obsVersion",
+                "hostPid",
+                "eventSequence",
+                "ok",
+                "sceneCollectionName",
+            },
+            "set_current_scene_collection": {
+                "instanceId",
+                "pluginVersion",
+                "obsVersion",
+                "hostPid",
+                "eventSequence",
+                "ok",
+                "sceneCollectionName",
+            },
+            "list_allowlisted_hotkeys": {
+                "instanceId",
+                "pluginVersion",
+                "obsVersion",
+                "hostPid",
+                "eventSequence",
+                "ok",
+                "hotkeys",
+                "truncated",
+            },
+            "trigger_allowlisted_hotkey": {
+                "instanceId",
+                "pluginVersion",
+                "obsVersion",
+                "hostPid",
+                "eventSequence",
+                "ok",
+                "hotkeyName",
+                "accepted",
+            },
+            "get_operator_status": {
+                "instanceId",
+                "pluginVersion",
+                "obsVersion",
+                "hostPid",
+                "eventSequence",
+                "ok",
+                "ready",
+                "uiThreadReady",
+                "configPathRedacted",
+                "profileName",
+                "sceneCollectionName",
+                "configVersion",
+            },
+        }
+    )
 
     for tool in tools:
         schema = tool["output_schema"]
@@ -330,6 +441,42 @@ def test_every_skill_output_schema_accepts_the_real_core_success_envelope() -> N
                 "outputKind": "streaming",
                 "outputActive": False,
                 "verified": True,
+            },
+            "list_profiles": {
+                **identity,
+                "profiles": [{"profileName": "Main"}],
+                "truncated": False,
+            },
+            "get_current_profile": {**identity, "profileName": "Main"},
+            "set_current_profile": {**identity, "profileName": "Main", "verified": True},
+            "list_scene_collections": {
+                **identity,
+                "sceneCollections": [{"sceneCollectionName": "Main"}],
+                "truncated": False,
+            },
+            "get_current_scene_collection": {**identity, "sceneCollectionName": "Main"},
+            "set_current_scene_collection": {
+                **identity,
+                "sceneCollectionName": "Main",
+                "verified": True,
+            },
+            "list_allowlisted_hotkeys": {
+                **identity,
+                "hotkeys": [{"hotkeyName": "start_streaming"}],
+                "truncated": False,
+            },
+            "trigger_allowlisted_hotkey": {
+                **identity,
+                "hotkeyName": "start_streaming",
+                "accepted": True,
+            },
+            "get_operator_status": {
+                **identity,
+                "ready": True,
+                "uiThreadReady": True,
+                "configPathRedacted": True,
+                "profileName": "Main",
+                "sceneCollectionName": "Main",
             },
         }
     )

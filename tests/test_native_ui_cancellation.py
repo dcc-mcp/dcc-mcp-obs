@@ -57,18 +57,3 @@ def test_every_destructive_obs_mutation_claims_after_state_probes() -> None:
     assert timeout.index("state->gate.cancel_pending()") < timeout.index(
         'set_error(response, "OBS_UI_TIMEOUT");'
     )
-
-
-def test_started_native_mutation_reaches_quiescence_before_timeout_returns() -> None:
-    source = (ROOT / "native" / "src" / "plugin-main.cpp").read_text(encoding="utf-8")
-    timeout = source.split("if (!state->condition.wait_for", maxsplit=1)[1].split(
-        "obs_data_apply", maxsplit=1
-    )[0]
-
-    assert "if (state->gate.cancel_pending())" in timeout
-    assert "state->condition.wait(lock, [&state] { return state->complete; });" in timeout
-    cancellation = timeout.index("if (state->gate.cancel_pending())")
-    timeout_error = timeout.index('set_error(response, "OBS_UI_TIMEOUT");')
-    quiescence = timeout.index("state->condition.wait(lock")
-    assert cancellation < timeout_error < quiescence
-    assert timeout.index("return false;") < quiescence

@@ -13,6 +13,26 @@ from .__version__ import __version__
 from .deadline import current_deadline
 
 DEFAULT_OPERATION_TIMEOUT_SECONDS = 30.0
+ALLOWLISTED_HOTKEYS = frozenset(
+    {
+        "start_recording",
+        "stop_recording",
+        "start_streaming",
+        "stop_streaming",
+        "start_replay_buffer",
+        "stop_replay_buffer",
+        "start_virtual_camera",
+        "stop_virtual_camera",
+        "OBSBasic.StartRecording",
+        "OBSBasic.StopRecording",
+        "OBSBasic.StartStreaming",
+        "OBSBasic.StopStreaming",
+        "OBSBasic.StartReplayBuffer",
+        "OBSBasic.StopReplayBuffer",
+        "OBSBasic.StartVirtualCam",
+        "OBSBasic.StopVirtualCam",
+    }
+)
 MAX_PUBLIC_ERROR_CODE_LENGTH = 64
 PUBLIC_DOWNSTREAM_ERRORS = frozenset(
     {
@@ -35,6 +55,14 @@ PUBLIC_DOWNSTREAM_ERRORS = frozenset(
         "OBS_TIMEOUT",
         "OBS_UI_TIMEOUT",
         "OBS_VERSION_UNSUPPORTED",
+        "OBS_PROFILE_NOT_FOUND",
+        "OBS_SCENE_COLLECTION_NOT_FOUND",
+        "OBS_HOTKEY_NOT_ALLOWLISTED",
+        "OBS_TARGET_AMBIGUOUS",
+        "OBS_SCREENSHOT_INVALID",
+        "OBS_SCREENSHOT_UNVERIFIED",
+        "OBS_RESPONSE_INCOMPLETE",
+        "OBS_UI_INDETERMINATE",
     }
 )
 _IDENTITY_KEYS = frozenset(
@@ -148,6 +176,137 @@ class ObsControlBridge:
 
     def list_scenes(self) -> dict[str, object]:
         return self._checked("ListScenes", deadline=self._operation_deadline())
+
+    # Profiles and scene collections are deliberately name-based only after a
+    # bounded discovery call.  This prevents a stale or ambiguous operator
+    # target from being silently selected by the native side.
+    def list_profiles(self) -> dict[str, object]:
+        return self._checked("ListProfiles", deadline=self._operation_deadline())
+
+    def get_current_profile(self) -> dict[str, object]:
+        return self._checked("GetCurrentProfile", deadline=self._operation_deadline())
+
+    def set_current_profile(self, profile_name: str) -> dict[str, object]:
+        self._select_exact_name(
+            self.list_profiles(),
+            "profiles",
+            "profileName",
+            profile_name,
+            missing_code="OBS_PROFILE_NOT_FOUND",
+        )
+        return self._select_profile_or_collection(
+            "SetCurrentProfile", "GetCurrentProfile", "profileName", profile_name
+        )
+
+    def list_scene_collections(self) -> dict[str, object]:
+        return self._checked("ListSceneCollections", deadline=self._operation_deadline())
+
+    def get_current_scene_collection(self) -> dict[str, object]:
+        return self._checked("GetCurrentSceneCollection", deadline=self._operation_deadline())
+
+    def set_current_scene_collection(self, collection_name: str) -> dict[str, object]:
+        self._select_exact_name(
+            self.list_scene_collections(),
+            "sceneCollections",
+            "sceneCollectionName",
+            collection_name,
+            missing_code="OBS_SCENE_COLLECTION_NOT_FOUND",
+        )
+        return self._select_profile_or_collection(
+            "SetCurrentSceneCollection",
+            "GetCurrentSceneCollection",
+            "sceneCollectionName",
+            collection_name,
+        )
+
+    def list_allowlisted_hotkeys(self) -> dict[str, object]:
+        return self._checked("ListAllowlistedHotkeys", deadline=self._operation_deadline())
+
+    def trigger_allowlisted_hotkey(self, hotkey_id: str) -> dict[str, object]:
+        if (
+            not isinstance(hotkey_id, str)
+            or not 1 <= len(hotkey_id) <= 128
+            or hotkey_id not in ALLOWLISTED_HOTKEYS
+        ):
+            raise BridgeError("OBS_HOTKEY_NOT_ALLOWLISTED")
+        # The native request is intentionally named *allowlisted*: it accepts
+        # only operator-configured identifiers and never arbitrary key input.
+        response = self._checked(
+            "TriggerAllowlistedHotkey",
+            {"hotkeyName": hotkey_id},
+            deadline=self._operation_deadline(),
+        )
+        if response.get("accepted") is not True:
+            raise BridgeError("OBS_HOTKEY_NOT_ALLOWLISTED")
+        if response.get("hotkeyName") != hotkey_id:
+            raise BridgeError("OBS_RESPONSE_INVALID")
+        return {**response, "hotkeyName": hotkey_id}
+
+    def capture_source_screenshot(
+        self, source_name: str, *, image_format: str = "png"
+    ) -> dict[str, object]:
+        if (
+            not isinstance(source_name, str)
+            or not 1 <= len(source_name) <= 256
+            or not isinstance(image_format, str)
+            or image_format not in {"png", "jpg", "jpeg", "webp"}
+        ):
+            raise BridgeError("OBS_SCREENSHOT_INVALID")
+        self._checked(
+            "CaptureScreenshot",
+            {"sourceName": source_name, "imageFormat": image_format},
+            deadline=self._operation_deadline(),
+        )
+        # The OBS frontend API is fire-and-forget and exposes no completion or
+        # artifact readback contract.  Never claim a screenshot was captured.
+        raise BridgeError("OBS_SCREENSHOT_UNVERIFIED")
+
+    def get_operator_status(self) -> dict[str, object]:
+        return self._checked("GetOperatorStatus", deadline=self._operation_deadline())
+
+    operator_status = get_operator_status
+
+    @staticmethod
+    def _select_exact_name(
+        response: Mapping[str, object],
+        collection_key: str,
+        name_key: str,
+        target: str,
+        *,
+        missing_code: str,
+    ) -> None:
+        if not isinstance(target, str) or not 1 <= len(target) <= 256:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        entries = response.get(collection_key)
+        if not isinstance(entries, list):
+            raise BridgeError("OBS_RESPONSE_INVALID")
+        if response.get("truncated") is not False:
+            raise BridgeError("OBS_RESPONSE_INCOMPLETE")
+        matches = [
+            entry for entry in entries if isinstance(entry, dict) and entry.get(name_key) == target
+        ]
+        if len(matches) > 1:
+            raise BridgeError("OBS_TARGET_AMBIGUOUS")
+        if not matches:
+            raise BridgeError(missing_code)
+
+    def _select_profile_or_collection(
+        self, request_type: str, status_request: str, field: str, target: str
+    ) -> dict[str, object]:
+        deadline = self._operation_deadline()
+        accepted = self._checked(request_type, {field: target}, deadline=deadline)
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        for attempt in range(self._postcondition_attempts):
+            readback = self._checked(status_request, deadline=deadline)
+            if readback.get(field) == target:
+                return {**readback, "verified": True}
+            if attempt + 1 < self._postcondition_attempts:
+                remaining = deadline - self._clock()
+                if remaining <= 0:
+                    raise BridgeError("OBS_TIMEOUT")
+                self._sleeper(min(self._postcondition_poll_seconds, remaining))
+        raise BridgeError("OBS_POSTCONDITION_FAILED")
 
     def list_sources(self, *, scene_name: str | None = None) -> dict[str, object]:
         data: dict[str, object] = {}
@@ -360,6 +519,10 @@ class ObsControlBridge:
         if request_type in {
             "GetPluginStatus",
             "ListScenes",
+            "ListProfiles",
+            "GetCurrentProfile",
+            "ListSceneCollections",
+            "GetCurrentSceneCollection",
             "ListSources",
             "GetRecordingStatus",
             "GetStreamingStatus",
@@ -367,6 +530,9 @@ class ObsControlBridge:
             "GetVirtualCameraStatus",
             "ListOutputs",
             "GetOutputStatus",
+            "ListAllowlistedHotkeys",
+            "GetOperatorStatus",
+            "CaptureScreenshot",
         } and (not set(response) >= _IDENTITY_KEYS or response.get("ok") is not True):
             raise BridgeError("OBS_RESPONSE_INVALID")
         if request_type == "GetPluginStatus":
@@ -391,6 +557,54 @@ class ObsControlBridge:
                     or len(scene["sceneName"]) > 256
                     for scene in scenes
                 )
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type in {"ListProfiles", "ListSceneCollections"}:
+            collection_key, name_key = (
+                ("profiles", "profileName")
+                if request_type == "ListProfiles"
+                else ("sceneCollections", "sceneCollectionName")
+            )
+            current_key = (
+                "currentProfileName"
+                if request_type == "ListProfiles"
+                else "currentSceneCollectionName"
+            )
+            allowed = _IDENTITY_KEYS | {
+                collection_key,
+                "truncated",
+                current_key,
+            }
+            entries = response.get(collection_key)
+            if (
+                set(response) - allowed
+                or not isinstance(entries, list)
+                or len(entries) > 128
+                or type(response.get("truncated")) is not bool
+                or (
+                    current_key in response
+                    and (
+                        not isinstance(response[current_key], str)
+                        or not 1 <= len(response[current_key]) <= 256
+                    )
+                )
+                or any(
+                    not isinstance(item, dict)
+                    or set(item) != {name_key}
+                    or not isinstance(item.get(name_key), str)
+                    or not 1 <= len(item[name_key]) <= 256
+                    for item in entries
+                )
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type in {"GetCurrentProfile", "GetCurrentSceneCollection"}:
+            field = "profileName" if request_type == "GetCurrentProfile" else "sceneCollectionName"
+            if (
+                set(response) - (_IDENTITY_KEYS | {field})
+                or not isinstance(response.get(field), str)
+                or not 1 <= len(response[field]) <= 256
             ):
                 raise BridgeError("OBS_RESPONSE_INVALID")
             return
@@ -466,6 +680,110 @@ class ObsControlBridge:
             ):
                 raise BridgeError("OBS_RESPONSE_INVALID")
             return
+        if request_type == "ListAllowlistedHotkeys":
+            hotkeys = response.get("hotkeys")
+            if (
+                set(response) - (_IDENTITY_KEYS | {"hotkeys", "truncated"})
+                or not isinstance(hotkeys, list)
+                or len(hotkeys) > 128
+                or type(response.get("truncated")) is not bool
+                or any(
+                    not isinstance(item, dict)
+                    or set(item) - {"hotkeyName", "description"}
+                    or set(item) < {"hotkeyName"}
+                    or not isinstance(item.get("hotkeyName"), str)
+                    or not 1 <= len(item["hotkeyName"]) <= 128
+                    or (
+                        "description" in item
+                        and (
+                            not isinstance(item["description"], str)
+                            or len(item["description"]) > 256
+                        )
+                    )
+                    for item in hotkeys
+                )
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type == "GetOperatorStatus":
+            allowed = _IDENTITY_KEYS | {
+                "ready",
+                "uiThreadReady",
+                "configPathRedacted",
+                "profileName",
+                "sceneCollectionName",
+                "allowlistedHotkeys",
+                "configVersion",
+            }
+            if (
+                set(response) - allowed
+                or response.get("ready") is not True
+                or response.get("uiThreadReady") is not True
+                or response.get("configPathRedacted") is not True
+                or (
+                    "profileName" in response
+                    and (
+                        not isinstance(response["profileName"], str)
+                        or not 1 <= len(response["profileName"]) <= 256
+                    )
+                )
+                or (
+                    "sceneCollectionName" in response
+                    and (
+                        not isinstance(response["sceneCollectionName"], str)
+                        or not 1 <= len(response["sceneCollectionName"]) <= 256
+                    )
+                )
+                or (
+                    "allowlistedHotkeys" in response
+                    and (
+                        not isinstance(response["allowlistedHotkeys"], list)
+                        or any(
+                            not isinstance(item, str) or not 1 <= len(item) <= 128
+                            for item in response["allowlistedHotkeys"]
+                        )
+                    )
+                )
+                or (
+                    "configVersion" in response
+                    and (
+                        not isinstance(response["configVersion"], str)
+                        or not 1 <= len(response["configVersion"]) <= 128
+                    )
+                )
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type == "CaptureScreenshot":
+            allowed = _IDENTITY_KEYS | {
+                "accepted",
+                "screenshotId",
+                "imageFormat",
+                "width",
+                "height",
+                "path",
+                "pathRedacted",
+            }
+            if (
+                set(response) - allowed
+                or response.get("accepted") is not True
+                or not isinstance(response.get("screenshotId"), str)
+                or not 1 <= len(response["screenshotId"]) <= 256
+                or response.get("imageFormat") not in {"png", "jpg", "jpeg", "webp"}
+                or response.get("pathRedacted") is not True
+                or ("path" in response and not isinstance(response["path"], str))
+                or any(
+                    key in response
+                    and (
+                        not isinstance(response[key], int)
+                        or isinstance(response[key], bool)
+                        or response[key] <= 0
+                    )
+                    for key in ("width", "height")
+                )
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
         if request_type in {
             "StartRecording",
             "StopRecording",
@@ -480,11 +798,29 @@ class ObsControlBridge:
             "StopVirtualCamera",
             "StartOutput",
             "StopOutput",
+            "SetCurrentProfile",
+            "SetCurrentSceneCollection",
+            "TriggerAllowlistedHotkey",
         }:
-            allowed = _IDENTITY_KEYS | {"accepted"}
+            allowed = set(_IDENTITY_KEYS) | {"accepted"}
+            if request_type == "SetCurrentProfile":
+                allowed.add("profileName")
+            elif request_type == "SetCurrentSceneCollection":
+                allowed.add("sceneCollectionName")
+            elif request_type == "TriggerAllowlistedHotkey":
+                allowed.add("hotkeyName")
             if request_type == "SaveReplayBuffer":
                 allowed |= {"submitted"}
-            if set(response) - allowed or type(response.get("accepted")) is not bool:
+            if (
+                set(response) - allowed
+                or response.get("ok") is not True
+                or type(response.get("accepted")) is not bool
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            if request_type == "TriggerAllowlistedHotkey" and (
+                not isinstance(response.get("hotkeyName"), str)
+                or not 1 <= len(response["hotkeyName"]) <= 128
+            ):
                 raise BridgeError("OBS_RESPONSE_INVALID")
             if (
                 request_type == "SaveReplayBuffer"
@@ -554,4 +890,4 @@ class ObsControlBridge:
         return event_sequence
 
 
-__all__ = ["BridgeError", "ObsControlBridge", "VendorTransport"]
+__all__ = ["ALLOWLISTED_HOTKEYS", "BridgeError", "ObsControlBridge", "VendorTransport"]

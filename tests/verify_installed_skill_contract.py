@@ -114,12 +114,46 @@ def main() -> None:
             "outputActive": False,
             "verified": True,
         },
+        "list_profiles": {**identity, "profiles": [{"profileName": "Main"}], "truncated": False},
+        "get_current_profile": {**identity, "profileName": "Main"},
+        "set_current_profile": {**identity, "profileName": "Main", "verified": True},
+        "list_scene_collections": {
+            **identity,
+            "sceneCollections": [{"sceneCollectionName": "Main"}],
+            "truncated": False,
+        },
+        "get_current_scene_collection": {**identity, "sceneCollectionName": "Main"},
+        "set_current_scene_collection": {
+            **identity,
+            "sceneCollectionName": "Main",
+            "verified": True,
+        },
+        "list_allowlisted_hotkeys": {
+            **identity,
+            "hotkeys": [{"hotkeyName": "start_streaming"}],
+            "truncated": False,
+        },
+        "trigger_allowlisted_hotkey": {
+            **identity,
+            "hotkeyName": "start_streaming",
+            "accepted": True,
+        },
+        "get_operator_status": {
+            **identity,
+            "ready": True,
+            "uiThreadReady": True,
+            "configPathRedacted": True,
+            "profileName": "Main",
+            "sceneCollectionName": "Main",
+        },
     }
 
     assert [tool["name"] for tool in tools] == list(results)
     assert "`postcondition.verified=true`" in skill_text
     for tool in tools:
         envelope = skill_success("OBS action completed.", **results[tool["name"]])
+        if tool["name"] == "trigger_allowlisted_hotkey":
+            assert "postcondition" not in envelope
         jsonschema.Draft202012Validator(tool["output_schema"]).validate(envelope)
 
 

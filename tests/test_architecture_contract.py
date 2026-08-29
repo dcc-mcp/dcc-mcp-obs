@@ -63,6 +63,7 @@ def test_native_error_state_cannot_be_overwritten_by_identity_readback() -> None
 
 
 def test_capability_matrix_freezes_full_product_scope() -> None:
+    native_source = (ROOT / "native" / "src" / "plugin-main.cpp").read_text(encoding="utf-8")
     matrix = json.loads(
         (ROOT / "contracts" / "obs-capabilities-v1.json").read_text(encoding="utf-8")
     )
@@ -96,6 +97,9 @@ def test_capability_matrix_freezes_full_product_scope() -> None:
         "screenshots",
     }
     assert "get_plugin_status" in domains["status"]["delivered_operations"]
+    assert "get_operator_status" in domains["status"]["delivered_operations"]
+    assert '"GetOperatorStatus"' in native_source
+    assert 'if (request == "GetOperatorStatus")' in native_source
     assert "list_scenes" in domains["scenes"]["delivered_operations"]
     assert "list_sources" in domains["sources"]["delivered_operations"]
     assert domains["recording"]["status"] == "delivered"
