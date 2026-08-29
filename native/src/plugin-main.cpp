@@ -809,8 +809,8 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, cons
 	const auto system_deadline =
 		deadline_at_ms == 0 ? system_now + kUiTimeout
 				    : std::chrono::system_clock::time_point(std::chrono::milliseconds(deadline_at_ms));
-	const auto remaining = system_deadline - system_now;
-	state->deadline = steady_now + std::max(remaining, std::chrono::system_clock::duration::zero());
+	const auto remaining_until_deadline = system_deadline - system_now;
+	state->deadline = steady_now + std::max(remaining_until_deadline, std::chrono::system_clock::duration::zero());
 	auto *holder = new std::shared_ptr<UiState>(state);
 	obs_queue_task(OBS_TASK_UI, execute_ui_operation, holder, false);
 
