@@ -138,6 +138,25 @@ def test_native_macos_jobs_use_obs_compatible_runner() -> None:
     assert "set(obs_macos_minimum_xcode 16.0)" in compiler_contract
 
 
+def test_native_matrix_runs_host_independent_contract_tests() -> None:
+    """Keep issue-6 native safety checks on every supported runner."""
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    native_ci = workflow.split("\n  native:\n", maxsplit=1)[1]
+
+    for runner in ("windows-2022", "macos-15", "ubuntu-24.04"):
+        assert f"- os: {runner}" in native_ci
+
+    assert "name: Run native contract tests" in native_ci
+    assert "cmake -S native/tests -B native-tests-build" in native_ci
+    assert "ctest --test-dir native-tests-build" in native_ci
+
+    contract_cmake = (ROOT / "native" / "tests" / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "find_package(Threads REQUIRED)" in contract_cmake
+    assert "target_link_libraries(ui-task-gate-contract PRIVATE Threads::Threads)" in contract_cmake
+    assert "add_executable(ui-task-gate-contract ui-task-gate-test.cpp)" in contract_cmake
+    assert "add_test(NAME ui-task-gate-contract COMMAND ui-task-gate-contract)" in contract_cmake
+
+
 def test_release_please_workflow_uses_official_immutable_v4_4_1_commit() -> None:
     workflow = (ROOT / ".github" / "workflows" / "release-please.yml").read_text(encoding="utf-8")
     _assert_release_action_contract(workflow)

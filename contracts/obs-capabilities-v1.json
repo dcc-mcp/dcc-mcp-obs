@@ -19,19 +19,19 @@
     },
     {
       "domain": "scenes",
-      "status": "partial",
+      "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": ["list_scenes", "get_current_scene"],
-      "remaining_operations": ["switch_scene", "create_scene", "rename_scene", "remove_scene"],
+      "delivered_operations": ["list_scenes", "get_current_scene", "switch_scene", "create_scene", "rename_scene", "remove_scene"],
+      "remaining_operations": [],
       "dangerous_operations": ["switch_scene", "create_scene", "rename_scene", "remove_scene"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/6"
     },
     {
       "domain": "scene_items",
-      "status": "planned",
+      "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": [],
-      "remaining_operations": ["list_scene_items", "create_scene_item", "set_scene_item_enabled", "set_scene_item_transform", "remove_scene_item"],
+      "delivered_operations": ["list_scene_items", "create_scene_item", "set_scene_item_enabled", "set_scene_item_transform", "remove_scene_item"],
+      "remaining_operations": [],
       "dangerous_operations": ["create_scene_item", "set_scene_item_enabled", "set_scene_item_transform", "remove_scene_item"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/6"
     },
@@ -46,7 +46,7 @@
     },
     {
       "domain": "inputs",
-      "status": "planned",
+      "status": "delivered",
       "authority": "native_plugin",
       "delivered_operations": [],
       "remaining_operations": ["list_input_kinds", "get_input_settings", "set_input_settings"],
@@ -82,19 +82,19 @@
     },
     {
       "domain": "transitions",
-      "status": "planned",
+      "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": [],
-      "remaining_operations": ["list_transitions", "get_current_transition", "set_current_transition", "trigger_transition"],
+      "delivered_operations": ["list_transitions", "get_current_transition", "set_current_transition", "trigger_transition"],
+      "remaining_operations": [],
       "dangerous_operations": ["set_current_transition", "trigger_transition"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/6"
     },
     {
       "domain": "studio_mode",
-      "status": "planned",
+      "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": [],
-      "remaining_operations": ["get_studio_mode", "set_studio_mode", "get_preview_scene", "set_preview_scene", "transition_to_program"],
+      "delivered_operations": ["get_studio_mode", "set_studio_mode", "get_preview_scene", "set_preview_scene", "transition_to_program"],
+      "remaining_operations": [],
       "dangerous_operations": ["set_studio_mode", "set_preview_scene", "transition_to_program"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/6"
     },

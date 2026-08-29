@@ -14,6 +14,7 @@ OBS WebSocket 只承担鉴权传输，不提供不受限制的 raw request 或�
 - 精确插件版本、OBS 版本、PID、实例 ID、readiness 和事件序号
 - 有界场景枚举和当前场景读回
 - 当前场景或精确指定场景的有界 source 枚举
+- 类型化场景切换、场景项 CRUD、转场和 Studio Mode 预览/节目操作
 - 录制状态
 - 开始、停止、暂停、继续录制
 - 每次写操作后独立的类型化状态读回
@@ -28,7 +29,7 @@ OBS WebSocket 只承担鉴权传输，不提供不受限制的 raw request 或�
 - [配置、场景集合、有界热键、截图和操作者状态](https://github.com/dcc-mcp/dcc-mcp-obs/issues/3)
 - [可丢弃真实 OBS 验收](https://github.com/dcc-mcp/dcc-mcp-obs/issues/4)
 - [输入、属性、滤镜、音频和媒体](https://github.com/dcc-mcp/dcc-mcp-obs/issues/5)
-- [场景图、切换、转场和 Studio Mode](https://github.com/dcc-mcp/dcc-mcp-obs/issues/6)
+- [类型化场景图控制](../scene-graph.md)
 
 ## 要求
 
@@ -73,9 +74,10 @@ dcc-mcp-obs --host-pid <obs-pid>
 ## Agent 命中
 
 内置 `obs-control` Skill 覆盖 OBS、Open Broadcaster Software、recording、
-场景/source 查看、pause、resume、录屏、录制视频等中英文检索词。Agent 先搜索并
-加载 Skill，再调用场景、录制、直播、回放缓冲、虚拟摄像头和输出域的类型化工具。
-场景切换仍属于路线图，不是当前已发布的原生控制工具。
+场景/source 查看、场景图、场景项、转场、Studio Mode、pause、resume、录屏、
+录制视频等中英文检索词。Agent 先搜索并加载 Skill，再调用场景、场景图、录制、
+直播、回放缓冲、虚拟摄像头和输出域的类型化工具。场景图写操作必须经过原生
+插件的精确实例校验、截止时间和状态读回。
 
 OBS 控制始终原生插件/WebSocket 优先。仅当某个纯视觉操作没有类型化契约时，
 才允许通过 DCC-MCP `ui-control` 使用项目自有 DCC-CUA，并且必须绑定精确 PID/HWND、

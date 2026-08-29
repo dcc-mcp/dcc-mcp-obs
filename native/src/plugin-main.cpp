@@ -7,6 +7,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cmath>
 #include <memory>
 #include <mutex>
 #include <random>
@@ -32,6 +33,7 @@ constexpr char kVendorName[] = "dcc-mcp-obs";
 constexpr char kPluginVersion[] = "1.1.0"; // x-release-please-version
 constexpr auto kUiTimeout = std::chrono::seconds(5);
 constexpr size_t kMaxScenes = 256;
+constexpr size_t kMaxTransitions = 128;
 constexpr size_t kMaxSources = 512;
 constexpr size_t kMaxOutputs = 8;
 constexpr size_t kMaxProfiles = 128;
@@ -97,6 +99,26 @@ enum class UiOperation {
 	ListAllowlistedHotkeys,
 	TriggerAllowlistedHotkey,
 	CaptureScreenshot,
+	SetCurrentScene,
+	GetCurrentScene,
+	CreateScene,
+	RenameScene,
+	RemoveScene,
+	ListSceneItems,
+	GetSceneItem,
+	CreateSceneItem,
+	SetSceneItemEnabled,
+	SetSceneItemTransform,
+	RemoveSceneItem,
+	ListTransitions,
+	GetCurrentTransition,
+	SetCurrentTransition,
+	TriggerTransition,
+	GetStudioModeStatus,
+	SetStudioMode,
+	GetCurrentPreviewScene,
+	SetCurrentPreviewScene,
+	TriggerStudioModeTransition,
 };
 
 struct UiState {
@@ -105,6 +127,14 @@ struct UiState {
 	std::string output_name;
 	std::string target_name;
 	std::string hotkey_name;
+	std::string source_name;
+	std::string source_kind;
+	std::string transition_name;
+	int64_t scene_item_id = 0;
+	bool enabled = true, studio_enabled = false, has_duration = false;
+	int duration_ms = 0;
+	bool has_pos = false, has_scale = false, has_rotation = false;
+	float pos_x = 0.0f, pos_y = 0.0f, scale_x = 1.0f, scale_y = 1.0f, rotation = 0.0f;
 	std::string image_format;
 	std::chrono::steady_clock::time_point deadline;
 	std::mutex mutex;
@@ -358,6 +388,158 @@ obs_data_t *list_sources(const std::string &scene_name)
 	return result;
 }
 
+obs_source_t *scene_source_by_name(const std::string &name)
+{
+	if (name.empty())
+		return nullptr;
+	obs_source_t *source = obs_get_source_by_name(name.c_str());
+	if (source == nullptr || !obs_source_is_scene(source)) {
+		if (source != nullptr)
+			obs_source_release(source);
+		return nullptr;
+	}
+	return source;
+}
+
+obs_data_t *current_scene_status()
+{
+	auto *result = obs_data_create();
+	auto *scene = obs_frontend_get_current_scene();
+	if (scene == nullptr) {
+		set_error(result, "OBS_SCENE_NOT_FOUND");
+		return result;
+	}
+	obs_data_set_string(result, "sceneName", obs_source_get_name(scene));
+	obs_source_release(scene);
+	return result;
+}
+
+void set_scene_item_data(obs_data_t *entry, const std::string &scene_name, obs_sceneitem_t *item)
+{
+	obs_source_t *source = obs_sceneitem_get_source(item);
+	if (source == nullptr)
+		return;
+	obs_data_set_string(entry, "sceneName", scene_name.c_str());
+	obs_data_set_int(entry, "sceneItemId", obs_sceneitem_get_id(item));
+	obs_data_set_string(entry, "sourceName", obs_source_get_name(source));
+	obs_data_set_string(entry, "sourceKind", obs_source_get_id(source));
+	obs_data_set_bool(entry, "enabled", obs_sceneitem_visible(item));
+	vec2 pos{}, scale{};
+	obs_sceneitem_get_pos(item, &pos);
+	obs_sceneitem_get_scale(item, &scale);
+	obs_data_set_double(entry, "posX", pos.x);
+	obs_data_set_double(entry, "posY", pos.y);
+	obs_data_set_double(entry, "scaleX", scale.x);
+	obs_data_set_double(entry, "scaleY", scale.y);
+	obs_data_set_double(entry, "rotation", obs_sceneitem_get_rot(item));
+}
+
+obs_data_t *list_scene_items(const std::string &scene_name)
+{
+	auto *result = obs_data_create();
+	auto *scene_source = scene_name.empty() ? obs_frontend_get_current_scene() : scene_source_by_name(scene_name);
+	if (scene_source == nullptr) {
+		set_error(result, "OBS_SCENE_NOT_FOUND");
+		return result;
+	}
+	auto *scene = obs_scene_from_source(scene_source);
+	if (scene == nullptr) {
+		obs_source_release(scene_source);
+		set_error(result, "OBS_SCENE_NOT_FOUND");
+		return result;
+	}
+	auto *items = obs_data_array_create();
+	struct Context {
+		obs_data_array_t *items;
+		const char *scene_name;
+	} context{items, obs_source_get_name(scene_source)};
+	obs_scene_enum_items(
+		scene,
+		[](obs_scene_t *, obs_sceneitem_t *item, void *private_data) {
+			auto *ctx = static_cast<Context *>(private_data);
+			if (obs_data_array_count(ctx->items) >= kMaxSources)
+				return false;
+			auto *entry = obs_data_create();
+			set_scene_item_data(entry, ctx->scene_name, item);
+			obs_data_array_push_back(ctx->items, entry);
+			obs_data_release(entry);
+			return true;
+		},
+		&context);
+	obs_data_set_string(result, "sceneName", obs_source_get_name(scene_source));
+	obs_data_set_array(result, "sceneItems", items);
+	obs_data_set_bool(result, "truncated", obs_data_array_count(items) >= kMaxSources);
+	obs_data_array_release(items);
+	obs_source_release(scene_source);
+	return result;
+}
+
+obs_data_t *scene_item_status(const std::string &scene_name, int64_t item_id)
+{
+	auto *result = obs_data_create();
+	auto *scene_source = scene_source_by_name(scene_name);
+	if (scene_source == nullptr) {
+		set_error(result, "OBS_SCENE_NOT_FOUND");
+		return result;
+	}
+	auto *scene = obs_scene_from_source(scene_source);
+	auto *item = scene == nullptr ? nullptr : obs_scene_find_sceneitem_by_id(scene, item_id);
+	if (item == nullptr) {
+		obs_source_release(scene_source);
+		obs_data_set_string(result, "sceneName", scene_name.c_str());
+		obs_data_set_int(result, "sceneItemId", item_id);
+		obs_data_set_bool(result, "exists", false);
+		return result;
+	}
+	set_scene_item_data(result, scene_name, item);
+	obs_source_release(scene_source);
+	return result;
+}
+
+obs_data_t *list_transitions()
+{
+	auto *result = obs_data_create();
+	auto *transitions = obs_data_array_create();
+	obs_frontend_source_list source_list{};
+	obs_frontend_get_transitions(&source_list);
+	const size_t total = source_list.sources.num;
+	const size_t count = std::min(total, kMaxTransitions);
+	for (size_t i = 0; i < count; ++i) {
+		auto *entry = obs_data_create();
+		obs_data_set_string(entry, "transitionName", obs_source_get_name(source_list.sources.array[i]));
+		obs_data_set_string(entry, "transitionKind", obs_source_get_id(source_list.sources.array[i]));
+		obs_data_array_push_back(transitions, entry);
+		obs_data_release(entry);
+	}
+	obs_frontend_source_list_free(&source_list);
+	auto *current = obs_frontend_get_current_transition();
+	if (current != nullptr) {
+		obs_data_set_string(result, "currentTransitionName", obs_source_get_name(current));
+		obs_source_release(current);
+	}
+	obs_data_set_array(result, "transitions", transitions);
+	obs_data_set_bool(result, "truncated", total > kMaxTransitions);
+	obs_data_array_release(transitions);
+	return result;
+}
+
+obs_data_t *studio_mode_status()
+{
+	auto *result = obs_data_create();
+	obs_data_set_bool(result, "studioModeEnabled", obs_frontend_preview_program_mode_active());
+	auto *program = obs_frontend_get_current_scene();
+	if (program != nullptr) {
+		obs_data_set_string(result, "programSceneName", obs_source_get_name(program));
+		obs_source_release(program);
+	}
+	auto *preview = obs_frontend_get_current_preview_scene();
+	if (preview != nullptr) {
+		obs_data_set_string(result, "previewSceneName", obs_source_get_name(preview));
+		obs_source_release(preview);
+	}
+	return result;
+}
+
 obs_data_t *recording_status()
 {
 	obs_data_t *result = obs_data_create();
@@ -457,7 +639,17 @@ void execute_ui_operation(void *private_data)
 		state->operation == UiOperation::StopOutput || state->operation == UiOperation::SetProfile ||
 		state->operation == UiOperation::SetSceneCollection ||
 		state->operation == UiOperation::TriggerAllowlistedHotkey ||
-		state->operation == UiOperation::CaptureScreenshot;
+		state->operation == UiOperation::CaptureScreenshot ||
+		state->operation == UiOperation::SetCurrentScene || state->operation == UiOperation::CreateScene ||
+		state->operation == UiOperation::RenameScene || state->operation == UiOperation::RemoveScene ||
+		state->operation == UiOperation::CreateSceneItem ||
+		state->operation == UiOperation::SetSceneItemEnabled ||
+		state->operation == UiOperation::SetSceneItemTransform ||
+		state->operation == UiOperation::RemoveSceneItem ||
+		state->operation == UiOperation::SetCurrentTransition ||
+		state->operation == UiOperation::TriggerTransition || state->operation == UiOperation::SetStudioMode ||
+		state->operation == UiOperation::SetCurrentPreviewScene ||
+		state->operation == UiOperation::TriggerStudioModeTransition;
 	if (!is_mutation && !state->gate.try_start()) {
 		result = obs_data_create();
 		set_error(result, "OBS_UI_TIMEOUT");
@@ -494,6 +686,365 @@ void execute_ui_operation(void *private_data)
 		case UiOperation::ListSources:
 			result = list_sources(state->scene_name);
 			break;
+		case UiOperation::GetCurrentScene:
+			result = current_scene_status();
+			break;
+		case UiOperation::SetCurrentScene: {
+			result = obs_data_create();
+			auto *scene = scene_source_by_name(state->scene_name);
+			if (scene == nullptr)
+				set_error(result, "OBS_SCENE_NOT_FOUND");
+			else if (!state->gate.claim_mutation(state->deadline))
+				set_error(result, "OBS_UI_TIMEOUT");
+			else {
+				obs_frontend_set_current_scene(scene);
+				auto *current = obs_frontend_get_current_scene();
+				if (current == nullptr || state->scene_name != obs_source_get_name(current))
+					set_error(result, "OBS_POSTCONDITION_FAILED");
+				else {
+					obs_data_set_string(result, "sceneName", obs_source_get_name(current));
+					obs_data_set_bool(result, "accepted", true);
+				}
+				if (current != nullptr)
+					obs_source_release(current);
+			}
+			if (scene != nullptr)
+				obs_source_release(scene);
+			break;
+		}
+		case UiOperation::CreateScene: {
+			result = obs_data_create();
+			if (state->scene_name.empty())
+				set_error(result, "OBS_ARGUMENT_INVALID");
+			else {
+				auto *existing = obs_get_source_by_name(state->scene_name.c_str());
+				if (existing != nullptr) {
+					obs_source_release(existing);
+					set_error(result, "OBS_TARGET_AMBIGUOUS");
+				}
+			}
+			if (obs_data_has_user_value(result, "ok"))
+				break;
+			if (state->scene_name.empty()) {
+				set_error(result, "OBS_ARGUMENT_INVALID");
+				break;
+			}
+			if (!state->gate.claim_mutation(state->deadline)) {
+				set_error(result, "OBS_UI_TIMEOUT");
+				break;
+			}
+			{
+				auto *new_scene = obs_scene_create(state->scene_name.c_str());
+				if (new_scene == nullptr)
+					set_error(result, "OBS_MUTATION_REJECTED");
+				else {
+					auto *source = obs_scene_get_source(new_scene);
+					if (source == nullptr || state->scene_name != obs_source_get_name(source))
+						set_error(result, "OBS_POSTCONDITION_FAILED");
+					else {
+						obs_data_set_string(result, "sceneName", obs_source_get_name(source));
+						obs_data_set_bool(result, "accepted", true);
+					}
+					obs_scene_release(new_scene);
+				}
+			}
+			break;
+		}
+		case UiOperation::RenameScene: {
+			result = obs_data_create();
+			auto *scene = scene_source_by_name(state->scene_name);
+			auto *conflict = state->target_name.empty()
+						 ? nullptr
+						 : obs_get_source_by_name(state->target_name.c_str());
+			if (conflict != nullptr) {
+				obs_source_release(conflict);
+				set_error(result, "OBS_TARGET_AMBIGUOUS");
+			} else if (scene == nullptr || state->target_name.empty())
+				set_error(result, "OBS_SCENE_NOT_FOUND");
+			else if (!state->gate.claim_mutation(state->deadline))
+				set_error(result, "OBS_UI_TIMEOUT");
+			else {
+				obs_source_set_name(scene, state->target_name.c_str());
+				auto *renamed = obs_get_source_by_name(state->target_name.c_str());
+				if (renamed == nullptr || state->target_name != obs_source_get_name(renamed))
+					set_error(result, "OBS_POSTCONDITION_FAILED");
+				else {
+					obs_data_set_string(result, "sceneName", obs_source_get_name(renamed));
+					obs_data_set_bool(result, "accepted", true);
+				}
+				if (renamed != nullptr)
+					obs_source_release(renamed);
+			}
+			if (scene != nullptr)
+				obs_source_release(scene);
+			break;
+		}
+		case UiOperation::RemoveScene: {
+			result = obs_data_create();
+			auto *scene = scene_source_by_name(state->scene_name);
+			if (scene == nullptr)
+				set_error(result, "OBS_SCENE_NOT_FOUND");
+			else if (!state->gate.claim_mutation(state->deadline))
+				set_error(result, "OBS_UI_TIMEOUT");
+			else {
+				obs_source_remove(scene);
+				auto *remaining = obs_get_source_by_name(state->scene_name.c_str());
+				if (remaining != nullptr) {
+					obs_source_release(remaining);
+					set_error(result, "OBS_POSTCONDITION_FAILED");
+				} else {
+					obs_data_set_string(result, "sceneName", state->scene_name.c_str());
+					obs_data_set_bool(result, "accepted", true);
+				}
+			}
+			if (scene != nullptr)
+				obs_source_release(scene);
+			break;
+		}
+		case UiOperation::ListSceneItems:
+			result = list_scene_items(state->scene_name);
+			break;
+		case UiOperation::GetSceneItem:
+			result = scene_item_status(state->scene_name, state->scene_item_id);
+			break;
+		case UiOperation::CreateSceneItem: {
+			result = obs_data_create();
+			auto *scene_source = scene_source_by_name(state->scene_name);
+			auto *source = state->source_name.empty() ? nullptr
+								  : obs_get_source_by_name(state->source_name.c_str());
+			if (scene_source == nullptr || source == nullptr)
+				set_error(result,
+					  scene_source == nullptr ? "OBS_SCENE_NOT_FOUND" : "OBS_SOURCE_NOT_FOUND");
+			else if (!state->source_kind.empty() &&
+				 std::string(obs_source_get_id(source)) != state->source_kind)
+				set_error(result, "OBS_ARGUMENT_INVALID");
+			else if (!state->gate.claim_mutation(state->deadline))
+				set_error(result, "OBS_UI_TIMEOUT");
+			else {
+				auto *scene = obs_scene_from_source(scene_source);
+				auto *item = scene == nullptr ? nullptr : obs_scene_add(scene, source);
+				if (item == nullptr)
+					set_error(result, "OBS_MUTATION_REJECTED");
+				else {
+					obs_sceneitem_set_visible(item, state->enabled);
+					set_scene_item_data(result, state->scene_name, item);
+					obs_data_set_bool(result, "accepted", true);
+				}
+			}
+			if (source != nullptr)
+				obs_source_release(source);
+			if (scene_source != nullptr)
+				obs_source_release(scene_source);
+			break;
+		}
+		case UiOperation::SetSceneItemEnabled:
+		case UiOperation::SetSceneItemTransform:
+		case UiOperation::RemoveSceneItem: {
+			result = obs_data_create();
+			auto *scene_source = scene_source_by_name(state->scene_name);
+			auto *scene = scene_source == nullptr ? nullptr : obs_scene_from_source(scene_source);
+			auto *item = scene == nullptr ? nullptr
+						      : obs_scene_find_sceneitem_by_id(scene, state->scene_item_id);
+			if (item == nullptr)
+				set_error(result,
+					  scene_source == nullptr ? "OBS_SCENE_NOT_FOUND" : "OBS_SCENE_ITEM_NOT_FOUND");
+			else if (!state->gate.claim_mutation(state->deadline))
+				set_error(result, "OBS_UI_TIMEOUT");
+			else if (state->operation == UiOperation::RemoveSceneItem) {
+				obs_sceneitem_remove(item);
+				if (obs_scene_find_sceneitem_by_id(scene, state->scene_item_id) != nullptr)
+					set_error(result, "OBS_POSTCONDITION_FAILED");
+				else {
+					obs_data_set_string(result, "sceneName", state->scene_name.c_str());
+					obs_data_set_int(result, "sceneItemId", state->scene_item_id);
+					obs_data_set_bool(result, "accepted", true);
+				}
+			} else {
+				if (state->operation == UiOperation::SetSceneItemEnabled)
+					obs_sceneitem_set_visible(item, state->enabled);
+				else {
+					vec2 pos{}, scale{};
+					obs_sceneitem_get_pos(item, &pos);
+					obs_sceneitem_get_scale(item, &scale);
+					if (state->has_pos) {
+						pos.x = state->pos_x;
+						pos.y = state->pos_y;
+						obs_sceneitem_set_pos(item, &pos);
+					}
+					if (state->has_scale) {
+						scale.x = state->scale_x;
+						scale.y = state->scale_y;
+						obs_sceneitem_set_scale(item, &scale);
+					}
+					if (state->has_rotation)
+						obs_sceneitem_set_rot(item, state->rotation);
+				}
+				bool verified = true;
+				if (state->operation == UiOperation::SetSceneItemEnabled)
+					verified = obs_sceneitem_visible(item) == state->enabled;
+				if (state->operation == UiOperation::SetSceneItemTransform) {
+					vec2 actual_pos{}, actual_scale{};
+					obs_sceneitem_get_pos(item, &actual_pos);
+					obs_sceneitem_get_scale(item, &actual_scale);
+					if (state->has_pos)
+						verified = verified &&
+							   std::fabs(actual_pos.x - state->pos_x) < 0.001f &&
+							   std::fabs(actual_pos.y - state->pos_y) < 0.001f;
+					if (state->has_scale)
+						verified = verified &&
+							   std::fabs(actual_scale.x - state->scale_x) < 0.001f &&
+							   std::fabs(actual_scale.y - state->scale_y) < 0.001f;
+					if (state->has_rotation)
+						verified = verified && std::fabs(obs_sceneitem_get_rot(item) -
+										 state->rotation) < 0.001f;
+				}
+				if (!verified)
+					set_error(result, "OBS_POSTCONDITION_FAILED");
+				else {
+					set_scene_item_data(result, state->scene_name, item);
+					obs_data_set_bool(result, "accepted", true);
+				}
+			}
+			if (scene_source != nullptr)
+				obs_source_release(scene_source);
+			break;
+		}
+		case UiOperation::ListTransitions:
+			result = list_transitions();
+			break;
+		case UiOperation::GetCurrentTransition: {
+			result = obs_data_create();
+			auto *transition = obs_frontend_get_current_transition();
+			if (transition == nullptr)
+				set_error(result, "OBS_TRANSITION_NOT_FOUND");
+			else {
+				obs_data_set_string(result, "transitionName", obs_source_get_name(transition));
+				obs_source_release(transition);
+			}
+			break;
+		}
+		case UiOperation::SetCurrentTransition: {
+			result = obs_data_create();
+			auto *transition = state->transition_name.empty()
+						   ? nullptr
+						   : obs_get_source_by_name(state->transition_name.c_str());
+			if (transition == nullptr || obs_source_get_type(transition) != OBS_SOURCE_TYPE_TRANSITION)
+				set_error(result, "OBS_TRANSITION_NOT_FOUND");
+			else if (!state->gate.claim_mutation(state->deadline))
+				set_error(result, "OBS_UI_TIMEOUT");
+			else {
+				obs_frontend_set_current_transition(transition);
+				if (state->has_duration)
+					obs_frontend_set_transition_duration(state->duration_ms);
+				auto *current = obs_frontend_get_current_transition();
+				if (current == nullptr || state->transition_name != obs_source_get_name(current) ||
+				    (state->has_duration &&
+				     obs_frontend_get_transition_duration() != state->duration_ms))
+					set_error(result, "OBS_POSTCONDITION_FAILED");
+				else {
+					obs_data_set_string(result, "transitionName", obs_source_get_name(current));
+					obs_data_set_int(result, "durationMs", obs_frontend_get_transition_duration());
+					obs_data_set_bool(result, "accepted", true);
+				}
+				if (current)
+					obs_source_release(current);
+			}
+			if (transition)
+				obs_source_release(transition);
+			break;
+		}
+		case UiOperation::TriggerTransition: {
+			result = obs_data_create();
+			auto *transition = obs_frontend_get_current_transition();
+			auto *destination = scene_source_by_name(state->scene_name);
+			if (transition == nullptr || destination == nullptr)
+				set_error(result, "OBS_TRANSITION_NOT_FOUND");
+			else if (!state->gate.claim_mutation(state->deadline))
+				set_error(result, "OBS_UI_TIMEOUT");
+			else {
+				obs_frontend_set_current_scene(destination);
+				auto *current = obs_frontend_get_current_scene();
+				if (current == nullptr || state->scene_name != obs_source_get_name(current))
+					set_error(result, "OBS_POSTCONDITION_FAILED");
+				else {
+					obs_data_set_string(result, "sceneName", obs_source_get_name(current));
+					obs_data_set_bool(result, "accepted", true);
+				}
+				if (current)
+					obs_source_release(current);
+			}
+			if (transition)
+				obs_source_release(transition);
+			if (destination)
+				obs_source_release(destination);
+			break;
+		}
+		case UiOperation::GetStudioModeStatus:
+			result = studio_mode_status();
+			break;
+		case UiOperation::SetStudioMode: {
+			result = obs_data_create();
+			if (!state->gate.claim_mutation(state->deadline))
+				set_error(result, "OBS_UI_TIMEOUT");
+			else {
+				obs_frontend_set_preview_program_mode(state->studio_enabled);
+				if (obs_frontend_preview_program_mode_active() != state->studio_enabled)
+					set_error(result, "OBS_POSTCONDITION_FAILED");
+				else {
+					obs_data_set_bool(result, "studioModeEnabled", state->studio_enabled);
+					obs_data_set_bool(result, "accepted", true);
+				}
+			}
+			break;
+		}
+		case UiOperation::GetCurrentPreviewScene: {
+			result = obs_data_create();
+			auto *preview = obs_frontend_get_current_preview_scene();
+			if (preview == nullptr)
+				set_error(result, "OBS_STUDIO_MODE_INACTIVE");
+			else {
+				obs_data_set_string(result, "sceneName", obs_source_get_name(preview));
+				obs_source_release(preview);
+			}
+			break;
+		}
+		case UiOperation::SetCurrentPreviewScene: {
+			result = obs_data_create();
+			auto *scene = scene_source_by_name(state->scene_name);
+			if (scene == nullptr)
+				set_error(result, "OBS_SCENE_NOT_FOUND");
+			else if (!obs_frontend_preview_program_mode_active())
+				set_error(result, "OBS_STUDIO_MODE_INACTIVE");
+			else if (!state->gate.claim_mutation(state->deadline))
+				set_error(result, "OBS_UI_TIMEOUT");
+			else {
+				obs_frontend_set_current_preview_scene(scene);
+				auto *preview = obs_frontend_get_current_preview_scene();
+				if (preview == nullptr || state->scene_name != obs_source_get_name(preview))
+					set_error(result, "OBS_POSTCONDITION_FAILED");
+				else {
+					obs_data_set_string(result, "sceneName", obs_source_get_name(preview));
+					obs_data_set_bool(result, "accepted", true);
+				}
+				if (preview)
+					obs_source_release(preview);
+			}
+			if (scene != nullptr)
+				obs_source_release(scene);
+			break;
+		}
+		case UiOperation::TriggerStudioModeTransition: {
+			result = obs_data_create();
+			if (!obs_frontend_preview_program_mode_active())
+				set_error(result, "OBS_STUDIO_MODE_INACTIVE");
+			else if (!state->gate.claim_mutation(state->deadline))
+				set_error(result, "OBS_UI_TIMEOUT");
+			else {
+				obs_frontend_preview_program_trigger_transition();
+				obs_data_set_bool(result, "accepted", true);
+			}
+			break;
+		}
 		case UiOperation::RecordingStatus:
 			result = recording_status();
 			break;
@@ -795,7 +1346,11 @@ void execute_ui_operation(void *private_data)
 
 bool run_ui_operation(UiOperation operation, const std::string &scene_name, const std::string &output_name,
 		      const std::string &target_name, const std::string &hotkey_name, const std::string &image_format,
-		      uint64_t deadline_at_ms, obs_data_t *response)
+		      const std::string &source_name, const std::string &source_kind,
+		      const std::string &transition_name, int64_t scene_item_id, bool enabled, bool studio_enabled,
+		      bool has_duration, int duration_ms, bool has_pos, bool has_scale, bool has_rotation, float pos_x,
+		      float pos_y, float scale_x, float scale_y, float rotation, uint64_t deadline_at_ms,
+		      obs_data_t *response)
 {
 	auto state = std::make_shared<UiState>();
 	state->operation = operation;
@@ -804,6 +1359,22 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, cons
 	state->target_name = target_name;
 	state->hotkey_name = hotkey_name;
 	state->image_format = image_format;
+	state->source_name = source_name;
+	state->source_kind = source_kind;
+	state->transition_name = transition_name;
+	state->scene_item_id = scene_item_id;
+	state->enabled = enabled;
+	state->studio_enabled = studio_enabled;
+	state->has_duration = has_duration;
+	state->duration_ms = duration_ms;
+	state->has_pos = has_pos;
+	state->has_scale = has_scale;
+	state->has_rotation = has_rotation;
+	state->pos_x = pos_x;
+	state->pos_y = pos_y;
+	state->scale_x = scale_x;
+	state->scale_y = scale_y;
+	state->rotation = rotation;
 	const auto steady_now = std::chrono::steady_clock::now();
 	const auto system_now = std::chrono::system_clock::now();
 	state->deadline = deadline_at_ms == 0
@@ -847,6 +1418,46 @@ UiOperation operation_for(const std::string &request)
 		return UiOperation::OperatorStatus;
 	if (request == "ListScenes")
 		return UiOperation::ListScenes;
+	if (request == "SetCurrentScene")
+		return UiOperation::SetCurrentScene;
+	if (request == "GetCurrentScene")
+		return UiOperation::GetCurrentScene;
+	if (request == "CreateScene")
+		return UiOperation::CreateScene;
+	if (request == "RenameScene")
+		return UiOperation::RenameScene;
+	if (request == "RemoveScene")
+		return UiOperation::RemoveScene;
+	if (request == "ListSceneItems")
+		return UiOperation::ListSceneItems;
+	if (request == "GetSceneItem")
+		return UiOperation::GetSceneItem;
+	if (request == "CreateSceneItem")
+		return UiOperation::CreateSceneItem;
+	if (request == "SetSceneItemEnabled")
+		return UiOperation::SetSceneItemEnabled;
+	if (request == "SetSceneItemTransform")
+		return UiOperation::SetSceneItemTransform;
+	if (request == "RemoveSceneItem")
+		return UiOperation::RemoveSceneItem;
+	if (request == "ListTransitions")
+		return UiOperation::ListTransitions;
+	if (request == "GetCurrentTransition")
+		return UiOperation::GetCurrentTransition;
+	if (request == "SetCurrentTransition")
+		return UiOperation::SetCurrentTransition;
+	if (request == "TriggerTransition")
+		return UiOperation::TriggerTransition;
+	if (request == "GetStudioModeStatus")
+		return UiOperation::GetStudioModeStatus;
+	if (request == "SetStudioMode")
+		return UiOperation::SetStudioMode;
+	if (request == "GetCurrentPreviewScene")
+		return UiOperation::GetCurrentPreviewScene;
+	if (request == "SetCurrentPreviewScene")
+		return UiOperation::SetCurrentPreviewScene;
+	if (request == "TriggerStudioModeTransition")
+		return UiOperation::TriggerStudioModeTransition;
 	if (request == "ListSources")
 		return UiOperation::ListSources;
 	if (request == "GetRecordingStatus")
@@ -915,6 +1526,14 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 	std::string output_name;
 	std::string target_name;
 	std::string hotkey_name;
+	std::string source_name;
+	std::string source_kind;
+	std::string transition_name;
+	int64_t scene_item_id = 0;
+	bool enabled = true, studio_enabled = false, has_duration = false;
+	int duration_ms = 0;
+	bool has_pos = false, has_scale = false, has_rotation = false;
+	float pos_x = 0.0f, pos_y = 0.0f, scale_x = 1.0f, scale_y = 1.0f, rotation = 0.0f;
 	const uint64_t now_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
 							      std::chrono::system_clock::now().time_since_epoch())
 							      .count());
@@ -976,6 +1595,118 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 			return;
 		}
 	}
+	const bool scene_request = request_name == "SetCurrentScene" || request_name == "GetCurrentScene" ||
+				   request_name == "CreateScene" || request_name == "RenameScene" ||
+				   request_name == "RemoveScene" || request_name == "ListSceneItems" ||
+				   request_name == "GetSceneItem" || request_name == "CreateSceneItem" ||
+				   request_name == "SetSceneItemEnabled" || request_name == "SetSceneItemTransform" ||
+				   request_name == "RemoveSceneItem" || request_name == "TriggerTransition" ||
+				   request_name == "SetCurrentPreviewScene";
+	if (scene_request && request_data != nullptr) {
+		const char *value = obs_data_get_string(request_data, "sceneName");
+		if (value != nullptr)
+			scene_name = value;
+		if (scene_name.size() > 256) {
+			set_error(response_data, "OBS_ARGUMENT_INVALID");
+			return;
+		}
+		value = obs_data_get_string(request_data, "newSceneName");
+		if (value == nullptr)
+			value = obs_data_get_string(request_data, "targetSceneName");
+		if (value == nullptr)
+			value = obs_data_get_string(request_data, "newName");
+		if (value != nullptr)
+			target_name = value;
+		value = obs_data_get_string(request_data, "sourceName");
+		if (value != nullptr)
+			source_name = value;
+		value = obs_data_get_string(request_data, "sourceKind");
+		if (value != nullptr)
+			source_kind = value;
+		if (request_name == "CreateSceneItem" && (scene_name.empty() || source_name.empty())) {
+			set_error(response_data, "OBS_ARGUMENT_INVALID");
+			return;
+		}
+		if (request_name == "GetSceneItem" || request_name == "SetSceneItemEnabled" ||
+		    request_name == "SetSceneItemTransform" || request_name == "RemoveSceneItem") {
+			scene_item_id = obs_data_get_int(request_data, "sceneItemId");
+			if (scene_item_id <= 0 || scene_name.empty()) {
+				set_error(response_data, "OBS_ARGUMENT_INVALID");
+				return;
+			}
+		}
+		if (request_name == "SetSceneItemEnabled")
+			enabled = obs_data_get_bool(request_data, "enabled");
+		if (request_name == "SetSceneItemTransform") {
+			if (obs_data_has_user_value(request_data, "posX")) {
+				has_pos = true;
+				pos_x = static_cast<float>(obs_data_get_double(request_data, "posX"));
+			}
+			if (obs_data_has_user_value(request_data, "posY")) {
+				has_pos = true;
+				pos_y = static_cast<float>(obs_data_get_double(request_data, "posY"));
+			}
+			if (obs_data_has_user_value(request_data, "scaleX")) {
+				has_scale = true;
+				scale_x = static_cast<float>(obs_data_get_double(request_data, "scaleX"));
+			}
+			if (obs_data_has_user_value(request_data, "scaleY")) {
+				has_scale = true;
+				scale_y = static_cast<float>(obs_data_get_double(request_data, "scaleY"));
+			}
+			if (obs_data_has_user_value(request_data, "rotation")) {
+				has_rotation = true;
+				rotation = static_cast<float>(obs_data_get_double(request_data, "rotation"));
+			}
+			if ((!has_pos && !has_scale && !has_rotation) || !std::isfinite(pos_x) ||
+			    !std::isfinite(pos_y) || !std::isfinite(scale_x) || !std::isfinite(scale_y) ||
+			    !std::isfinite(rotation)) {
+				set_error(response_data, "OBS_ARGUMENT_INVALID");
+				return;
+			}
+		}
+	}
+	const char *required_capability = nullptr;
+	if (request_name == "SetCurrentScene" || request_name == "CreateScene" || request_name == "RenameScene" ||
+	    request_name == "RemoveScene" || request_name == "CreateSceneItem" ||
+	    request_name == "SetSceneItemEnabled" || request_name == "SetSceneItemTransform" ||
+	    request_name == "RemoveSceneItem")
+		required_capability = request_name == "SetCurrentScene" ? "scene_switch" : "scene_graph";
+	else if (request_name == "SetCurrentTransition" || request_name == "TriggerTransition")
+		required_capability = "transitions";
+	else if (request_name == "SetStudioMode")
+		required_capability = "studio_mode";
+	else if (request_name == "SetCurrentPreviewScene")
+		required_capability = "studio_preview";
+	else if (request_name == "TriggerStudioModeTransition")
+		required_capability = "studio_transition";
+	if (required_capability != nullptr) {
+		const char *capability = request_data != nullptr ? obs_data_get_string(request_data, "capability")
+								 : nullptr;
+		if (capability == nullptr || std::string(capability) != required_capability) {
+			set_error(response_data, "OBS_ARGUMENT_INVALID");
+			return;
+		}
+	}
+	if (request_name == "SetCurrentTransition" && request_data != nullptr) {
+		const char *value = obs_data_get_string(request_data, "transitionName");
+		if (value != nullptr)
+			transition_name = value;
+		if (transition_name.empty() || transition_name.size() > 256) {
+			set_error(response_data, "OBS_ARGUMENT_INVALID");
+			return;
+		}
+		if (obs_data_has_user_value(request_data, "durationMs")) {
+			duration_ms = static_cast<int>(obs_data_get_int(request_data, "durationMs"));
+			if (duration_ms < 0 || duration_ms > 3600000) {
+				set_error(response_data, "OBS_ARGUMENT_INVALID");
+				return;
+			}
+			has_duration = true;
+		}
+	}
+	if (request_name == "SetStudioMode" && request_data != nullptr)
+		studio_enabled = obs_data_get_bool(request_data, "studioModeEnabled");
 	std::string image_format = "png";
 	if (request_name == "CaptureSourceScreenshot" || request_name == "CaptureScreenshot") {
 		const char *source = request_data != nullptr ? obs_data_get_string(request_data, "sourceName")
@@ -994,7 +1725,9 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 		}
 	}
 	run_ui_operation(operation_for(request), scene_name, output_name, target_name, hotkey_name, image_format,
-			 deadline_at_ms, response_data);
+			 source_name, source_kind, transition_name, scene_item_id, enabled, studio_enabled,
+			 has_duration, duration_ms, has_pos, has_scale, has_rotation, pos_x, pos_y, scale_x, scale_y,
+			 rotation, deadline_at_ms, response_data);
 }
 
 void frontend_event(enum obs_frontend_event, void *)
@@ -1011,6 +1744,26 @@ void frontend_event(enum obs_frontend_event, void *)
 constexpr const char *kRequests[] = {
 	"GetPluginStatus",
 	"ListScenes",
+	"SetCurrentScene",
+	"GetCurrentScene",
+	"CreateScene",
+	"RenameScene",
+	"RemoveScene",
+	"ListSceneItems",
+	"GetSceneItem",
+	"CreateSceneItem",
+	"SetSceneItemEnabled",
+	"SetSceneItemTransform",
+	"RemoveSceneItem",
+	"ListTransitions",
+	"GetCurrentTransition",
+	"SetCurrentTransition",
+	"TriggerTransition",
+	"GetStudioModeStatus",
+	"SetStudioMode",
+	"GetCurrentPreviewScene",
+	"SetCurrentPreviewScene",
+	"TriggerStudioModeTransition",
 	"ListSources",
 	"GetRecordingStatus",
 	"GetOperatorStatus",

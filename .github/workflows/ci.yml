@@ -124,6 +124,12 @@ jobs:
         with:
           target: ${{ matrix.target }}
           config: RelWithDebInfo
+      - name: Run native contract tests
+        shell: bash
+        run: |
+          cmake -S native/tests -B native-tests-build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          cmake --build native-tests-build --config RelWithDebInfo --parallel
+          ctest --test-dir native-tests-build -C RelWithDebInfo --output-on-failure
       - name: Create canonical installer bundle
         run: >-
           python tools/create_plugin_bundle.py

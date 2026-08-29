@@ -821,3 +821,227 @@ tools:
     annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
     call_examples: [{arguments: {}, note: Paths and secrets are redacted from operator status.}]
     next-tools: {on-failure: [obs_control__get_status]}
+
+  # Issue 6 typed scene graph and Studio Mode surface. Every mutating tool
+  # requires native capability enforcement and returns a verified readback.
+  - name: get_current_scene
+    description: Read the current typed program scene.
+    source_file: scripts/get_current_scene.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema: &scene_read_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: &scene_context
+          type: object
+          additionalProperties: false
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence]
+          properties:
+            instanceId: {type: string, minLength: 1, maxLength: 128}
+            pluginVersion: {type: string, minLength: 1}
+            obsVersion: {type: string, minLength: 1}
+            hostPid: {type: integer, minimum: 1}
+            eventSequence: {type: integer, minimum: 0}
+            ok: {type: boolean}
+            ready: {type: boolean}
+            uiThreadReady: {type: boolean}
+            configPathRedacted: {type: boolean}
+            sceneName: {type: string, minLength: 1, maxLength: 256}
+            currentSceneName: {type: string, minLength: 1, maxLength: 256}
+            sceneItemId: {type: integer, minimum: 1}
+            sourceName: {type: string, minLength: 1, maxLength: 256}
+            sourceKind: {type: string, minLength: 1, maxLength: 256}
+            enabled: {type: boolean}
+            exists: {type: boolean}
+            removed: {type: boolean}
+            accepted: {type: boolean}
+            verified: {type: boolean}
+            scenes: {type: array}
+            sceneItems: {type: array}
+            transitions: {type: array}
+            truncated: {type: boolean}
+            transitionName: {type: string, minLength: 1, maxLength: 256}
+            currentTransitionName: {type: string, minLength: 1, maxLength: 256}
+            durationMs: {type: integer, minimum: 0, maximum: 3600000}
+            studioModeEnabled: {type: boolean}
+            previewSceneName: {type: string, minLength: 1, maxLength: 256}
+            programSceneName: {type: string, minLength: 1, maxLength: 256}
+        postcondition:
+          type: object
+          additionalProperties: false
+          required: [verified]
+          properties: {verified: {const: true}}
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 10
+    annotations: {read_only_hint: true, destructive_hint: false}
+    call_examples: [{arguments: {}, note: Read the bound scene.}]
+    annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+  - name: set_current_scene
+    description: Switch to one discovered scene and verify readback.
+    source_file: scripts/set_current_scene.py
+    input_schema: {type: object, properties: {scene_name: {type: string, minLength: 1, maxLength: 256}}, required: [scene_name], additionalProperties: false}
+    output_schema: &scene_mutation_output {type: object, additionalProperties: false, required: [success, message, error, prompt, context, postcondition], properties: {success: {const: true}, message: {type: string}, error: {type: "null"}, prompt: {type: [string, "null"]}, context: *scene_context, postcondition: {type: object, additionalProperties: false, required: [verified], properties: {verified: {const: true}}}}}
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 30
+    call_examples: [{arguments: {scene_name: Main}, note: Switch only after discovery.}]
+    annotations: {read_only_hint: false, destructive_hint: true}
+  - name: list_scene_items
+    description: List typed scene items for one scene.
+    source_file: scripts/list_scene_items.py
+    input_schema: {type: object, properties: {scene_name: {type: string, minLength: 1, maxLength: 256}}, required: [scene_name], additionalProperties: false}
+    output_schema: *scene_read_output
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 10
+    annotations: {read_only_hint: true, destructive_hint: false}
+    call_examples: [{arguments: {scene_name: Main}, note: Read bounded scene items.}]
+    annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+  - name: create_scene_item
+    description: Create a typed scene item and verify identity.
+    source_file: scripts/create_scene_item.py
+    input_schema: {type: object, properties: {scene_name: {type: string}, source_name: {type: string}, source_kind: {type: [string, "null"]}, enabled: {type: boolean}}, required: [scene_name, source_name], additionalProperties: false}
+    output_schema: *scene_mutation_output
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 30
+    call_examples: [{arguments: {scene_name: Main, source_name: Camera}, note: Create with explicit intent.}]
+    annotations: {read_only_hint: false, destructive_hint: true}
+  - name: set_scene_item_enabled
+    description: Set one exact scene item visibility and verify readback.
+    source_file: scripts/set_scene_item_enabled.py
+    input_schema: {type: object, properties: {scene_name: {type: string}, scene_item_id: {type: integer, minimum: 1}, enabled: {type: boolean}}, required: [scene_name, scene_item_id, enabled], additionalProperties: false}
+    output_schema: *scene_mutation_output
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 30
+    call_examples: [{arguments: {scene_name: Main, scene_item_id: 1, enabled: false}, note: Update one exact item.}]
+    annotations: {read_only_hint: false, destructive_hint: true}
+  - name: remove_scene_item
+    description: Remove one exact scene item and verify absence.
+    source_file: scripts/remove_scene_item.py
+    input_schema: {type: object, properties: {scene_name: {type: string}, scene_item_id: {type: integer, minimum: 1}}, required: [scene_name, scene_item_id], additionalProperties: false}
+    output_schema: *scene_mutation_output
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 30
+    call_examples: [{arguments: {scene_name: Main, scene_item_id: 1}, note: Remove one exact item.}]
+    annotations: {read_only_hint: false, destructive_hint: true}
+  - name: list_transitions
+    description: List typed OBS transitions.
+    source_file: scripts/list_transitions.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema: *scene_read_output
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 10
+    annotations: {read_only_hint: true, destructive_hint: false}
+    call_examples: [{arguments: {}, note: Read bounded transitions.}]
+    annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+  - name: set_current_transition
+    description: Select one typed transition and verify readback.
+    source_file: scripts/set_current_transition.py
+    input_schema: {type: object, properties: {transition_name: {type: string}, duration_ms: {type: [integer, "null"], minimum: 0}}, required: [transition_name], additionalProperties: false}
+    output_schema: *scene_mutation_output
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 30
+    call_examples: [{arguments: {transition_name: Fade}, note: Select one discovered transition.}]
+    annotations: {read_only_hint: false, destructive_hint: true}
+  - name: trigger_transition
+    description: Trigger a typed transition to one exact scene.
+    source_file: scripts/trigger_transition.py
+    input_schema: {type: object, properties: {scene_name: {type: string}}, required: [scene_name], additionalProperties: false}
+    output_schema: *scene_mutation_output
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 30
+    call_examples: [{arguments: {scene_name: Main}, note: Trigger a typed transition.}]
+    annotations: {read_only_hint: false, destructive_hint: true}
+  - name: get_studio_mode
+    description: Read typed Studio Mode preview/program state.
+    source_file: scripts/get_studio_mode.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema: *scene_read_output
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 10
+    annotations: {read_only_hint: true, destructive_hint: false}
+    call_examples: [{arguments: {}, note: Read preview/program status.}]
+    annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+  - name: set_studio_mode
+    description: Enable or disable Studio Mode and verify readback.
+    source_file: scripts/set_studio_mode.py
+    input_schema: {type: object, properties: {enabled: {type: boolean}}, required: [enabled], additionalProperties: false}
+    output_schema: *scene_mutation_output
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 30
+    call_examples: [{arguments: {enabled: true}, note: Change Studio Mode explicitly.}]
+    annotations: {read_only_hint: false, destructive_hint: true}
+  - name: set_preview_scene
+    description: Set the exact Studio Mode preview scene and verify readback.
+    source_file: scripts/set_preview_scene.py
+    input_schema: {type: object, properties: {scene_name: {type: string}}, required: [scene_name], additionalProperties: false}
+    output_schema: *scene_mutation_output
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 30
+    call_examples: [{arguments: {scene_name: Preview}, note: Set one exact preview scene.}]
+    annotations: {read_only_hint: false, destructive_hint: true}
+  - name: transition_to_program
+    description: Transition Studio Mode preview to program and verify status.
+    source_file: scripts/transition_to_program.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema: *scene_mutation_output
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 30
+    call_examples: [{arguments: {}, note: Transition preview to program.}]
+    annotations: {read_only_hint: false, destructive_hint: true}
+  - name: create_scene
+    description: Create a typed scene and verify discovery readback.
+    source_file: scripts/create_scene.py
+    input_schema: {type: object, properties: {scene_name: {type: string}}, required: [scene_name], additionalProperties: false}
+    output_schema: *scene_mutation_output
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true}
+    call_examples: [{arguments: {scene_name: New}, note: Create with explicit intent.}]
+  - name: rename_scene
+    description: Rename one exact scene and verify discovery readback.
+    source_file: scripts/rename_scene.py
+    input_schema: {type: object, properties: {scene_name: {type: string}, new_scene_name: {type: string}}, required: [scene_name, new_scene_name], additionalProperties: false}
+    output_schema: *scene_mutation_output
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true}
+    call_examples: [{arguments: {scene_name: Main, new_scene_name: Main2}, note: Rename one exact scene.}]
+  - name: remove_scene
+    description: Remove one exact scene and verify absence.
+    source_file: scripts/remove_scene.py
+    input_schema: {type: object, properties: {scene_name: {type: string}}, required: [scene_name], additionalProperties: false}
+    output_schema: *scene_mutation_output
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true}
+    call_examples: [{arguments: {scene_name: Old}, note: Remove with explicit intent.}]
+  - name: set_scene_item_transform
+    description: Set a bounded transform on one exact scene item.
+    source_file: scripts/set_scene_item_transform.py
+    input_schema: {type: object, properties: {scene_name: {type: string}, scene_item_id: {type: integer, minimum: 1}, position: {type: [array, "null"]}, scale: {type: [array, "null"]}, rotation: {type: [number, "null"]}}, required: [scene_name, scene_item_id], additionalProperties: false}
+    output_schema: *scene_mutation_output
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true}
+    call_examples: [{arguments: {scene_name: Main, scene_item_id: 1, rotation: 15}, note: Transform one exact item.}]
