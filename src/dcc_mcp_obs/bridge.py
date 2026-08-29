@@ -49,6 +49,10 @@ PUBLIC_DOWNSTREAM_ERRORS = frozenset(
         "OBS_RESPONSE_INVALID",
         "OBS_RESPONSE_MISMATCH",
         "OBS_SCENE_NOT_FOUND",
+        "OBS_SCENE_ITEM_NOT_FOUND",
+        "OBS_SOURCE_NOT_FOUND",
+        "OBS_TRANSITION_NOT_FOUND",
+        "OBS_STUDIO_MODE_INACTIVE",
         "OBS_OUTPUT_NOT_FOUND",
         "OBS_OUTPUT_NOT_ACTIVE",
         "OBS_MUTATION_REJECTED",
@@ -177,6 +181,382 @@ class ObsControlBridge:
     def list_scenes(self) -> dict[str, object]:
         return self._checked("ListScenes", deadline=self._operation_deadline())
 
+    # Scene graph operations are deliberately typed wrappers.  Callers can
+    # only address bounded names/ids and every mutation is followed by a
+    # separate native readback on the same, identity-bound transport.
+    def get_current_scene(self) -> dict[str, object]:
+        return self._checked("GetCurrentScene", deadline=self._operation_deadline())
+
+    def set_current_scene(self, scene_name: str) -> dict[str, object]:
+        self._select_exact_name(
+            self.list_scenes(),
+            "scenes",
+            "sceneName",
+            scene_name,
+            missing_code="OBS_SCENE_NOT_FOUND",
+        )
+        return self._scene_name_mutation(
+            "SetCurrentScene", "GetCurrentScene", scene_name, capability="scene_switch"
+        )
+
+    switch_scene = set_current_scene
+
+    def create_scene(self, scene_name: str) -> dict[str, object]:
+        scene_name = self._require_name(scene_name)
+        deadline = self._operation_deadline()
+        accepted = self._checked(
+            "CreateScene", {"sceneName": scene_name, "capability": "scene_graph"}, deadline=deadline
+        )
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        for attempt in range(self._postcondition_attempts):
+            scenes = self._checked("ListScenes", deadline=deadline)
+            if any(item.get("sceneName") == scene_name for item in scenes.get("scenes", [])):
+                return {**scenes, "sceneName": scene_name, "verified": True}
+            if attempt + 1 < self._postcondition_attempts:
+                self._poll(deadline)
+        raise BridgeError("OBS_POSTCONDITION_FAILED")
+
+    def remove_scene(self, scene_name: str) -> dict[str, object]:
+        scene_name = self._require_name(scene_name)
+        self._select_exact_name(
+            self.list_scenes(),
+            "scenes",
+            "sceneName",
+            scene_name,
+            missing_code="OBS_SCENE_NOT_FOUND",
+        )
+        deadline = self._operation_deadline()
+        accepted = self._checked(
+            "RemoveScene", {"sceneName": scene_name, "capability": "scene_graph"}, deadline=deadline
+        )
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        for attempt in range(self._postcondition_attempts):
+            scenes = self._checked("ListScenes", deadline=deadline)
+            if not any(item.get("sceneName") == scene_name for item in scenes.get("scenes", [])):
+                return {**scenes, "removed": True, "verified": True}
+            if attempt + 1 < self._postcondition_attempts:
+                self._poll(deadline)
+        raise BridgeError("OBS_POSTCONDITION_FAILED")
+
+    def rename_scene(self, scene_name: str, new_scene_name: str) -> dict[str, object]:
+        scene_name = self._require_name(scene_name)
+        new_scene_name = self._require_name(new_scene_name)
+        if scene_name == new_scene_name:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        scenes = self.list_scenes()
+        self._select_exact_name(
+            scenes, "scenes", "sceneName", scene_name, missing_code="OBS_SCENE_NOT_FOUND"
+        )
+        if any(
+            isinstance(item, dict) and item.get("sceneName") == new_scene_name
+            for item in scenes.get("scenes", [])
+        ):
+            raise BridgeError("OBS_TARGET_AMBIGUOUS")
+        deadline = self._operation_deadline()
+        accepted = self._checked(
+            "RenameScene",
+            {"sceneName": scene_name, "newSceneName": new_scene_name, "capability": "scene_graph"},
+            deadline=deadline,
+        )
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        for attempt in range(self._postcondition_attempts):
+            scenes = self._checked("ListScenes", deadline=deadline)
+            names = {item.get("sceneName") for item in scenes.get("scenes", [])}
+            if new_scene_name in names and scene_name not in names:
+                return {**scenes, "sceneName": new_scene_name, "verified": True}
+            if attempt + 1 < self._postcondition_attempts:
+                self._poll(deadline)
+        raise BridgeError("OBS_POSTCONDITION_FAILED")
+
+    def list_scene_items(self, *, scene_name: str) -> dict[str, object]:
+        scene_name = self._require_name(scene_name)
+        return self._checked(
+            "ListSceneItems", {"sceneName": scene_name}, deadline=self._operation_deadline()
+        )
+
+    def get_scene_item(self, *, scene_name: str, scene_item_id: int) -> dict[str, object]:
+        scene_name = self._require_name(scene_name)
+        scene_item_id = self._require_item_id(scene_item_id)
+        return self._checked(
+            "GetSceneItem",
+            {"sceneName": scene_name, "sceneItemId": scene_item_id},
+            deadline=self._operation_deadline(),
+        )
+
+    def create_scene_item(
+        self,
+        *,
+        scene_name: str,
+        source_name: str,
+        source_kind: str | None = None,
+        enabled: bool = True,
+    ) -> dict[str, object]:
+        scene_name = self._require_name(scene_name)
+        source_name = self._require_name(source_name)
+        if source_kind is not None:
+            source_kind = self._require_name(source_kind)
+        if type(enabled) is not bool:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        data: dict[str, object] = {
+            "sceneName": scene_name,
+            "sourceName": source_name,
+            "enabled": enabled,
+            "capability": "scene_graph",
+        }
+        if source_kind is not None:
+            data["sourceKind"] = source_kind
+        deadline = self._operation_deadline()
+        accepted = self._checked("CreateSceneItem", data, deadline=deadline)
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        item_id = accepted.get("sceneItemId")
+        if type(item_id) is not int or isinstance(item_id, bool) or item_id <= 0:
+            raise BridgeError("OBS_RESPONSE_INVALID")
+        return self._readback_scene_item(
+            scene_name,
+            item_id,
+            deadline=deadline,
+            expected_source=source_name,
+            expected_kind=source_kind,
+            expected_enabled=enabled,
+        )
+
+    def update_scene_item(
+        self,
+        *,
+        scene_name: str,
+        scene_item_id: int,
+        enabled: bool | None = None,
+    ) -> dict[str, object]:
+        if enabled is None:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        return self.set_scene_item_enabled(
+            scene_name=scene_name, scene_item_id=scene_item_id, enabled=enabled
+        )
+
+    def set_scene_item_enabled(
+        self, *, scene_name: str, scene_item_id: int, enabled: bool
+    ) -> dict[str, object]:
+        scene_name = self._require_name(scene_name)
+        scene_item_id = self._require_item_id(scene_item_id)
+        if type(enabled) is not bool:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        deadline = self._operation_deadline()
+        accepted = self._checked(
+            "SetSceneItemEnabled",
+            {
+                "sceneName": scene_name,
+                "sceneItemId": scene_item_id,
+                "enabled": enabled,
+                "capability": "scene_graph",
+            },
+            deadline=deadline,
+        )
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        return self._readback_scene_item(
+            scene_name, scene_item_id, deadline=deadline, expected_enabled=enabled
+        )
+
+    def set_scene_item_transform(
+        self,
+        *,
+        scene_name: str,
+        scene_item_id: int,
+        position: tuple[float, float] | None = None,
+        scale: tuple[float, float] | None = None,
+        rotation: float | None = None,
+    ) -> dict[str, object]:
+        scene_name = self._require_name(scene_name)
+        scene_item_id = self._require_item_id(scene_item_id)
+        data: dict[str, object] = {
+            "sceneName": scene_name,
+            "sceneItemId": scene_item_id,
+            "capability": "scene_graph",
+        }
+        for key, value in (("position", position), ("scale", scale)):
+            if value is not None:
+                if (
+                    not isinstance(value, (tuple, list))
+                    or len(value) != 2
+                    or any(type(component) not in (int, float) for component in value)
+                ):
+                    raise BridgeError("OBS_ARGUMENT_INVALID")
+                prefix = "pos" if key == "position" else "scale"
+                data[f"{prefix}X"] = float(value[0])
+                data[f"{prefix}Y"] = float(value[1])
+        if rotation is not None:
+            if type(rotation) not in (int, float) or not math.isfinite(float(rotation)):
+                raise BridgeError("OBS_ARGUMENT_INVALID")
+            data["rotation"] = float(rotation)
+        if len(data) == 3:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        deadline = self._operation_deadline()
+        accepted = self._checked("SetSceneItemTransform", data, deadline=deadline)
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        return self._readback_scene_item(
+            scene_name,
+            scene_item_id,
+            deadline=deadline,
+            expected_pos=(float(position[0]), float(position[1])) if position is not None else None,
+            expected_scale=(float(scale[0]), float(scale[1])) if scale is not None else None,
+            expected_rotation=float(rotation) if rotation is not None else None,
+        )
+
+    def remove_scene_item(self, *, scene_name: str, scene_item_id: int) -> dict[str, object]:
+        scene_name = self._require_name(scene_name)
+        scene_item_id = self._require_item_id(scene_item_id)
+        deadline = self._operation_deadline()
+        accepted = self._checked(
+            "RemoveSceneItem",
+            {"sceneName": scene_name, "sceneItemId": scene_item_id, "capability": "scene_graph"},
+            deadline=deadline,
+        )
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        for attempt in range(self._postcondition_attempts):
+            try:
+                readback = self._checked(
+                    "GetSceneItem",
+                    {"sceneName": scene_name, "sceneItemId": scene_item_id},
+                    deadline=deadline,
+                )
+            except BridgeError as exc:
+                if exc.code == "OBS_SCENE_ITEM_NOT_FOUND":
+                    return {
+                        "sceneName": scene_name,
+                        "sceneItemId": scene_item_id,
+                        "removed": True,
+                        "verified": True,
+                    }
+                raise
+            if readback.get("exists") is False or readback.get("removed") is True:
+                return {**readback, "verified": True}
+            if attempt + 1 < self._postcondition_attempts:
+                self._poll(deadline)
+        raise BridgeError("OBS_POSTCONDITION_FAILED")
+
+    def list_transitions(self) -> dict[str, object]:
+        return self._checked("ListTransitions", deadline=self._operation_deadline())
+
+    def get_current_transition(self) -> dict[str, object]:
+        return self._checked("GetCurrentTransition", deadline=self._operation_deadline())
+
+    def set_current_transition(
+        self, transition_name: str, *, duration_ms: int | None = None
+    ) -> dict[str, object]:
+        transition_name = self._require_name(transition_name)
+        if duration_ms is not None and (
+            type(duration_ms) is not int or duration_ms < 0 or duration_ms > 3_600_000
+        ):
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        data: dict[str, object] = {"transitionName": transition_name, "capability": "transitions"}
+        if duration_ms is not None:
+            data["durationMs"] = duration_ms
+        return self._name_mutation(
+            "SetCurrentTransition", "GetCurrentTransition", "transitionName", transition_name, data
+        )
+
+    def trigger_transition(self, scene_name: str) -> dict[str, object]:
+        self._select_exact_name(
+            self.list_scenes(),
+            "scenes",
+            "sceneName",
+            scene_name,
+            missing_code="OBS_SCENE_NOT_FOUND",
+        )
+        deadline = self._operation_deadline()
+        accepted = self._checked(
+            "TriggerTransition",
+            {"sceneName": scene_name, "capability": "transitions"},
+            deadline=deadline,
+        )
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        return {
+            **self._checked("GetCurrentTransition", deadline=deadline),
+            "sceneName": scene_name,
+            "accepted": True,
+            "verified": True,
+        }
+
+    def get_studio_mode_status(self) -> dict[str, object]:
+        return self._checked("GetStudioModeStatus", deadline=self._operation_deadline())
+
+    get_studio_mode = get_studio_mode_status
+
+    def set_studio_mode(self, enabled: bool) -> dict[str, object]:
+        if type(enabled) is not bool:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        deadline = self._operation_deadline()
+        accepted = self._checked(
+            "SetStudioMode",
+            {"studioModeEnabled": enabled, "capability": "studio_mode"},
+            deadline=deadline,
+        )
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        for attempt in range(self._postcondition_attempts):
+            status = self._checked("GetStudioModeStatus", deadline=deadline)
+            if status.get("studioModeEnabled") is enabled:
+                return {**status, "verified": True}
+            if attempt + 1 < self._postcondition_attempts:
+                self._poll(deadline)
+        raise BridgeError("OBS_POSTCONDITION_FAILED")
+
+    def get_current_preview_scene(self) -> dict[str, object]:
+        return self._checked("GetCurrentPreviewScene", deadline=self._operation_deadline())
+
+    get_preview_scene = get_current_preview_scene
+
+    def set_current_preview_scene(self, scene_name: str) -> dict[str, object]:
+        self._select_exact_name(
+            self.list_scenes(),
+            "scenes",
+            "sceneName",
+            scene_name,
+            missing_code="OBS_SCENE_NOT_FOUND",
+        )
+        return self._scene_name_mutation(
+            "SetCurrentPreviewScene",
+            "GetCurrentPreviewScene",
+            scene_name,
+            capability="studio_preview",
+        )
+
+    set_preview_scene = set_current_preview_scene
+
+    def trigger_studio_mode_transition(self) -> dict[str, object]:
+        deadline = self._operation_deadline()
+        before = self._checked("GetStudioModeStatus", deadline=deadline)
+        before_program = before.get("programSceneName")
+        before_preview = before.get("previewSceneName")
+        if not isinstance(before_program, str) or not isinstance(before_preview, str):
+            raise BridgeError("OBS_POSTCONDITION_FAILED")
+        accepted = self._checked(
+            "TriggerStudioModeTransition", {"capability": "studio_transition"}, deadline=deadline
+        )
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        # An accepted acknowledgement alone can describe a no-op.  Require the
+        # native Studio Mode readback to prove the preview/program swap.
+        for attempt in range(self._postcondition_attempts):
+            status = self._checked("GetStudioModeStatus", deadline=deadline)
+            if (
+                status.get("programSceneName") == before_preview
+                and status.get("previewSceneName") == before_program
+            ):
+                return {**status, "accepted": True, "verified": True}
+            if attempt + 1 < self._postcondition_attempts:
+                self._poll(deadline)
+        raise BridgeError("OBS_POSTCONDITION_FAILED")
+
+    transition_to_program = trigger_studio_mode_transition
+
     # Profiles and scene collections are deliberately name-based only after a
     # bounded discovery call.  This prevents a stale or ambiguous operator
     # target from being silently selected by the native side.
@@ -265,6 +645,119 @@ class ObsControlBridge:
         return self._checked("GetOperatorStatus", deadline=self._operation_deadline())
 
     operator_status = get_operator_status
+
+    @staticmethod
+    def _require_name(value: str) -> str:
+        if not isinstance(value, str) or not 1 <= len(value) <= 256:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        return value
+
+    @staticmethod
+    def _require_item_id(value: int) -> int:
+        if type(value) is not int or value <= 0:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        return value
+
+    def _poll(self, deadline: float) -> None:
+        remaining = deadline - self._clock()
+        if remaining <= 0:
+            raise BridgeError("OBS_TIMEOUT")
+        self._sleeper(min(self._postcondition_poll_seconds, remaining))
+
+    def _scene_name_mutation(
+        self, request_type: str, status_request: str, scene_name: str, *, capability: str
+    ) -> dict[str, object]:
+        return self._name_mutation(
+            request_type,
+            status_request,
+            "sceneName",
+            scene_name,
+            {"sceneName": scene_name, "capability": capability},
+        )
+
+    def _name_mutation(
+        self,
+        request_type: str,
+        status_request: str,
+        field: str,
+        target: str,
+        data: Mapping[str, object],
+    ) -> dict[str, object]:
+        deadline = self._operation_deadline()
+        accepted = self._checked(request_type, data, deadline=deadline)
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        for attempt in range(self._postcondition_attempts):
+            readback = self._checked(status_request, deadline=deadline)
+            if readback.get(field) == target:
+                return {**readback, "verified": True}
+            if attempt + 1 < self._postcondition_attempts:
+                self._poll(deadline)
+        raise BridgeError("OBS_POSTCONDITION_FAILED")
+
+    def _readback_scene_item(
+        self,
+        scene_name: str,
+        scene_item_id: int,
+        *,
+        deadline: float,
+        expected_source: str | None = None,
+        expected_kind: str | None = None,
+        expected_enabled: bool | None = None,
+        expected_pos: tuple[float, float] | None = None,
+        expected_scale: tuple[float, float] | None = None,
+        expected_rotation: float | None = None,
+    ) -> dict[str, object]:
+        for attempt in range(self._postcondition_attempts):
+            readback = self._checked(
+                "GetSceneItem",
+                {"sceneName": scene_name, "sceneItemId": scene_item_id},
+                deadline=deadline,
+            )
+            valid = (
+                readback.get("sceneName") == scene_name
+                and readback.get("sceneItemId") == scene_item_id
+                and (expected_source is None or readback.get("sourceName") == expected_source)
+                and (expected_kind is None or readback.get("sourceKind") == expected_kind)
+                and (expected_enabled is None or readback.get("enabled") is expected_enabled)
+                and (
+                    expected_pos is None
+                    or (
+                        isinstance(readback.get("posX"), (int, float))
+                        and not isinstance(readback.get("posX"), bool)
+                        and isinstance(readback.get("posY"), (int, float))
+                        and not isinstance(readback.get("posY"), bool)
+                        and math.isclose(float(readback["posX"]), expected_pos[0], abs_tol=1e-3)
+                        and math.isclose(float(readback["posY"]), expected_pos[1], abs_tol=1e-3)
+                    )
+                )
+                and (
+                    expected_scale is None
+                    or (
+                        isinstance(readback.get("scaleX"), (int, float))
+                        and not isinstance(readback.get("scaleX"), bool)
+                        and isinstance(readback.get("scaleY"), (int, float))
+                        and not isinstance(readback.get("scaleY"), bool)
+                        and math.isclose(float(readback["scaleX"]), expected_scale[0], abs_tol=1e-3)
+                        and math.isclose(float(readback["scaleY"]), expected_scale[1], abs_tol=1e-3)
+                    )
+                )
+                and (
+                    expected_rotation is None
+                    or (
+                        isinstance(readback.get("rotation"), (int, float))
+                        and not isinstance(readback.get("rotation"), bool)
+                        and math.isclose(
+                            float(readback["rotation"]), expected_rotation, abs_tol=1e-3
+                        )
+                    )
+                )
+            )
+            if valid:
+                return {**readback, "verified": True}
+            if attempt + 1 < self._postcondition_attempts:
+                self._poll(deadline)
+        raise BridgeError("OBS_POSTCONDITION_FAILED")
 
     @staticmethod
     def _select_exact_name(
@@ -519,6 +1012,13 @@ class ObsControlBridge:
         if request_type in {
             "GetPluginStatus",
             "ListScenes",
+            "GetCurrentScene",
+            "ListSceneItems",
+            "GetSceneItem",
+            "ListTransitions",
+            "GetCurrentTransition",
+            "GetStudioModeStatus",
+            "GetCurrentPreviewScene",
             "ListProfiles",
             "GetCurrentProfile",
             "ListSceneCollections",
@@ -556,6 +1056,131 @@ class ObsControlBridge:
                     or not scene["sceneName"]
                     or len(scene["sceneName"]) > 256
                     for scene in scenes
+                )
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type == "GetCurrentScene":
+            allowed = _IDENTITY_KEYS | {"sceneName"}
+            if (
+                set(response) - allowed
+                or not isinstance(response.get("sceneName"), str)
+                or not 1 <= len(response["sceneName"]) <= 256
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type in {"ListSceneItems", "GetSceneItem"}:
+            allowed = _IDENTITY_KEYS | {
+                "sceneName",
+                "sceneItemId",
+                "sourceName",
+                "sourceKind",
+                "enabled",
+                "sceneItems",
+                "truncated",
+                "exists",
+                "removed",
+                "posX",
+                "posY",
+                "scaleX",
+                "scaleY",
+                "rotation",
+            }
+            if set(response) - allowed or not isinstance(response.get("sceneName"), str):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            if "sceneItemId" in response and (
+                type(response["sceneItemId"]) is not int or response["sceneItemId"] <= 0
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            if request_type == "ListSceneItems":
+                items = response.get("sceneItems")
+                if (
+                    not isinstance(items, list)
+                    or len(items) > 512
+                    or type(response.get("truncated")) is not bool
+                    or any(not ObsControlBridge._valid_scene_item(item) for item in items)
+                ):
+                    raise BridgeError("OBS_RESPONSE_INVALID")
+            elif response.get("exists") is False or response.get("removed") is True:
+                if set(response) - (
+                    _IDENTITY_KEYS | {"sceneName", "sceneItemId", "exists", "removed"}
+                ):
+                    raise BridgeError("OBS_RESPONSE_INVALID")
+            else:
+                item_payload = {
+                    key: response[key]
+                    for key in ("sceneName", "sceneItemId", "sourceName", "sourceKind", "enabled")
+                    if key in response
+                }
+                if not ObsControlBridge._valid_scene_item(item_payload):
+                    raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type in {"ListTransitions", "GetCurrentTransition"}:
+            allowed = _IDENTITY_KEYS | {
+                "transitions",
+                "truncated",
+                "transitionName",
+                "currentTransitionName",
+                "durationMs",
+            }
+            if set(response) - allowed:
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            if request_type == "ListTransitions":
+                transitions = response.get("transitions")
+                if (
+                    not isinstance(transitions, list)
+                    or len(transitions) > 128
+                    or type(response.get("truncated")) is not bool
+                    or any(
+                        not isinstance(item, dict)
+                        or set(item) - {"transitionName", "transitionKind"}
+                        or "transitionName" not in item
+                        or not isinstance(item.get("transitionName"), str)
+                        or not 1 <= len(item["transitionName"]) <= 256
+                        or (
+                            "transitionKind" in item
+                            and (
+                                not isinstance(item["transitionKind"], str)
+                                or not 1 <= len(item["transitionKind"]) <= 256
+                            )
+                        )
+                        for item in transitions
+                    )
+                ):
+                    raise BridgeError("OBS_RESPONSE_INVALID")
+            elif (
+                not isinstance(response.get("transitionName"), str)
+                or not 1 <= len(response["transitionName"]) <= 256
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            if "currentTransitionName" in response and (
+                not isinstance(response["currentTransitionName"], str)
+                or not 1 <= len(response["currentTransitionName"]) <= 256
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            if "durationMs" in response and (
+                type(response["durationMs"]) is not int
+                or not 0 <= response["durationMs"] <= 3_600_000
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type == "GetCurrentPreviewScene":
+            if (
+                set(response) - (_IDENTITY_KEYS | {"sceneName"})
+                or not isinstance(response.get("sceneName"), str)
+                or not 1 <= len(response["sceneName"]) <= 256
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type == "GetStudioModeStatus":
+            allowed = _IDENTITY_KEYS | {"studioModeEnabled", "previewSceneName", "programSceneName"}
+            if (
+                set(response) - allowed
+                or type(response.get("studioModeEnabled")) is not bool
+                or any(
+                    key in response
+                    and (not isinstance(response[key], str) or not 1 <= len(response[key]) <= 256)
+                    for key in ("previewSceneName", "programSceneName")
                 )
             ):
                 raise BridgeError("OBS_RESPONSE_INVALID")
@@ -800,6 +1425,20 @@ class ObsControlBridge:
             "StopOutput",
             "SetCurrentProfile",
             "SetCurrentSceneCollection",
+            "SetCurrentScene",
+            "CreateScene",
+            "RenameScene",
+            "RemoveScene",
+            "CreateSceneItem",
+            "UpdateSceneItem",
+            "SetSceneItemEnabled",
+            "SetSceneItemTransform",
+            "RemoveSceneItem",
+            "SetCurrentTransition",
+            "TriggerTransition",
+            "SetStudioMode",
+            "SetCurrentPreviewScene",
+            "TriggerStudioModeTransition",
             "TriggerAllowlistedHotkey",
         }:
             allowed = set(_IDENTITY_KEYS) | {"accepted"}
@@ -809,6 +1448,40 @@ class ObsControlBridge:
                 allowed.add("sceneCollectionName")
             elif request_type == "TriggerAllowlistedHotkey":
                 allowed.add("hotkeyName")
+            elif request_type in {"SetCurrentScene", "SetCurrentPreviewScene"}:
+                allowed.add("sceneName")
+            elif request_type in {"CreateScene", "RemoveScene"}:
+                allowed |= {"sceneName", "capability"}
+            elif request_type == "RenameScene":
+                allowed |= {"sceneName", "newSceneName", "capability"}
+            elif request_type == "SetCurrentTransition":
+                allowed |= {"transitionName", "durationMs"}
+            elif request_type in {
+                "CreateSceneItem",
+                "UpdateSceneItem",
+                "SetSceneItemEnabled",
+                "SetSceneItemTransform",
+                "RemoveSceneItem",
+            }:
+                allowed |= {
+                    "sceneName",
+                    "sceneItemId",
+                    "sourceName",
+                    "sourceKind",
+                    "enabled",
+                    "capability",
+                    "posX",
+                    "posY",
+                    "scaleX",
+                    "scaleY",
+                    "rotation",
+                }
+            elif request_type in {"TriggerStudioModeTransition", "TriggerTransition"}:
+                allowed.add("capability")
+                if request_type == "TriggerTransition":
+                    allowed.add("sceneName")
+            elif request_type == "SetStudioMode":
+                allowed |= {"studioModeEnabled", "capability"}
             if request_type == "SaveReplayBuffer":
                 allowed |= {"submitted"}
             if (
@@ -817,6 +1490,48 @@ class ObsControlBridge:
                 or type(response.get("accepted")) is not bool
             ):
                 raise BridgeError("OBS_RESPONSE_INVALID")
+            if request_type in {"SetCurrentScene", "SetCurrentPreviewScene"} and (
+                not isinstance(response.get("sceneName"), str)
+                or not 1 <= len(response["sceneName"]) <= 256
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            if request_type == "SetCurrentTransition" and (
+                not isinstance(response.get("transitionName"), str)
+                or not 1 <= len(response["transitionName"]) <= 256
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            if request_type == "TriggerTransition" and (
+                not isinstance(response.get("sceneName"), str)
+                or not 1 <= len(response["sceneName"]) <= 256
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            if request_type in {
+                "CreateSceneItem",
+                "UpdateSceneItem",
+                "SetSceneItemEnabled",
+                "SetSceneItemTransform",
+                "RemoveSceneItem",
+            }:
+                if request_type != "RemoveSceneItem":
+                    item_payload = {
+                        key: response[key]
+                        for key in (
+                            "sceneName",
+                            "sceneItemId",
+                            "sourceName",
+                            "sourceKind",
+                            "enabled",
+                        )
+                        if key in response
+                    }
+                    if not ObsControlBridge._valid_scene_item(item_payload):
+                        raise BridgeError("OBS_RESPONSE_INVALID")
+                if request_type == "RemoveSceneItem" and (
+                    type(response.get("sceneItemId")) is not int
+                    or response["sceneItemId"] <= 0
+                    or not isinstance(response.get("sceneName"), str)
+                ):
+                    raise BridgeError("OBS_RESPONSE_INVALID")
             if request_type == "TriggerAllowlistedHotkey" and (
                 not isinstance(response.get("hotkeyName"), str)
                 or not 1 <= len(response["hotkeyName"]) <= 128
@@ -850,6 +1565,35 @@ class ObsControlBridge:
             and bool(source["sourceKind"])
             and len(source["sourceKind"]) <= 256
             and type(source.get("enabled")) is bool
+        )
+
+    @staticmethod
+    def _valid_scene_item(item: object) -> bool:
+        if not isinstance(item, dict):
+            return False
+        required = {"sceneName", "sceneItemId", "sourceName", "sourceKind", "enabled"}
+        optional = {"posX", "posY", "scaleX", "scaleY", "rotation"}
+        if not required <= set(item) <= required | optional:
+            return False
+        return (
+            isinstance(item.get("sceneName"), str)
+            and 1 <= len(item["sceneName"]) <= 256
+            and type(item.get("sceneItemId")) is int
+            and item["sceneItemId"] > 0
+            and isinstance(item.get("sourceName"), str)
+            and 1 <= len(item["sourceName"]) <= 256
+            and isinstance(item.get("sourceKind"), str)
+            and 1 <= len(item["sourceKind"]) <= 256
+            and type(item.get("enabled")) is bool
+            and all(
+                key not in item
+                or (
+                    type(item[key]) in (int, float)
+                    and not isinstance(item[key], bool)
+                    and math.isfinite(float(item[key]))
+                )
+                for key in optional
+            )
         )
 
     def _operation_deadline(self) -> float:

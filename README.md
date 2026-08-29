@@ -17,6 +17,8 @@ script or raw WebSocket tool.
 - Exact native plugin, OBS version, PID, instance ID, readiness, and event sequence
 - Bounded scene discovery and current-scene readback
 - Bounded source discovery for the current or an exact named scene
+- Typed scene switching, scene-item CRUD, transitions, and Studio Mode
+  preview/program operations with verified readback
 - Recording status
 - Start, stop, pause, and resume recording
 - A separate typed status readback after every mutation
@@ -32,7 +34,7 @@ as shipped tools until their typed contracts land.
 - [Profiles, scene collections, bounded hotkeys, screenshots, and operator status](https://github.com/dcc-mcp/dcc-mcp-obs/issues/3)
 - [Disposable real-OBS acceptance](https://github.com/dcc-mcp/dcc-mcp-obs/issues/4)
 - [Inputs, properties, filters, audio, and media](https://github.com/dcc-mcp/dcc-mcp-obs/issues/5)
-- [Scene graph, switching, transitions, and Studio Mode](https://github.com/dcc-mcp/dcc-mcp-obs/issues/6)
+- [Typed scene graph controls](docs/scene-graph.md)
 
 ## Requirements
 
@@ -86,9 +88,10 @@ dcc-mcp-obs --host-pid <obs-pid>
 The bundled `obs-control` skill includes English and Chinese discovery aliases
 for OBS, Open Broadcaster Software, recording, streaming, replay buffer,
 virtual camera, outputs, scene/source inspection, pause, resume, 录屏, 直播,
-回放缓冲, and 虚拟摄像头. Agents search and load the skill before calling the
-typed tools. Scene switching remains a roadmap capability, not a shipped
-native control.
+回放缓冲, 虚拟摄像头, 场景图, 场景切换, 转场, and Studio Mode. Agents search
+and load the skill before calling the typed tools. Scene-graph mutations are
+available only through the native typed contract and require verified
+postconditions.
 
 OBS control is native-plugin/WebSocket first. Unsupported visual-only actions
 may use DCC-MCP `ui-control` with project-owned DCC-CUA only after exact PID
