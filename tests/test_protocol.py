@@ -125,6 +125,35 @@ def test_late_mutation_response_is_indeterminate() -> None:
         transport.vendor_request("SetCurrentProfile", {"profileName": "Main"}, deadline=0.005)
 
 
+@pytest.mark.parametrize("transport_error", [BrokenPipeError, ConnectionResetError])
+def test_post_send_connection_errors_are_indeterminate_for_mutations(transport_error) -> None:
+    class FailingSendSocket(ScriptedSocket):
+        def send(self, payload: str) -> None:
+            value = json.loads(payload)
+            if value.get("op") == 6:
+                raise transport_error("send failed")
+            super().send(payload)
+
+    socket = FailingSendSocket([_hello(), {"op": 2, "d": {"negotiatedRpcVersion": 1}}, _response()])
+    transport = ObsWebSocketTransport(
+        ObsEndpointConfig(password="secret"), connector=lambda _url, _timeout: socket
+    )
+
+    with pytest.raises(ProtocolError, match="OBS_UI_INDETERMINATE"):
+        transport.vendor_request("StartStreaming", {})
+
+
+def test_post_send_malformed_response_is_indeterminate_for_mutation() -> None:
+    malformed = {"op": 7, "d": {"requestType": "CallVendorRequest"}}
+    socket = ScriptedSocket([_hello(), {"op": 2, "d": {"negotiatedRpcVersion": 1}}, malformed])
+    transport = ObsWebSocketTransport(
+        ObsEndpointConfig(password="secret"), connector=lambda _url, _timeout: socket
+    )
+
+    with pytest.raises(ProtocolError, match="OBS_UI_INDETERMINATE"):
+        transport.vendor_request("SetCurrentSceneCollection", {"sceneCollectionName": "Main"})
+
+
 def test_rejects_hello_without_authentication_before_identify() -> None:
     hello = _hello()
     del hello["d"]["authentication"]

@@ -147,10 +147,9 @@ class ObsWebSocketTransport:
                 socket = self._ensure_connected(deadline)
                 request_id = uuid.uuid4().hex
                 request_payload = dict(data)
-                # Carry the caller's absolute deadline across the websocket
-                # vendor boundary as bounded relative milliseconds.  Native
-                # UI work must never wait on a fixed timeout after the caller
-                # has already expired.
+                # Carry the caller's absolute wall-clock deadline across the
+                # websocket vendor boundary. Native UI work must never
+                # reconstruct a fresh budget after this request arrives.
                 request_payload["__dccDeadlineAtMs"] = math.ceil(
                     (time.time() + self._remaining(deadline)) * 1000
                 )
@@ -185,11 +184,7 @@ class ObsWebSocketTransport:
                 return vendor_payload
             except ProtocolError as exc:
                 self._disconnect_locked()
-                if (
-                    exc.code == "OBS_TIMEOUT"
-                    and request_sent
-                    and request_type in MUTATING_VENDOR_REQUESTS
-                ):
+                if request_sent and request_type in MUTATING_VENDOR_REQUESTS:
                     raise ProtocolError("OBS_UI_INDETERMINATE") from exc
                 raise
             except (TimeoutError, websocket.WebSocketTimeoutException) as exc:
@@ -202,7 +197,12 @@ class ObsWebSocketTransport:
                 raise ProtocolError(code) from exc
             except Exception as exc:
                 self._disconnect_locked()
-                raise ProtocolError("OBS_CONNECTION_FAILED") from exc
+                code = (
+                    "OBS_UI_INDETERMINATE"
+                    if request_sent and request_type in MUTATING_VENDOR_REQUESTS
+                    else "OBS_CONNECTION_FAILED"
+                )
+                raise ProtocolError(code) from exc
         finally:
             self._lock.release()
 
