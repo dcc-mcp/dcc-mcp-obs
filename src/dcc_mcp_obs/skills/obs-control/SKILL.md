@@ -1,6 +1,6 @@
 ---
 name: obs-control
-description: Inspect and control typed OBS profiles, scene collections, scenes, recording, streaming, replay buffer, virtual camera, allowlisted hotkeys, safe screenshots, and outputs for OBS Studio and Open Broadcaster Software.
+description: Inspect and control typed OBS profiles, scene collections, scenes, recording, streaming, replay buffer, virtual camera, allowlisted hotkeys, and outputs for OBS Studio and Open Broadcaster Software.
 license: GPL-2.0-or-later
 compatibility: "Python 3.10+, OBS Studio 28+ with obs-websocket 5.x"
 metadata:
@@ -40,9 +40,9 @@ camera, allowlisted hotkeys, screenshots, outputs, scene/source inspection,
 7. Profile and scene-collection changes require exact-name discovery and a
    verified current-name readback; duplicate names fail closed.
 8. Hotkey actions accept only identifiers returned by the allowlist contract.
-   Screenshots are bounded to a named source and never expose local paths; the
-   current fire-and-forget OBS screenshot API fails closed without completion
-   and artifact readback, so it must never be reported as verified.
+   Screenshot capture is intentionally not exposed until OBS provides a
+   completion/artifact readback contract; never synthesize success or verified
+   output for the fire-and-forget API.
 
 ## UI fallback
 

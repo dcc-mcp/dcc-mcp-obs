@@ -158,6 +158,25 @@ def test_empty_current_profile_is_rejected_by_bridge_contract():
         bridge.get_current_profile()
 
 
+def test_empty_operator_config_version_is_rejected_by_bridge_contract():
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {
+                **IDENTITY,
+                "ready": True,
+                "uiThreadReady": True,
+                "configPathRedacted": True,
+                "configVersion": "",
+                "eventSequence": 2,
+            },
+        ]
+    )
+    bridge = ObsControlBridge(transport, expected_pid=1234)
+    with pytest.raises(BridgeError, match="OBS_RESPONSE_INVALID"):
+        bridge.get_operator_status()
+
+
 def test_unknown_hotkey_fails_closed_before_transport_call():
     transport = FakeTransport([{**IDENTITY, "ready": True}])
     bridge = ObsControlBridge(transport, expected_pid=1234)

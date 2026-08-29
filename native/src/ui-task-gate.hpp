@@ -28,10 +28,14 @@ public:
 
 	bool claim_mutation(std::chrono::steady_clock::time_point deadline)
 	{
-		if (std::chrono::steady_clock::now() >= deadline)
-			return false;
 		State expected = State::Pending;
-		return state_.compare_exchange_strong(expected, State::Started);
+		if (!state_.compare_exchange_strong(expected, State::Started))
+			return false;
+		if (std::chrono::steady_clock::now() >= deadline) {
+			state_.store(State::Cancelled);
+			return false;
+		}
+		return true;
 	}
 
 private:

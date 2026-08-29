@@ -38,3 +38,5 @@ def test_native_deadline_and_response_contracts_are_explicit() -> None:
     assert "claim_mutation(state->deadline)" in source
     assert 'obs_data_set_string(result, "hotkeyName"' in source
     assert "OBS_SCREENSHOT_UNVERIFIED" in source
+    assert "OBS_UI_INDETERMINATE" in source
+    assert "names[count] != nullptr" in source

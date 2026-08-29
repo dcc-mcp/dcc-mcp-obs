@@ -62,6 +62,7 @@ PUBLIC_DOWNSTREAM_ERRORS = frozenset(
         "OBS_SCREENSHOT_INVALID",
         "OBS_SCREENSHOT_UNVERIFIED",
         "OBS_RESPONSE_INCOMPLETE",
+        "OBS_UI_INDETERMINATE",
     }
 )
 _IDENTITY_KEYS = frozenset(
@@ -743,7 +744,13 @@ class ObsControlBridge:
                         )
                     )
                 )
-                or ("configVersion" in response and not isinstance(response["configVersion"], str))
+                or (
+                    "configVersion" in response
+                    and (
+                        not isinstance(response["configVersion"], str)
+                        or not 1 <= len(response["configVersion"]) <= 128
+                    )
+                )
             ):
                 raise BridgeError("OBS_RESPONSE_INVALID")
             return

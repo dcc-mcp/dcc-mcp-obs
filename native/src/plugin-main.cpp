@@ -214,7 +214,7 @@ NameLookup lookup_name(char **names, const std::string &target, size_t limit)
 		if (target == names[count])
 			++matches;
 	}
-	if (count >= limit && names[count - 1] != nullptr)
+	if (count >= limit && names[count] != nullptr)
 		return NameLookup::Incomplete;
 	if (matches > 1)
 		return NameLookup::Ambiguous;
@@ -812,7 +812,8 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, cons
 			set_error(response, "OBS_UI_TIMEOUT");
 			return false;
 		}
-		set_error(response, "OBS_UI_TIMEOUT");
+		set_error(response, "OBS_UI_INDETERMINATE");
+		obs_data_set_bool(response, "indeterminate", true);
 		return false;
 	}
 	if (!state->condition.wait_for(
@@ -823,10 +824,10 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, cons
 			set_error(response, "OBS_UI_TIMEOUT");
 			return false;
 		}
-		set_error(response, "OBS_UI_TIMEOUT");
+		set_error(response, "OBS_UI_INDETERMINATE");
+		obs_data_set_bool(response, "indeterminate", true);
 		return false;
 	}
-	// The old unbounded state->condition.wait(lock, [&state] { return state->complete; }); is intentionally avoided.
 	obs_data_apply(response, state->result);
 	return obs_data_get_bool(response, "ok");
 }

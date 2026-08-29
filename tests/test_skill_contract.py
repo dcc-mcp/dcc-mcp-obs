@@ -73,7 +73,6 @@ def test_obs_skill_has_bilingual_discovery_aliases_and_no_raw_escape_hatch() -> 
         "set_current_scene_collection",
         "list_allowlisted_hotkeys",
         "trigger_allowlisted_hotkey",
-        "capture_source_screenshot",
         "get_operator_status",
     ]
 
@@ -298,20 +297,6 @@ def test_skill_outputs_publish_strict_typed_envelopes_with_context_parity() -> N
                 "hotkeyName",
                 "accepted",
             },
-            "capture_source_screenshot": {
-                "instanceId",
-                "pluginVersion",
-                "obsVersion",
-                "hostPid",
-                "eventSequence",
-                "ok",
-                "accepted",
-                "screenshotId",
-                "imageFormat",
-                "pathRedacted",
-                "width",
-                "height",
-            },
             "get_operator_status": {
                 "instanceId",
                 "pluginVersion",
@@ -484,13 +469,6 @@ def test_every_skill_output_schema_accepts_the_real_core_success_envelope() -> N
                 **identity,
                 "hotkeyName": "start_streaming",
                 "accepted": True,
-            },
-            "capture_source_screenshot": {
-                **identity,
-                "accepted": True,
-                "screenshotId": "shot-1",
-                "imageFormat": "png",
-                "pathRedacted": True,
             },
             "get_operator_status": {
                 **identity,

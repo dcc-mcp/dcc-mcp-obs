@@ -800,28 +800,6 @@ tools:
     call_examples: [{arguments: {hotkey_id: start_streaming}, note: Trigger only a name returned by list_allowlisted_hotkeys.}]
     next-tools: {on-success: [obs_control__get_operator_status], on-failure: [obs_control__get_status]}
 
-  - name: capture_source_screenshot
-    description: Capture a bounded source screenshot while redacting local paths.
-    source_file: scripts/capture_source_screenshot.py
-    input_schema: {type: object, properties: {source_name: {type: string, minLength: 1, maxLength: 256}, image_format: {enum: [png, jpg, jpeg, webp]}}, required: [source_name], additionalProperties: false}
-    output_schema:
-      type: object
-      additionalProperties: false
-      required: [success, message, error, prompt, context]
-      properties:
-        success: {const: true}
-        message: {type: string}
-        error: {type: "null"}
-        prompt: {type: [string, "null"]}
-        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, accepted, screenshotId, imageFormat, pathRedacted], properties: {instanceId: {type: string, minLength: 1, maxLength: 128}, pluginVersion: {type: string, minLength: 1}, obsVersion: {type: string, minLength: 1}, hostPid: {type: integer, minimum: 1}, eventSequence: {type: integer, minimum: 0}, ok: {const: true}, accepted: {const: true}, screenshotId: {type: string, minLength: 1, maxLength: 256}, imageFormat: {enum: [png, jpg, jpeg, webp]}, pathRedacted: {const: true}, width: {type: integer, exclusiveMinimum: 0}, height: {type: integer, exclusiveMinimum: 0}}}
-    execution: sync
-    affinity: any
-    enforce_thread_affinity: true
-    timeout_hint_secs: 30
-    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: false, open_world_hint: false, deferred_hint: false}
-    call_examples: [{arguments: {source_name: Program, image_format: png}, note: Capture only after explicit operator intent; local paths are never returned.}]
-    next-tools: {on-success: [obs_control__get_operator_status], on-failure: [obs_control__get_status]}
-
   - name: get_operator_status
     description: Read redacted operator-visible OBS status and configuration readiness.
     source_file: scripts/get_operator_status.py
