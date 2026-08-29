@@ -100,19 +100,19 @@
     },
     {
       "domain": "profiles",
-      "status": "planned",
+      "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": [],
-      "remaining_operations": ["list_profiles", "get_current_profile", "set_current_profile"],
+      "delivered_operations": ["list_profiles", "get_current_profile", "set_current_profile"],
+      "remaining_operations": [],
       "dangerous_operations": ["set_current_profile"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/3"
     },
     {
       "domain": "scene_collections",
-      "status": "planned",
+      "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": [],
-      "remaining_operations": ["list_scene_collections", "get_current_scene_collection", "set_current_scene_collection"],
+      "delivered_operations": ["list_scene_collections", "get_current_scene_collection", "set_current_scene_collection"],
+      "remaining_operations": [],
       "dangerous_operations": ["set_current_scene_collection"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/3"
     },
@@ -172,19 +172,19 @@
     },
     {
       "domain": "hotkeys",
-      "status": "planned",
+      "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": [],
-      "remaining_operations": ["list_allowlisted_hotkeys", "trigger_allowlisted_hotkey"],
+      "delivered_operations": ["list_allowlisted_hotkeys", "trigger_allowlisted_hotkey"],
+      "remaining_operations": [],
       "dangerous_operations": ["trigger_allowlisted_hotkey"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/3"
     },
     {
       "domain": "screenshots",
-      "status": "planned",
+      "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": [],
-      "remaining_operations": ["capture_source_screenshot"],
+      "delivered_operations": ["capture_source_screenshot"],
+      "remaining_operations": [],
       "dangerous_operations": ["capture_source_screenshot"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/3"
     }

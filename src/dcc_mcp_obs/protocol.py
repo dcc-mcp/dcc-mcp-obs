@@ -22,6 +22,7 @@ MAX_INTERLEAVED_EVENTS = 64
 VENDOR_REQUESTS = frozenset(
     {
         "GetPluginStatus",
+        "GetOperatorStatus",
         "ListScenes",
         "ListSources",
         "GetRecordingStatus",
@@ -43,6 +44,16 @@ VENDOR_REQUESTS = frozenset(
         "GetOutputStatus",
         "StartOutput",
         "StopOutput",
+        "ListProfiles",
+        "GetCurrentProfile",
+        "SetCurrentProfile",
+        "ListSceneCollections",
+        "GetCurrentSceneCollection",
+        "SetCurrentSceneCollection",
+        "ListAllowlistedHotkeys",
+        "TriggerAllowlistedHotkey",
+        "CaptureScreenshot",
+        "CaptureSourceScreenshot",
     }
 )
 

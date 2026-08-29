@@ -114,6 +114,7 @@ def test_unknown_vendor_request_is_rejected_locally() -> None:
 def test_transport_allowlist_is_exactly_the_typed_public_requests() -> None:
     assert {
         "GetPluginStatus",
+        "GetOperatorStatus",
         "ListScenes",
         "ListSources",
         "GetRecordingStatus",
@@ -135,6 +136,16 @@ def test_transport_allowlist_is_exactly_the_typed_public_requests() -> None:
         "GetOutputStatus",
         "StartOutput",
         "StopOutput",
+        "ListProfiles",
+        "GetCurrentProfile",
+        "SetCurrentProfile",
+        "ListSceneCollections",
+        "GetCurrentSceneCollection",
+        "SetCurrentSceneCollection",
+        "ListAllowlistedHotkeys",
+        "TriggerAllowlistedHotkey",
+        "CaptureScreenshot",
+        "CaptureSourceScreenshot",
     } == VENDOR_REQUESTS
 
 

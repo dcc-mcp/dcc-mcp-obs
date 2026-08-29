@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["instanceId", "pluginVersion", "obsVersion", "hostPid", "eventSequence", "ok"],
+  "properties": {
+    "instanceId": {"type": "string", "minLength": 1, "maxLength": 128},
+    "pluginVersion": {"type": "string", "minLength": 1},
+    "obsVersion": {"type": "string", "minLength": 1},
+    "hostPid": {"type": "integer", "minimum": 1},
+    "eventSequence": {"type": "integer", "minimum": 0},
+    "ok": {"const": true},
+    "ready": {"const": true},
+    "profileName": {"type": "string", "minLength": 1, "maxLength": 256},
+    "sceneCollectionName": {"type": "string", "minLength": 1, "maxLength": 256},
+    "profiles": {"$ref": "#/$defs/namedProfiles"},
+    "sceneCollections": {"$ref": "#/$defs/namedCollections"},
+    "hotkeys": {"type": "array", "maxItems": 128, "items": {"$ref": "#/$defs/hotkey"}},
+    "allowlistedHotkeys": {"type": "array", "maxItems": 128, "items": {"type": "string", "minLength": 1, "maxLength": 128}},
+    "truncated": {"type": "boolean"},
+    "accepted": {"const": true},
+    "triggered": {"const": true},
+    "verified": {"const": true},
+    "screenshotId": {"type": "string", "minLength": 1, "maxLength": 256},
+    "imageFormat": {"enum": ["png", "jpg", "jpeg", "webp"]},
+    "pathRedacted": {"const": true},
+    "width": {"type": "integer", "exclusiveMinimum": 0},
+    "height": {"type": "integer", "exclusiveMinimum": 0},
+    "configVersion": {"type": "string", "minLength": 1}
+  },
+  "$defs": {
+    "namedProfiles": {"type": "array", "maxItems": 256, "items": {"type": "object", "additionalProperties": false, "required": ["profileName"], "properties": {"profileName": {"type": "string", "minLength": 1, "maxLength": 256}}}},
+    "namedCollections": {"type": "array", "maxItems": 256, "items": {"type": "object", "additionalProperties": false, "required": ["sceneCollectionName"], "properties": {"sceneCollectionName": {"type": "string", "minLength": 1, "maxLength": 256}}}},
+    "hotkey": {"type": "object", "additionalProperties": false, "required": ["hotkeyName"], "properties": {"hotkeyName": {"type": "string", "minLength": 1, "maxLength": 128}, "description": {"type": "string", "maxLength": 256}}}
+  }
+}

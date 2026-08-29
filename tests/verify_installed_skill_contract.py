@@ -114,6 +114,47 @@ def main() -> None:
             "outputActive": False,
             "verified": True,
         },
+        "list_profiles": {**identity, "profiles": [{"profileName": "Main"}], "truncated": False},
+        "get_current_profile": {**identity, "profileName": "Main"},
+        "set_current_profile": {**identity, "profileName": "Main", "verified": True},
+        "list_scene_collections": {
+            **identity,
+            "sceneCollections": [{"sceneCollectionName": "Main"}],
+            "truncated": False,
+        },
+        "get_current_scene_collection": {**identity, "sceneCollectionName": "Main"},
+        "set_current_scene_collection": {
+            **identity,
+            "sceneCollectionName": "Main",
+            "verified": True,
+        },
+        "list_allowlisted_hotkeys": {
+            **identity,
+            "hotkeys": [{"hotkeyName": "start_streaming"}],
+            "truncated": False,
+        },
+        "trigger_allowlisted_hotkey": {
+            **identity,
+            "hotkeyName": "start_streaming",
+            "accepted": True,
+            "verified": True,
+        },
+        "capture_source_screenshot": {
+            **identity,
+            "accepted": True,
+            "screenshotId": "shot-1",
+            "imageFormat": "png",
+            "pathRedacted": True,
+            "verified": True,
+        },
+        "get_operator_status": {
+            **identity,
+            "ready": True,
+            "uiThreadReady": True,
+            "configPathRedacted": True,
+            "profileName": "Main",
+            "sceneCollectionName": "Main",
+        },
     }
 
     assert [tool["name"] for tool in tools] == list(results)
