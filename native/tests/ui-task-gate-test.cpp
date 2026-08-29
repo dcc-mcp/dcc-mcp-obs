@@ -18,6 +18,9 @@ int main()
 	worker.join();
 	assert(!mutated.load());
 
+	dcc_mcp_obs::UiTaskGate expired;
+	assert(!expired.claim_mutation(std::chrono::steady_clock::now() - std::chrono::seconds(1)));
+
 	dcc_mcp_obs::UiTaskGate started;
 	assert(started.claim_mutation());
 	mutated = true;

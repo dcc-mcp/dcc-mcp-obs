@@ -40,7 +40,9 @@ camera, allowlisted hotkeys, screenshots, outputs, scene/source inspection,
 7. Profile and scene-collection changes require exact-name discovery and a
    verified current-name readback; duplicate names fail closed.
 8. Hotkey actions accept only identifiers returned by the allowlist contract.
-   Screenshots are bounded to a named source and never expose local paths.
+   Screenshots are bounded to a named source and never expose local paths; the
+   current fire-and-forget OBS screenshot API fails closed without completion
+   and artifact readback, so it must never be reported as verified.
 
 ## UI fallback
 

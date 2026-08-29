@@ -210,8 +210,6 @@ def test_skill_outputs_publish_strict_typed_envelopes_with_context_parity() -> N
             "stop_output",
             "set_current_profile",
             "set_current_scene_collection",
-            "trigger_allowlisted_hotkey",
-            "capture_source_screenshot",
         }
     )
     for name in {"start_recording", "stop_recording", "pause_recording", "resume_recording"}:
@@ -486,7 +484,6 @@ def test_every_skill_output_schema_accepts_the_real_core_success_envelope() -> N
                 **identity,
                 "hotkeyName": "start_streaming",
                 "accepted": True,
-                "verified": True,
             },
             "capture_source_screenshot": {
                 **identity,
@@ -494,7 +491,6 @@ def test_every_skill_output_schema_accepts_the_real_core_success_envelope() -> N
                 "screenshotId": "shot-1",
                 "imageFormat": "png",
                 "pathRedacted": True,
-                "verified": True,
             },
             "get_operator_status": {
                 **identity,

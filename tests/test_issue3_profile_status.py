@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import jsonschema
 import pytest
+import yaml
 
 from dcc_mcp_obs import __version__
 from dcc_mcp_obs.bridge import BridgeError, ObsControlBridge
@@ -66,11 +70,34 @@ def test_scene_collection_selection_rejects_ambiguous_target():
         bridge.set_current_scene_collection("Main")
 
 
+def test_selection_rejects_truncated_discovery_before_mutation():
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {
+                **IDENTITY,
+                "profiles": [{"profileName": "Main"}],
+                "truncated": True,
+                "eventSequence": 2,
+            },
+        ]
+    )
+    bridge = ObsControlBridge(transport, expected_pid=1234)
+    with pytest.raises(BridgeError, match="OBS_RESPONSE_INCOMPLETE"):
+        bridge.set_current_profile("Main")
+    assert len(transport.requests) == 2
+
+
 def test_allowlisted_hotkey_and_screenshot_redact_path():
     transport = FakeTransport(
         [
             {**IDENTITY, "ready": True},
-            {**IDENTITY, "accepted": True, "eventSequence": 2},
+            {
+                **IDENTITY,
+                "accepted": True,
+                "hotkeyName": "OBSBasic.StartStreaming",
+                "eventSequence": 2,
+            },
             {
                 **IDENTITY,
                 "accepted": True,
@@ -84,11 +111,51 @@ def test_allowlisted_hotkey_and_screenshot_redact_path():
     )
     bridge = ObsControlBridge(transport, expected_pid=1234)
     hotkey = bridge.trigger_allowlisted_hotkey("OBSBasic.StartStreaming")
-    screenshot = bridge.capture_source_screenshot("Program")
-    assert hotkey["triggered"] is True
-    assert screenshot["screenshotId"] == "shot-1"
-    assert "path" not in screenshot
-    assert "secret" not in str(screenshot)
+    assert hotkey["hotkeyName"] == "OBSBasic.StartStreaming"
+    assert hotkey["accepted"] is True
+    with pytest.raises(BridgeError, match="OBS_SCREENSHOT_UNVERIFIED"):
+        bridge.capture_source_screenshot("Program")
+
+
+def test_hotkey_success_matches_strict_tool_envelope():
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {
+                **IDENTITY,
+                "accepted": True,
+                "hotkeyName": "start_streaming",
+                "eventSequence": 2,
+            },
+        ]
+    )
+    bridge = ObsControlBridge(transport, expected_pid=1234)
+    raw = bridge.trigger_allowlisted_hotkey("start_streaming")
+    envelope = {
+        "success": True,
+        "message": "ok",
+        "error": None,
+        "prompt": None,
+        "context": raw,
+    }
+    tool = next(
+        item
+        for item in yaml.safe_load(
+            Path("src/dcc_mcp_obs/skills/obs-control/tools.yaml").read_text(encoding="utf-8")
+        )["tools"]
+        if item["name"] == "trigger_allowlisted_hotkey"
+    )
+    errors = list(jsonschema.Draft202012Validator(tool["output_schema"]).iter_errors(envelope))
+    assert not errors
+
+
+def test_empty_current_profile_is_rejected_by_bridge_contract():
+    transport = FakeTransport(
+        [{**IDENTITY, "ready": True}, {**IDENTITY, "profileName": "", "eventSequence": 2}]
+    )
+    bridge = ObsControlBridge(transport, expected_pid=1234)
+    with pytest.raises(BridgeError, match="OBS_RESPONSE_INVALID"):
+        bridge.get_current_profile()
 
 
 def test_unknown_hotkey_fails_closed_before_transport_call():

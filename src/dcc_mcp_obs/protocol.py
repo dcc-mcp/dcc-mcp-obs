@@ -123,6 +123,14 @@ class ObsWebSocketTransport:
             try:
                 socket = self._ensure_connected(deadline)
                 request_id = uuid.uuid4().hex
+                request_payload = dict(data)
+                # Carry the caller's absolute deadline across the websocket
+                # vendor boundary as bounded relative milliseconds.  Native
+                # UI work must never wait on a fixed timeout after the caller
+                # has already expired.
+                request_payload["__dccDeadlineMs"] = max(
+                    1, math.ceil(self._remaining(deadline) * 1000)
+                )
                 self._send_json(
                     socket,
                     {
@@ -133,7 +141,7 @@ class ObsWebSocketTransport:
                             "requestData": {
                                 "vendorName": "dcc-mcp-obs",
                                 "requestType": request_type,
-                                "requestData": dict(data),
+                                "requestData": request_payload,
                             },
                         },
                     },

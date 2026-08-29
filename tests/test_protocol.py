@@ -80,6 +80,17 @@ def test_authenticates_and_uses_only_call_vendor_request() -> None:
     assert "PRIVATE_OBS_PASSWORD" not in json.dumps(socket.sent)
 
 
+def test_vendor_request_carries_bounded_deadline_metadata_to_native() -> None:
+    clock = ManualClock()
+    socket = ScriptedSocket([_hello(), {"op": 2, "d": {"negotiatedRpcVersion": 1}}, _response()])
+    transport = ObsWebSocketTransport(
+        ObsEndpointConfig(password="secret"), connector=lambda _url, _timeout: socket, clock=clock
+    )
+    transport.vendor_request("StartStreaming", {}, deadline=5)
+    request_data = socket.sent[1]["d"]["requestData"]["requestData"]
+    assert 1 <= request_data["__dccDeadlineMs"] <= 5000
+
+
 def test_rejects_hello_without_authentication_before_identify() -> None:
     hello = _hello()
     del hello["d"]["authentication"]

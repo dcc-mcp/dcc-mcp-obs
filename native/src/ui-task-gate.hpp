@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 
 namespace dcc_mcp_obs {
@@ -21,6 +22,14 @@ public:
 
 	bool claim_mutation()
 	{
+		State expected = State::Pending;
+		return state_.compare_exchange_strong(expected, State::Started);
+	}
+
+	bool claim_mutation(std::chrono::steady_clock::time_point deadline)
+	{
+		if (std::chrono::steady_clock::now() >= deadline)
+			return false;
 		State expected = State::Pending;
 		return state_.compare_exchange_strong(expected, State::Started);
 	}

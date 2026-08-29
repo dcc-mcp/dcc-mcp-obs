@@ -106,6 +106,7 @@ struct UiState {
 	std::string target_name;
 	std::string hotkey_name;
 	std::string image_format;
+	std::chrono::steady_clock::time_point deadline;
 	std::mutex mutex;
 	std::condition_variable condition;
 	bool complete = false;
@@ -201,15 +202,23 @@ obs_data_t *list_scenes()
 	return result;
 }
 
-bool name_in_list(char **names, const std::string &target, size_t limit)
+enum class NameLookup { Missing, Unique, Ambiguous, Incomplete };
+
+NameLookup lookup_name(char **names, const std::string &target, size_t limit)
 {
 	if (names == nullptr || target.empty())
-		return false;
-	for (size_t index = 0; index < limit && names[index] != nullptr; ++index) {
-		if (target == names[index])
-			return true;
+		return NameLookup::Missing;
+	size_t matches = 0;
+	size_t count = 0;
+	for (; count < limit && names[count] != nullptr; ++count) {
+		if (target == names[count])
+			++matches;
 	}
-	return false;
+	if (count >= limit && names[count - 1] != nullptr)
+		return NameLookup::Incomplete;
+	if (matches > 1)
+		return NameLookup::Ambiguous;
+	return matches == 1 ? NameLookup::Unique : NameLookup::Missing;
 }
 
 obs_data_t *list_profiles()
@@ -487,7 +496,7 @@ void execute_ui_operation(void *private_data)
 		case UiOperation::StartRecording: {
 			result = obs_data_create();
 			const bool recording_active = obs_frontend_recording_active();
-			if (!state->gate.claim_mutation()) {
+			if (!state->gate.claim_mutation(state->deadline)) {
 				set_error(result, "OBS_UI_TIMEOUT");
 			} else {
 				if (!recording_active)
@@ -499,7 +508,7 @@ void execute_ui_operation(void *private_data)
 		case UiOperation::StopRecording: {
 			result = obs_data_create();
 			const bool recording_active = obs_frontend_recording_active();
-			if (!state->gate.claim_mutation()) {
+			if (!state->gate.claim_mutation(state->deadline)) {
 				set_error(result, "OBS_UI_TIMEOUT");
 			} else {
 				if (recording_active)
@@ -512,7 +521,7 @@ void execute_ui_operation(void *private_data)
 			result = obs_data_create();
 			const bool recording_active = obs_frontend_recording_active();
 			const bool recording_paused = recording_active && obs_frontend_recording_paused();
-			if (!state->gate.claim_mutation()) {
+			if (!state->gate.claim_mutation(state->deadline)) {
 				set_error(result, "OBS_UI_TIMEOUT");
 			} else if (!recording_active) {
 				set_error(result, "OBS_RECORDING_NOT_ACTIVE");
@@ -527,7 +536,7 @@ void execute_ui_operation(void *private_data)
 			result = obs_data_create();
 			const bool recording_active = obs_frontend_recording_active();
 			const bool recording_paused = recording_active && obs_frontend_recording_paused();
-			if (!state->gate.claim_mutation()) {
+			if (!state->gate.claim_mutation(state->deadline)) {
 				set_error(result, "OBS_UI_TIMEOUT");
 			} else if (!recording_active) {
 				set_error(result, "OBS_RECORDING_NOT_ACTIVE");
@@ -543,7 +552,7 @@ void execute_ui_operation(void *private_data)
 			break;
 		case UiOperation::StartStreaming:
 			result = obs_data_create();
-			if (!state->gate.claim_mutation())
+			if (!state->gate.claim_mutation(state->deadline))
 				set_error(result, "OBS_UI_TIMEOUT");
 			else if (!obs_frontend_streaming_active())
 				obs_frontend_streaming_start();
@@ -552,7 +561,7 @@ void execute_ui_operation(void *private_data)
 			break;
 		case UiOperation::StopStreaming:
 			result = obs_data_create();
-			if (!state->gate.claim_mutation())
+			if (!state->gate.claim_mutation(state->deadline))
 				set_error(result, "OBS_UI_TIMEOUT");
 			else if (obs_frontend_streaming_active())
 				obs_frontend_streaming_stop();
@@ -564,7 +573,7 @@ void execute_ui_operation(void *private_data)
 			break;
 		case UiOperation::StartReplayBuffer:
 			result = obs_data_create();
-			if (!state->gate.claim_mutation())
+			if (!state->gate.claim_mutation(state->deadline))
 				set_error(result, "OBS_UI_TIMEOUT");
 			else if (!obs_frontend_replay_buffer_active())
 				obs_frontend_replay_buffer_start();
@@ -573,7 +582,7 @@ void execute_ui_operation(void *private_data)
 			break;
 		case UiOperation::StopReplayBuffer:
 			result = obs_data_create();
-			if (!state->gate.claim_mutation())
+			if (!state->gate.claim_mutation(state->deadline))
 				set_error(result, "OBS_UI_TIMEOUT");
 			else if (obs_frontend_replay_buffer_active())
 				obs_frontend_replay_buffer_stop();
@@ -582,7 +591,7 @@ void execute_ui_operation(void *private_data)
 			break;
 		case UiOperation::SaveReplayBuffer:
 			result = obs_data_create();
-			if (!state->gate.claim_mutation())
+			if (!state->gate.claim_mutation(state->deadline))
 				set_error(result, "OBS_UI_TIMEOUT");
 			else if (!obs_frontend_replay_buffer_active())
 				set_error(result, "OBS_OUTPUT_NOT_ACTIVE");
@@ -597,7 +606,7 @@ void execute_ui_operation(void *private_data)
 			break;
 		case UiOperation::StartVirtualCamera:
 			result = obs_data_create();
-			if (!state->gate.claim_mutation())
+			if (!state->gate.claim_mutation(state->deadline))
 				set_error(result, "OBS_UI_TIMEOUT");
 			else if (!obs_frontend_virtualcam_active())
 				obs_frontend_start_virtualcam();
@@ -606,7 +615,7 @@ void execute_ui_operation(void *private_data)
 			break;
 		case UiOperation::StopVirtualCamera:
 			result = obs_data_create();
-			if (!state->gate.claim_mutation())
+			if (!state->gate.claim_mutation(state->deadline))
 				set_error(result, "OBS_UI_TIMEOUT");
 			else if (obs_frontend_virtualcam_active())
 				obs_frontend_stop_virtualcam();
@@ -622,7 +631,7 @@ void execute_ui_operation(void *private_data)
 		case UiOperation::StartOutput:
 		case UiOperation::StopOutput:
 			result = obs_data_create();
-			if (!state->gate.claim_mutation()) {
+			if (!state->gate.claim_mutation(state->deadline)) {
 				set_error(result, "OBS_UI_TIMEOUT");
 				break;
 			}
@@ -661,12 +670,16 @@ void execute_ui_operation(void *private_data)
 		case UiOperation::SetProfile: {
 			result = obs_data_create();
 			char **profiles = obs_frontend_get_profiles();
-			const bool found = name_in_list(profiles, state->target_name, kMaxProfiles);
+			const NameLookup lookup = lookup_name(profiles, state->target_name, kMaxProfiles);
 			if (profiles != nullptr)
 				bfree(profiles);
-			if (!found) {
+			if (lookup == NameLookup::Incomplete)
+				set_error(result, "OBS_RESPONSE_INCOMPLETE");
+			else if (lookup == NameLookup::Ambiguous)
+				set_error(result, "OBS_TARGET_AMBIGUOUS");
+			else if (lookup != NameLookup::Unique) {
 				set_error(result, "OBS_PROFILE_NOT_FOUND");
-			} else if (!state->gate.claim_mutation()) {
+			} else if (!state->gate.claim_mutation(state->deadline)) {
 				set_error(result, "OBS_UI_TIMEOUT");
 			} else {
 				obs_frontend_set_current_profile(state->target_name.c_str());
@@ -683,12 +696,16 @@ void execute_ui_operation(void *private_data)
 		case UiOperation::SetSceneCollection: {
 			result = obs_data_create();
 			char **collections = obs_frontend_get_scene_collections();
-			const bool found = name_in_list(collections, state->target_name, kMaxSceneCollections);
+			const NameLookup lookup = lookup_name(collections, state->target_name, kMaxSceneCollections);
 			if (collections != nullptr)
 				bfree(collections);
-			if (!found) {
+			if (lookup == NameLookup::Incomplete)
+				set_error(result, "OBS_RESPONSE_INCOMPLETE");
+			else if (lookup == NameLookup::Ambiguous)
+				set_error(result, "OBS_TARGET_AMBIGUOUS");
+			else if (lookup != NameLookup::Unique) {
 				set_error(result, "OBS_SCENE_COLLECTION_NOT_FOUND");
-			} else if (!state->gate.claim_mutation()) {
+			} else if (!state->gate.claim_mutation(state->deadline)) {
 				set_error(result, "OBS_UI_TIMEOUT");
 			} else {
 				obs_frontend_set_current_scene_collection(state->target_name.c_str());
@@ -703,7 +720,7 @@ void execute_ui_operation(void *private_data)
 			result = obs_data_create();
 			if (!allowlisted_hotkey(state->hotkey_name))
 				set_error(result, "OBS_HOTKEY_NOT_ALLOWLISTED");
-			else if (!state->gate.claim_mutation())
+			else if (!state->gate.claim_mutation(state->deadline))
 				set_error(result, "OBS_UI_TIMEOUT");
 			else {
 				// Named hotkeys are mapped to typed frontend operations.  No raw
@@ -732,6 +749,7 @@ void execute_ui_operation(void *private_data)
 				else if (state->hotkey_name == "stop_virtual_camera" ||
 					 state->hotkey_name == "OBSBasic.StopVirtualCam")
 					obs_frontend_stop_virtualcam();
+				obs_data_set_string(result, "hotkeyName", state->hotkey_name.c_str());
 				obs_data_set_bool(result, "accepted", true);
 			}
 			break;
@@ -742,15 +760,12 @@ void execute_ui_operation(void *private_data)
 								  : obs_get_source_by_name(state->target_name.c_str());
 			if (screenshot_source == nullptr)
 				set_error(result, "OBS_SCREENSHOT_INVALID");
-			else if (!state->gate.claim_mutation())
+			else if (!state->gate.claim_mutation(state->deadline))
 				set_error(result, "OBS_UI_TIMEOUT");
-			else {
-				obs_frontend_take_source_screenshot(screenshot_source);
-				obs_data_set_bool(result, "accepted", true);
-				obs_data_set_bool(result, "pathRedacted", true);
-				obs_data_set_string(result, "screenshotId", "obs-frontend-screenshot");
-				obs_data_set_string(result, "imageFormat", state->image_format.c_str());
-			}
+			else
+				// OBS exposes this API as fire-and-forget: there is no completion,
+				// artifact identity, or safe path readback to return to MCP.
+				set_error(result, "OBS_SCREENSHOT_UNVERIFIED");
 			if (screenshot_source != nullptr)
 				obs_source_release(screenshot_source);
 			break;
@@ -776,7 +791,7 @@ void execute_ui_operation(void *private_data)
 
 bool run_ui_operation(UiOperation operation, const std::string &scene_name, const std::string &output_name,
 		      const std::string &target_name, const std::string &hotkey_name, const std::string &image_format,
-		      obs_data_t *response)
+		      uint64_t deadline_ms, obs_data_t *response)
 {
 	auto state = std::make_shared<UiState>();
 	state->operation = operation;
@@ -785,17 +800,33 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, cons
 	state->target_name = target_name;
 	state->hotkey_name = hotkey_name;
 	state->image_format = image_format;
+	state->deadline =
+		std::chrono::steady_clock::now() + std::chrono::milliseconds(deadline_ms == 0 ? 5000 : deadline_ms);
 	auto *holder = new std::shared_ptr<UiState>(state);
 	obs_queue_task(OBS_TASK_UI, execute_ui_operation, holder, false);
 
 	std::unique_lock<std::mutex> lock(state->mutex);
-	if (!state->condition.wait_for(lock, kUiTimeout, [&state] { return state->complete; })) {
+	auto remaining = state->deadline - std::chrono::steady_clock::now();
+	if (remaining <= std::chrono::steady_clock::duration::zero()) {
 		if (state->gate.cancel_pending()) {
 			set_error(response, "OBS_UI_TIMEOUT");
 			return false;
 		}
-		state->condition.wait(lock, [&state] { return state->complete; });
+		set_error(response, "OBS_UI_TIMEOUT");
+		return false;
 	}
+	if (!state->condition.wait_for(
+		    lock,
+		    std::min(std::chrono::duration_cast<std::chrono::steady_clock::duration>(kUiTimeout), remaining),
+		    [&state] { return state->complete; })) {
+		if (state->gate.cancel_pending()) {
+			set_error(response, "OBS_UI_TIMEOUT");
+			return false;
+		}
+		set_error(response, "OBS_UI_TIMEOUT");
+		return false;
+	}
+	// The old unbounded state->condition.wait(lock, [&state] { return state->complete; }); is intentionally avoided.
 	obs_data_apply(response, state->result);
 	return obs_data_get_bool(response, "ok");
 }
@@ -876,6 +907,15 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 	std::string output_name;
 	std::string target_name;
 	std::string hotkey_name;
+	uint64_t deadline_ms = 5000;
+	if (request_data != nullptr && obs_data_has_user_value(request_data, "__dccDeadlineMs")) {
+		const long long requested_deadline_ms = obs_data_get_int(request_data, "__dccDeadlineMs");
+		if (requested_deadline_ms <= 0 || requested_deadline_ms > 120000) {
+			set_error(response_data, "OBS_ARGUMENT_INVALID");
+			return;
+		}
+		deadline_ms = static_cast<uint64_t>(requested_deadline_ms);
+	}
 	if (std::string(request) == "ListSources" && request_data != nullptr) {
 		const char *value = obs_data_get_string(request_data, "sceneName");
 		if (value != nullptr)
@@ -942,7 +982,7 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 		}
 	}
 	run_ui_operation(operation_for(request), scene_name, output_name, target_name, hotkey_name, image_format,
-			 response_data);
+			 deadline_ms, response_data);
 }
 
 void frontend_event(enum obs_frontend_event, void *)

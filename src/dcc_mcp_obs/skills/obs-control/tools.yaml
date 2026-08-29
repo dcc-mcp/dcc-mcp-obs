@@ -785,13 +785,12 @@ tools:
     output_schema:
       type: object
       additionalProperties: false
-      required: [success, message, error, prompt, context, postcondition]
+      required: [success, message, error, prompt, context]
       properties:
         success: {const: true}
         message: {type: string}
         error: {type: "null"}
         prompt: {type: [string, "null"]}
-        postcondition: {type: object, additionalProperties: false, required: [verified], properties: {verified: {const: true}}}
         context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, hotkeyName, accepted], properties: {instanceId: {type: string, minLength: 1, maxLength: 128}, pluginVersion: {type: string, minLength: 1}, obsVersion: {type: string, minLength: 1}, hostPid: {type: integer, minimum: 1}, eventSequence: {type: integer, minimum: 0}, ok: {const: true}, hotkeyName: {type: string, minLength: 1, maxLength: 128}, accepted: {const: true}}}
     execution: sync
     affinity: any
@@ -808,13 +807,12 @@ tools:
     output_schema:
       type: object
       additionalProperties: false
-      required: [success, message, error, prompt, context, postcondition]
+      required: [success, message, error, prompt, context]
       properties:
         success: {const: true}
         message: {type: string}
         error: {type: "null"}
         prompt: {type: [string, "null"]}
-        postcondition: {type: object, additionalProperties: false, required: [verified], properties: {verified: {const: true}}}
         context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, accepted, screenshotId, imageFormat, pathRedacted], properties: {instanceId: {type: string, minLength: 1, maxLength: 128}, pluginVersion: {type: string, minLength: 1}, obsVersion: {type: string, minLength: 1}, hostPid: {type: integer, minimum: 1}, eventSequence: {type: integer, minimum: 0}, ok: {const: true}, accepted: {const: true}, screenshotId: {type: string, minLength: 1, maxLength: 256}, imageFormat: {enum: [png, jpg, jpeg, webp]}, pathRedacted: {const: true}, width: {type: integer, exclusiveMinimum: 0}, height: {type: integer, exclusiveMinimum: 0}}}
     execution: sync
     affinity: any
