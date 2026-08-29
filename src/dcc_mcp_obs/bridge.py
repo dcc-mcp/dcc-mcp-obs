@@ -212,7 +212,10 @@ class ObsControlBridge:
         if accepted.get("accepted") is not True:
             raise BridgeError("OBS_MUTATION_REJECTED")
         readback = self._checked("GetReplayBufferStatus", deadline=deadline)
-        return {**readback, "verified": True}
+        # OBS accepts replay saves asynchronously and exposes no completion
+        # event/file artifact in this contract.  Report submission only;
+        # claiming a verified save would be a false postcondition.
+        return {**readback, "accepted": True, "submitted": True}
 
     def virtual_camera_status(self) -> dict[str, object]:
         return self._checked("GetVirtualCameraStatus", deadline=self._operation_deadline())
@@ -274,7 +277,11 @@ class ObsControlBridge:
             readback = self._checked(
                 "GetOutputStatus", {"outputName": output_name}, deadline=deadline
             )
-            if readback.get("outputActive") is expected:
+            if (
+                readback.get("outputName") == output_name
+                and readback.get("outputKind") == output_name
+                and readback.get("outputActive") is expected
+            ):
                 return {**readback, "verified": True}
             if attempt + 1 < self._postcondition_attempts:
                 remaining = deadline - self._clock()
@@ -474,9 +481,18 @@ class ObsControlBridge:
             "StartOutput",
             "StopOutput",
         }:
+            allowed = _IDENTITY_KEYS | {"accepted"}
+            if request_type == "SaveReplayBuffer":
+                allowed |= {"submitted"}
             if (
-                set(response) - (_IDENTITY_KEYS | {"accepted"})
+                set(response) - allowed
                 or type(response.get("accepted")) is not bool
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            if (
+                request_type == "SaveReplayBuffer"
+                and "submitted" in response
+                and type(response.get("submitted")) is not bool
             ):
                 raise BridgeError("OBS_RESPONSE_INVALID")
             return

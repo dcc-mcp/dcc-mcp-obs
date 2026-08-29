@@ -86,6 +86,47 @@ def test_issue2_output_mutation_binds_exact_name_and_reconciles():
     assert transport.requests[1][1] == {"outputName": "streaming"}
 
 
+@pytest.mark.parametrize(
+    ("readback_name", "readback_kind"),
+    [("recording", "recording"), ("streaming", "recording")],
+)
+def test_issue2_output_mutation_rejects_identity_mismatch(readback_name, readback_kind):
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {**IDENTITY, "accepted": True, "eventSequence": 2},
+            {
+                **IDENTITY,
+                "outputName": readback_name,
+                "outputKind": readback_kind,
+                "outputActive": True,
+                "eventSequence": 3,
+            },
+        ]
+    )
+
+    with pytest.raises(BridgeError, match="OBS_POSTCONDITION_FAILED"):
+        ObsControlBridge(transport, expected_pid=1234, postcondition_attempts=1).start_output(
+            output_name="streaming"
+        )
+
+
+def test_issue2_replay_save_is_submitted_without_false_verified_readback():
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {**IDENTITY, "accepted": True, "eventSequence": 2},
+            {**IDENTITY, "replayBufferActive": True, "eventSequence": 3},
+        ]
+    )
+
+    result = ObsControlBridge(transport, expected_pid=1234).save_replay_buffer()
+
+    assert result["accepted"] is True
+    assert result["submitted"] is True
+    assert "verified" not in result
+
+
 def test_issue2_rejects_unsupported_obs_version_before_use():
     with pytest.raises(BridgeError, match="OBS_VERSION_UNSUPPORTED"):
         ObsControlBridge(
@@ -105,7 +146,6 @@ def test_issue2_skill_contract_marks_dangerous_operations_and_strict_schemas():
         "stop_streaming",
         "start_replay_buffer",
         "stop_replay_buffer",
-        "save_replay_buffer",
         "start_virtual_camera",
         "stop_virtual_camera",
         "start_output",
@@ -114,5 +154,7 @@ def test_issue2_skill_contract_marks_dangerous_operations_and_strict_schemas():
         assert by_name[name]["annotations"]["destructive_hint"] is True
         assert by_name[name]["output_schema"]["additionalProperties"] is False
         assert "postcondition" in by_name[name]["output_schema"]["required"]
+    save_context = by_name["save_replay_buffer"]["output_schema"]["properties"]["context"]
+    assert {"accepted", "submitted"}.issubset(save_context["required"])
     json.dumps(by_name)
     jsonschema.Draft202012Validator.check_schema(by_name["get_streaming_status"]["output_schema"])

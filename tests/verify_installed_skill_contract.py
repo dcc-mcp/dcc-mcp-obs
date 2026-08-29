@@ -78,7 +78,12 @@ def main() -> None:
         "get_replay_buffer_status": {**identity, "replayBufferActive": False},
         "start_replay_buffer": {**identity, "replayBufferActive": True, "verified": True},
         "stop_replay_buffer": {**identity, "replayBufferActive": False, "verified": True},
-        "save_replay_buffer": {**identity, "replayBufferActive": True, "verified": True},
+        "save_replay_buffer": {
+            **identity,
+            "replayBufferActive": True,
+            "accepted": True,
+            "submitted": True,
+        },
         "get_virtual_camera_status": {**identity, "virtualCameraActive": False},
         "start_virtual_camera": {**identity, "virtualCameraActive": True, "verified": True},
         "stop_virtual_camera": {**identity, "virtualCameraActive": False, "verified": True},

@@ -183,6 +183,14 @@ class ObsWebSocketTransport:
             identified = self._read_json(socket, deadline)
             if identified.get("op") != 2:
                 raise ProtocolError("OBS_AUTHENTICATION_FAILED")
+            identified_details = identified.get("d")
+            negotiated_rpc_version = (
+                identified_details.get("negotiatedRpcVersion")
+                if isinstance(identified_details, dict)
+                else None
+            )
+            if type(negotiated_rpc_version) is not int or negotiated_rpc_version != 1:
+                raise ProtocolError("OBS_VERSION_UNSUPPORTED")
         except Exception:
             with suppress(Exception):
                 socket.close()

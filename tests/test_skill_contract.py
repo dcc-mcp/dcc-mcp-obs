@@ -171,7 +171,7 @@ def test_skill_outputs_publish_strict_typed_envelopes_with_context_parity() -> N
             "stop_replay_buffer": mutation_context_keys - {"outputActive", "outputPaused"}
             | {"replayBufferActive"},
             "save_replay_buffer": mutation_context_keys - {"outputActive", "outputPaused"}
-            | {"replayBufferActive"},
+            | {"replayBufferActive", "accepted", "submitted"},
             "get_virtual_camera_status": mutation_context_keys - {"outputActive", "outputPaused"}
             | {"virtualCameraActive"},
             "start_virtual_camera": mutation_context_keys - {"outputActive", "outputPaused"}
@@ -194,7 +194,6 @@ def test_skill_outputs_publish_strict_typed_envelopes_with_context_parity() -> N
             "stop_streaming",
             "start_replay_buffer",
             "stop_replay_buffer",
-            "save_replay_buffer",
             "start_virtual_camera",
             "stop_virtual_camera",
             "start_output",
@@ -296,7 +295,12 @@ def test_every_skill_output_schema_accepts_the_real_core_success_envelope() -> N
             "get_replay_buffer_status": {**identity, "replayBufferActive": False},
             "start_replay_buffer": {**identity, "replayBufferActive": True, "verified": True},
             "stop_replay_buffer": {**identity, "replayBufferActive": False, "verified": True},
-            "save_replay_buffer": {**identity, "replayBufferActive": True, "verified": True},
+            "save_replay_buffer": {
+                **identity,
+                "replayBufferActive": True,
+                "accepted": True,
+                "submitted": True,
+            },
             "get_virtual_camera_status": {**identity, "virtualCameraActive": False},
             "start_virtual_camera": {**identity, "virtualCameraActive": True, "verified": True},
             "stop_virtual_camera": {**identity, "virtualCameraActive": False, "verified": True},

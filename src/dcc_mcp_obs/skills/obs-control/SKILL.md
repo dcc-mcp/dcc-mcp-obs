@@ -24,14 +24,16 @@ inspection, 录屏, 直播, 回放缓冲, 虚拟摄像头, or 输出.
 1. Use native plugin status and read-only scene/source discovery first.
 2. Ask for confirmation before start/stop/pause/resume recording when the user
    did not explicitly request that state change.
-3. Treat a mutation response as provisional. Require its typed readback with
-   `postcondition.verified=true` and retain the exact OBS instance identity
-   from `context`.
+3. Treat a mutation response as provisional. For state mutations, require its
+   typed readback with `postcondition.verified=true`; replay-buffer saves are
+   asynchronous and only report `accepted=true, submitted=true`.
 4. Never request, print, log, or return the OBS WebSocket password. The operator
    owns `DCC_MCP_OBS_WEBSOCKET_PASSWORD`.
 5. Streaming, replay-buffer, virtual-camera, and output start/stop/save tools are
-   dangerous mutations: require explicit operator intent and use their verified
-   typed postcondition. Reconciliation is bounded and never retries indefinitely.
+   dangerous mutations: require explicit operator intent. State changes use a
+   verified typed postcondition; replay saves remain submitted until a later
+   completion/artifact contract exists. Reconciliation is bounded and never
+   retries indefinitely.
 6. Never construct a raw OBS WebSocket request or execute arbitrary script/code.
 
 ## UI fallback

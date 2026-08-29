@@ -411,6 +411,7 @@ void execute_ui_operation(void *private_data)
 			else {
 				obs_frontend_replay_buffer_save();
 				obs_data_set_bool(result, "accepted", true);
+				obs_data_set_bool(result, "submitted", true);
 			}
 			break;
 		case UiOperation::VirtualCameraStatus:

@@ -374,20 +374,29 @@ tools:
     call_examples: [{arguments: {}, note: Stop replay buffer only after explicit operator intent.}]
     next-tools: {on-success: [obs_control__get_replay_buffer_status], on-failure: [obs_control__get_status]}
   - name: save_replay_buffer
-    description: Save the active OBS replay buffer through the typed native contract.
+    description: Submit an active OBS replay-buffer save; completion is asynchronous and not verified.
     source_file: scripts/save_replay_buffer.py
     input_schema: {type: object, properties: {}, additionalProperties: false}
     output_schema:
       type: object
       additionalProperties: false
-      required: [success, message, error, prompt, context, postcondition]
+      required: [success, message, error, prompt, context]
       properties:
         <<: *replay_status_properties
-        postcondition:
+        context:
           type: object
           additionalProperties: false
-          required: [verified]
-          properties: {verified: {const: true}}
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, replayBufferActive, accepted, submitted]
+          properties:
+            instanceId: {type: string, minLength: 1, maxLength: 128}
+            pluginVersion: {type: string, minLength: 1}
+            obsVersion: {type: string, minLength: 1}
+            hostPid: {type: integer, minimum: 1}
+            eventSequence: {type: integer, minimum: 0}
+            ok: {const: true}
+            replayBufferActive: {type: boolean}
+            accepted: {const: true}
+            submitted: {const: true}
     execution: sync
     affinity: any
     enforce_thread_affinity: true
