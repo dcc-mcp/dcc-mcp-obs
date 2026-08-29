@@ -7,7 +7,7 @@ metadata:
   dcc-mcp:
     dcc: obs
     layer: domain
-    version: "1.0.0"  # x-release-please-version
+    version: "1.1.0"  # x-release-please-version
     tags: [obs, profiles, scene-collections, recording, streaming, replay-buffer, virtual-camera, allowlisted-hotkeys, screenshots, outputs, scenes, sources]
     search-hint: "OBS Open Broadcaster Software profiles scene collections hotkeys screenshots operator status recording streaming replay buffer virtual camera outputs record video pause resume 录屏 录制视频 直播 回放 缓冲 虚拟摄像头 配置文件 场景集合 快捷键 截图 输出"
     tools: tools.yaml
