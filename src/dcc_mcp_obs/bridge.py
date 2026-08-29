@@ -811,7 +811,11 @@ class ObsControlBridge:
                 allowed.add("hotkeyName")
             if request_type == "SaveReplayBuffer":
                 allowed |= {"submitted"}
-            if set(response) - allowed or type(response.get("accepted")) is not bool:
+            if (
+                set(response) - allowed
+                or response.get("ok") is not True
+                or type(response.get("accepted")) is not bool
+            ):
                 raise BridgeError("OBS_RESPONSE_INVALID")
             if request_type == "TriggerAllowlistedHotkey" and (
                 not isinstance(response.get("hotkeyName"), str)

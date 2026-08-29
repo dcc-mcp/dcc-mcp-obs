@@ -143,6 +143,11 @@ class ObsWebSocketTransport:
             raise ProtocolError("OBS_TIMEOUT")
         try:
             request_sent = False
+
+            def mark_request_sent() -> None:
+                nonlocal request_sent
+                request_sent = True
+
             try:
                 socket = self._ensure_connected(deadline)
                 request_id = uuid.uuid4().hex
@@ -154,7 +159,6 @@ class ObsWebSocketTransport:
                     (time.time() + self._remaining(deadline)) * 1000
                 )
                 self._remaining(deadline)
-                request_sent = True
                 self._send_json(
                     socket,
                     {
@@ -170,6 +174,7 @@ class ObsWebSocketTransport:
                         },
                     },
                     deadline,
+                    on_send_attempt=mark_request_sent,
                 )
                 response = self._receive_response(socket, request_id, deadline)
                 status = response.get("requestStatus")
@@ -305,11 +310,20 @@ class ObsWebSocketTransport:
             raise ProtocolError("OBS_RESPONSE_INVALID")
         return value
 
-    def _send_json(self, socket: SocketLike, value: Mapping[str, object], deadline: float) -> None:
+    def _send_json(
+        self,
+        socket: SocketLike,
+        value: Mapping[str, object],
+        deadline: float,
+        *,
+        on_send_attempt: Callable[[], None] | None = None,
+    ) -> None:
         encoded = json.dumps(value, separators=(",", ":"), ensure_ascii=False)
         if len(encoded.encode("utf-8")) > MAX_FRAME_BYTES:
             raise ProtocolError("OBS_FRAME_TOO_LARGE")
         socket.settimeout(self._remaining(deadline))
+        if on_send_attempt is not None:
+            on_send_attempt()
         socket.send(encoded)
         self._within_deadline(deadline)
 

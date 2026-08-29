@@ -7,7 +7,12 @@ import json
 import pytest
 
 from dcc_mcp_obs.config import ObsEndpointConfig
-from dcc_mcp_obs.protocol import VENDOR_REQUESTS, ObsWebSocketTransport, ProtocolError
+from dcc_mcp_obs.protocol import (
+    MAX_FRAME_BYTES,
+    VENDOR_REQUESTS,
+    ObsWebSocketTransport,
+    ProtocolError,
+)
 
 
 class ScriptedSocket:
@@ -123,6 +128,36 @@ def test_post_send_mutation_timeout_is_indeterminate() -> None:
 
     with pytest.raises(ProtocolError, match="OBS_UI_INDETERMINATE"):
         transport.vendor_request("StartRecording", {}, deadline=0.005)
+
+
+def test_mutation_frame_validation_failure_before_send_preserves_frame_error() -> None:
+    socket = ScriptedSocket([_hello(), {"op": 2, "d": {"negotiatedRpcVersion": 1}}, _response()])
+    transport = ObsWebSocketTransport(
+        ObsEndpointConfig(password="secret"), connector=lambda _url, _timeout: socket
+    )
+
+    with pytest.raises(ProtocolError, match="OBS_FRAME_TOO_LARGE"):
+        transport.vendor_request("StartRecording", {"padding": "x" * MAX_FRAME_BYTES})
+
+    assert len(socket.sent) == 1  # identify only; the mutation frame was never attempted
+
+
+def test_mutation_settimeout_failure_before_send_preserves_connection_error() -> None:
+    class FailingRequestTimeoutSocket(ScriptedSocket):
+        def settimeout(self, timeout: float) -> None:
+            if len(self.sent) == 1:
+                raise OSError("settimeout failed")
+            super().settimeout(timeout)
+
+    socket = FailingRequestTimeoutSocket(
+        [_hello(), {"op": 2, "d": {"negotiatedRpcVersion": 1}}, _response()]
+    )
+    transport = ObsWebSocketTransport(
+        ObsEndpointConfig(password="secret"), connector=lambda _url, _timeout: socket
+    )
+
+    with pytest.raises(ProtocolError, match="OBS_CONNECTION_FAILED"):
+        transport.vendor_request("StartRecording", {})
 
 
 def test_late_mutation_response_is_indeterminate() -> None:

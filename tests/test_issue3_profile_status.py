@@ -254,6 +254,16 @@ def test_hotkey_success_matches_strict_tool_envelope():
     assert not errors
 
 
+def test_mutation_response_requires_explicit_ok_true():
+    mutation = {**IDENTITY, "accepted": True, "hotkeyName": "start_streaming", "eventSequence": 2}
+    mutation.pop("ok")
+    transport = FakeTransport([{**IDENTITY, "ready": True}, mutation])
+    bridge = ObsControlBridge(transport, expected_pid=1234)
+
+    with pytest.raises(BridgeError, match="OBS_RESPONSE_INVALID"):
+        bridge.trigger_allowlisted_hotkey("start_streaming")
+
+
 def test_empty_current_profile_is_rejected_by_bridge_contract():
     transport = FakeTransport(
         [{**IDENTITY, "ready": True}, {**IDENTITY, "profileName": "", "eventSequence": 2}]
