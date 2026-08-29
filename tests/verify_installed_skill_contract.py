@@ -72,6 +72,48 @@ def main() -> None:
             "outputPaused": False,
             "verified": True,
         },
+        "get_streaming_status": {**identity, "streamingActive": False},
+        "start_streaming": {**identity, "streamingActive": True, "verified": True},
+        "stop_streaming": {**identity, "streamingActive": False, "verified": True},
+        "get_replay_buffer_status": {**identity, "replayBufferActive": False},
+        "start_replay_buffer": {**identity, "replayBufferActive": True, "verified": True},
+        "stop_replay_buffer": {**identity, "replayBufferActive": False, "verified": True},
+        "save_replay_buffer": {
+            **identity,
+            "replayBufferActive": True,
+            "accepted": True,
+            "submitted": True,
+        },
+        "get_virtual_camera_status": {**identity, "virtualCameraActive": False},
+        "start_virtual_camera": {**identity, "virtualCameraActive": True, "verified": True},
+        "stop_virtual_camera": {**identity, "virtualCameraActive": False, "verified": True},
+        "list_outputs": {
+            **identity,
+            "outputs": [
+                {"outputName": "streaming", "outputKind": "streaming", "outputActive": False}
+            ],
+            "truncated": False,
+        },
+        "get_output_status": {
+            **identity,
+            "outputName": "streaming",
+            "outputKind": "streaming",
+            "outputActive": False,
+        },
+        "start_output": {
+            **identity,
+            "outputName": "streaming",
+            "outputKind": "streaming",
+            "outputActive": True,
+            "verified": True,
+        },
+        "stop_output": {
+            **identity,
+            "outputName": "streaming",
+            "outputKind": "streaming",
+            "outputActive": False,
+            "verified": True,
+        },
     }
 
     assert [tool["name"] for tool in tools] == list(results)

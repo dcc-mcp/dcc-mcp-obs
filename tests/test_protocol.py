@@ -111,7 +111,7 @@ def test_unknown_vendor_request_is_rejected_locally() -> None:
     assert connected is False
 
 
-def test_transport_allowlist_is_exactly_the_public_eight_requests() -> None:
+def test_transport_allowlist_is_exactly_the_typed_public_requests() -> None:
     assert {
         "GetPluginStatus",
         "ListScenes",
@@ -121,6 +121,20 @@ def test_transport_allowlist_is_exactly_the_public_eight_requests() -> None:
         "StopRecording",
         "PauseRecording",
         "ResumeRecording",
+        "GetStreamingStatus",
+        "StartStreaming",
+        "StopStreaming",
+        "GetReplayBufferStatus",
+        "StartReplayBuffer",
+        "StopReplayBuffer",
+        "SaveReplayBuffer",
+        "GetVirtualCameraStatus",
+        "StartVirtualCamera",
+        "StopVirtualCamera",
+        "ListOutputs",
+        "GetOutputStatus",
+        "StartOutput",
+        "StopOutput",
     } == VENDOR_REQUESTS
 
 
@@ -142,7 +156,7 @@ def test_bounded_events_are_reconciled_before_response() -> None:
 
 def test_request_id_mismatch_fails_closed_and_disconnects() -> None:
     response = _response()
-    socket = ScriptedSocket([_hello(), {"op": 2, "d": {}}, response])
+    socket = ScriptedSocket([_hello(), {"op": 2, "d": {"negotiatedRpcVersion": 1}}, response])
 
     def break_request_id(payload: str) -> None:
         value = json.loads(payload)
@@ -157,6 +171,28 @@ def test_request_id_mismatch_fails_closed_and_disconnects() -> None:
 
     with pytest.raises(ProtocolError, match="OBS_RESPONSE_MISMATCH"):
         transport.vendor_request("GetPluginStatus", {})
+    assert socket.closed is True
+
+
+@pytest.mark.parametrize(
+    "identify",
+    [
+        {"op": 2},
+        {"op": 2, "d": {}},
+        {"op": 2, "d": {"negotiatedRpcVersion": True}},
+        {"op": 2, "d": {"negotiatedRpcVersion": 0}},
+        {"op": 2, "d": {"negotiatedRpcVersion": 2}},
+    ],
+)
+def test_identify_requires_negotiated_rpc_version_one(identify) -> None:
+    socket = ScriptedSocket([_hello(), identify])
+    transport = ObsWebSocketTransport(
+        ObsEndpointConfig(password="secret"), connector=lambda _url, _timeout: socket
+    )
+
+    with pytest.raises(ProtocolError, match="OBS_VERSION_UNSUPPORTED"):
+        transport.vendor_request("GetPluginStatus", {})
+
     assert socket.closed is True
 
 

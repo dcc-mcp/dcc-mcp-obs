@@ -228,3 +228,388 @@ tools:
     annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
     call_examples: [{arguments: {}, note: Resume a paused recording and verify it is unpaused.}]
     next-tools: {on-success: [obs_control__get_recording_status], on-failure: [obs_control__get_status]}
+
+  - name: get_streaming_status
+    description: Get typed OBS streaming status.
+    source_file: scripts/get_streaming_status.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema: &streaming_status_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties: &streaming_status_properties
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context:
+          type: object
+          additionalProperties: false
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, streamingActive]
+          properties:
+            instanceId: {type: string, minLength: 1, maxLength: 128}
+            pluginVersion: {type: string, minLength: 1}
+            obsVersion: {type: string, minLength: 1}
+            hostPid: {type: integer, minimum: 1}
+            eventSequence: {type: integer, minimum: 0}
+            ok: {const: true}
+            streamingActive: {type: boolean}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {}, note: Read streaming state before any mutation.}]
+    next-tools: {on-failure: [obs_control__get_status]}
+  - name: start_streaming
+    description: Start OBS streaming and verify exact active readback.
+    source_file: scripts/start_streaming.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema: &streaming_mutation_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context, postcondition]
+      properties:
+        <<: *streaming_status_properties
+        postcondition:
+          type: object
+          additionalProperties: false
+          required: [verified]
+          properties: {verified: {const: true}}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {}, note: Start streaming only after explicit operator intent.}]
+    next-tools: {on-success: [obs_control__get_streaming_status], on-failure: [obs_control__get_status]}
+    call_examples: [{arguments: {}, note: Start streaming only after explicit operator intent.}]
+  - name: stop_streaming
+    description: Stop OBS streaming and verify exact inactive readback.
+    source_file: scripts/stop_streaming.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema: *streaming_mutation_output
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {}, note: Stop streaming only after explicit operator intent.}]
+    next-tools: {on-success: [obs_control__get_streaming_status], on-failure: [obs_control__get_status]}
+    call_examples: [{arguments: {}, note: Stop streaming only after explicit operator intent.}]
+  - name: get_replay_buffer_status
+    description: Get typed OBS replay-buffer status.
+    source_file: scripts/get_replay_buffer_status.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema: &replay_status_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties: &replay_status_properties
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context:
+          type: object
+          additionalProperties: false
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, replayBufferActive]
+          properties:
+            instanceId: {type: string, minLength: 1, maxLength: 128}
+            pluginVersion: {type: string, minLength: 1}
+            obsVersion: {type: string, minLength: 1}
+            hostPid: {type: integer, minimum: 1}
+            eventSequence: {type: integer, minimum: 0}
+            ok: {const: true}
+            replayBufferActive: {type: boolean}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {}, note: Read replay-buffer state before any mutation.}]
+    next-tools: {on-failure: [obs_control__get_status]}
+  - name: start_replay_buffer
+    description: Start OBS replay buffer and verify exact active readback.
+    source_file: scripts/start_replay_buffer.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context, postcondition]
+      properties:
+        <<: *replay_status_properties
+        postcondition:
+          type: object
+          additionalProperties: false
+          required: [verified]
+          properties: {verified: {const: true}}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {}, note: Start replay buffer only after explicit operator intent.}]
+    next-tools: {on-success: [obs_control__get_replay_buffer_status], on-failure: [obs_control__get_status]}
+  - name: stop_replay_buffer
+    description: Stop OBS replay buffer and verify exact inactive readback.
+    source_file: scripts/stop_replay_buffer.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context, postcondition]
+      properties:
+        <<: *replay_status_properties
+        postcondition:
+          type: object
+          additionalProperties: false
+          required: [verified]
+          properties: {verified: {const: true}}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {}, note: Stop replay buffer only after explicit operator intent.}]
+    next-tools: {on-success: [obs_control__get_replay_buffer_status], on-failure: [obs_control__get_status]}
+  - name: save_replay_buffer
+    description: Submit an active OBS replay-buffer save; completion is asynchronous and not verified.
+    source_file: scripts/save_replay_buffer.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        <<: *replay_status_properties
+        context:
+          type: object
+          additionalProperties: false
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, replayBufferActive, accepted, submitted]
+          properties:
+            instanceId: {type: string, minLength: 1, maxLength: 128}
+            pluginVersion: {type: string, minLength: 1}
+            obsVersion: {type: string, minLength: 1}
+            hostPid: {type: integer, minimum: 1}
+            eventSequence: {type: integer, minimum: 0}
+            ok: {const: true}
+            replayBufferActive: {type: boolean}
+            accepted: {const: true}
+            submitted: {const: true}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: false, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {}, note: Save only an active replay buffer after explicit operator intent.}]
+    next-tools: {on-success: [obs_control__get_replay_buffer_status], on-failure: [obs_control__get_status]}
+  - name: get_virtual_camera_status
+    description: Get typed OBS virtual-camera status.
+    source_file: scripts/get_virtual_camera_status.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema: &virtual_camera_status_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties: &virtual_camera_status_properties
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context:
+          type: object
+          additionalProperties: false
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, virtualCameraActive]
+          properties:
+            instanceId: {type: string, minLength: 1, maxLength: 128}
+            pluginVersion: {type: string, minLength: 1}
+            obsVersion: {type: string, minLength: 1}
+            hostPid: {type: integer, minimum: 1}
+            eventSequence: {type: integer, minimum: 0}
+            ok: {const: true}
+            virtualCameraActive: {type: boolean}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {}, note: Read virtual-camera state before any mutation.}]
+    next-tools: {on-failure: [obs_control__get_status]}
+  - name: start_virtual_camera
+    description: Start OBS virtual camera and verify exact active readback.
+    source_file: scripts/start_virtual_camera.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context, postcondition]
+      properties:
+        <<: *virtual_camera_status_properties
+        postcondition:
+          type: object
+          additionalProperties: false
+          required: [verified]
+          properties: {verified: {const: true}}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {}, note: Start virtual camera only after explicit operator intent.}]
+    next-tools: {on-success: [obs_control__get_virtual_camera_status], on-failure: [obs_control__get_status]}
+  - name: stop_virtual_camera
+    description: Stop OBS virtual camera and verify exact inactive readback.
+    source_file: scripts/stop_virtual_camera.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context, postcondition]
+      properties:
+        <<: *virtual_camera_status_properties
+        postcondition:
+          type: object
+          additionalProperties: false
+          required: [verified]
+          properties: {verified: {const: true}}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {}, note: Stop virtual camera only after explicit operator intent.}]
+    next-tools: {on-success: [obs_control__get_virtual_camera_status], on-failure: [obs_control__get_status]}
+  - name: list_outputs
+    description: List the bounded typed OBS output domains.
+    source_file: scripts/list_outputs.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema: &outputs_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context:
+          type: object
+          additionalProperties: false
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, outputs, truncated]
+          properties:
+            instanceId: {type: string, minLength: 1, maxLength: 128}
+            pluginVersion: {type: string, minLength: 1}
+            obsVersion: {type: string, minLength: 1}
+            hostPid: {type: integer, minimum: 1}
+            eventSequence: {type: integer, minimum: 0}
+            ok: {const: true}
+            outputs:
+              type: array
+              maxItems: 64
+              items:
+                type: object
+                additionalProperties: false
+                required: [outputName, outputKind, outputActive]
+                properties:
+                  outputName: {type: string, minLength: 1, maxLength: 256}
+                  outputKind: {type: string, minLength: 1, maxLength: 256}
+                  outputActive: {type: boolean}
+            truncated: {type: boolean}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {}, note: Discover the bounded typed output list.}]
+    next-tools: {on-success: [obs_control__get_output_status], on-failure: [obs_control__get_status]}
+  - name: get_output_status
+    description: Get exact status for one typed OBS output.
+    source_file: scripts/get_output_status.py
+    input_schema:
+      type: object
+      properties: {output_name: {type: string, minLength: 1, maxLength: 256}}
+      required: [output_name]
+      additionalProperties: false
+    output_schema: &output_status_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties: &output_status_properties
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context:
+          type: object
+          additionalProperties: false
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, outputName, outputKind, outputActive]
+          properties:
+            instanceId: {type: string, minLength: 1, maxLength: 128}
+            pluginVersion: {type: string, minLength: 1}
+            obsVersion: {type: string, minLength: 1}
+            hostPid: {type: integer, minimum: 1}
+            eventSequence: {type: integer, minimum: 0}
+            ok: {const: true}
+            outputName: {type: string, minLength: 1, maxLength: 256}
+            outputKind: {type: string, minLength: 1, maxLength: 256}
+            outputActive: {type: boolean}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {output_name: streaming}, note: Read one exact output status.}]
+    next-tools: {on-failure: [obs_control__list_outputs, obs_control__get_status]}
+  - name: start_output
+    description: Start one typed OBS output and verify exact active readback.
+    source_file: scripts/start_output.py
+    input_schema:
+      type: object
+      properties: {output_name: {type: string, minLength: 1, maxLength: 256}}
+      required: [output_name]
+      additionalProperties: false
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context, postcondition]
+      properties:
+        <<: *output_status_properties
+        postcondition:
+          type: object
+          additionalProperties: false
+          required: [verified]
+          properties: {verified: {const: true}}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {output_name: streaming}, note: Start one typed output only after explicit operator intent.}]
+    next-tools: {on-success: [obs_control__get_output_status], on-failure: [obs_control__get_status]}
+  - name: stop_output
+    description: Stop one typed OBS output and verify exact inactive readback.
+    source_file: scripts/stop_output.py
+    input_schema:
+      type: object
+      properties: {output_name: {type: string, minLength: 1, maxLength: 256}}
+      required: [output_name]
+      additionalProperties: false
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context, postcondition]
+      properties:
+        <<: *output_status_properties
+        postcondition:
+          type: object
+          additionalProperties: false
+          required: [verified]
+          properties: {verified: {const: true}}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {output_name: streaming}, note: Stop one typed output only after explicit operator intent.}]
+    next-tools: {on-success: [obs_control__get_output_status], on-failure: [obs_control__get_status]}

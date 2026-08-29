@@ -33,6 +33,7 @@ constexpr char kPluginVersion[] = "1.0.0"; // x-release-please-version
 constexpr auto kUiTimeout = std::chrono::seconds(5);
 constexpr size_t kMaxScenes = 256;
 constexpr size_t kMaxSources = 512;
+constexpr size_t kMaxOutputs = 8;
 
 obs_websocket_vendor g_vendor = nullptr;
 std::atomic<uint64_t> g_event_sequence{0};
@@ -47,11 +48,26 @@ enum class UiOperation {
 	StopRecording,
 	PauseRecording,
 	ResumeRecording,
+	StreamingStatus,
+	StartStreaming,
+	StopStreaming,
+	ReplayBufferStatus,
+	StartReplayBuffer,
+	StopReplayBuffer,
+	SaveReplayBuffer,
+	VirtualCameraStatus,
+	StartVirtualCamera,
+	StopVirtualCamera,
+	ListOutputs,
+	OutputStatus,
+	StartOutput,
+	StopOutput,
 };
 
 struct UiState {
 	UiOperation operation;
 	std::string scene_name;
+	std::string output_name;
 	std::mutex mutex;
 	std::condition_variable condition;
 	bool complete = false;
@@ -181,6 +197,80 @@ obs_data_t *recording_status()
 	return result;
 }
 
+obs_data_t *streaming_status()
+{
+	auto *result = obs_data_create();
+	obs_data_set_bool(result, "streamingActive", obs_frontend_streaming_active());
+	return result;
+}
+
+obs_data_t *replay_buffer_status()
+{
+	auto *result = obs_data_create();
+	obs_data_set_bool(result, "replayBufferActive", obs_frontend_replay_buffer_active());
+	return result;
+}
+
+obs_data_t *virtual_camera_status()
+{
+	auto *result = obs_data_create();
+	obs_data_set_bool(result, "virtualCameraActive", obs_frontend_virtualcam_active());
+	return result;
+}
+
+void append_output(obs_data_array_t *outputs, const char *name, const char *kind, bool active)
+{
+	if (obs_data_array_count(outputs) >= kMaxOutputs)
+		return;
+	auto *entry = obs_data_create();
+	obs_data_set_string(entry, "outputName", name);
+	obs_data_set_string(entry, "outputKind", kind);
+	obs_data_set_bool(entry, "outputActive", active);
+	obs_data_array_push_back(outputs, entry);
+	obs_data_release(entry);
+}
+
+obs_data_t *list_outputs()
+{
+	auto *result = obs_data_create();
+	auto *outputs = obs_data_array_create();
+	append_output(outputs, "recording", "recording", obs_frontend_recording_active());
+	append_output(outputs, "streaming", "streaming", obs_frontend_streaming_active());
+	append_output(outputs, "replay_buffer", "replay_buffer", obs_frontend_replay_buffer_active());
+	append_output(outputs, "virtual_camera", "virtual_camera", obs_frontend_virtualcam_active());
+	obs_data_set_array(result, "outputs", outputs);
+	obs_data_set_bool(result, "truncated", false);
+	obs_data_array_release(outputs);
+	return result;
+}
+
+obs_data_t *output_status(const std::string &name)
+{
+	auto *result = obs_data_create();
+	bool active = false;
+	const char *kind = nullptr;
+	if (name == "recording") {
+		active = obs_frontend_recording_active();
+		kind = "recording";
+	} else if (name == "streaming") {
+		active = obs_frontend_streaming_active();
+		kind = "streaming";
+	} else if (name == "replay_buffer") {
+		active = obs_frontend_replay_buffer_active();
+		kind = "replay_buffer";
+	} else if (name == "virtual_camera") {
+		active = obs_frontend_virtualcam_active();
+		kind = "virtual_camera";
+	} else {
+		set_error(result, "OBS_OUTPUT_NOT_FOUND");
+		return result;
+	}
+	obs_data_set_string(result, "outputName", name.c_str());
+	obs_data_set_string(result, "outputKind", kind);
+	obs_data_set_bool(result, "outputActive", active);
+	return result;
+}
+
 void execute_ui_operation(void *private_data)
 {
 	std::unique_ptr<std::shared_ptr<UiState>> holder(static_cast<std::shared_ptr<UiState> *>(private_data));
@@ -188,7 +278,14 @@ void execute_ui_operation(void *private_data)
 	obs_data_t *result = nullptr;
 	const bool is_mutation =
 		state->operation == UiOperation::StartRecording || state->operation == UiOperation::StopRecording ||
-		state->operation == UiOperation::PauseRecording || state->operation == UiOperation::ResumeRecording;
+		state->operation == UiOperation::PauseRecording || state->operation == UiOperation::ResumeRecording ||
+		state->operation == UiOperation::StartStreaming || state->operation == UiOperation::StopStreaming ||
+		state->operation == UiOperation::StartReplayBuffer ||
+		state->operation == UiOperation::StopReplayBuffer ||
+		state->operation == UiOperation::SaveReplayBuffer ||
+		state->operation == UiOperation::StartVirtualCamera ||
+		state->operation == UiOperation::StopVirtualCamera || state->operation == UiOperation::StartOutput ||
+		state->operation == UiOperation::StopOutput;
 	if (!is_mutation && !state->gate.try_start()) {
 		result = obs_data_create();
 		set_error(result, "OBS_UI_TIMEOUT");
@@ -263,6 +360,120 @@ void execute_ui_operation(void *private_data)
 			}
 			break;
 		}
+		case UiOperation::StreamingStatus:
+			result = streaming_status();
+			break;
+		case UiOperation::StartStreaming:
+			result = obs_data_create();
+			if (!state->gate.claim_mutation())
+				set_error(result, "OBS_UI_TIMEOUT");
+			else if (!obs_frontend_streaming_active())
+				obs_frontend_streaming_start();
+			if (!obs_data_has_user_value(result, "ok"))
+				obs_data_set_bool(result, "accepted", true);
+			break;
+		case UiOperation::StopStreaming:
+			result = obs_data_create();
+			if (!state->gate.claim_mutation())
+				set_error(result, "OBS_UI_TIMEOUT");
+			else if (obs_frontend_streaming_active())
+				obs_frontend_streaming_stop();
+			if (!obs_data_has_user_value(result, "ok"))
+				obs_data_set_bool(result, "accepted", true);
+			break;
+		case UiOperation::ReplayBufferStatus:
+			result = replay_buffer_status();
+			break;
+		case UiOperation::StartReplayBuffer:
+			result = obs_data_create();
+			if (!state->gate.claim_mutation())
+				set_error(result, "OBS_UI_TIMEOUT");
+			else if (!obs_frontend_replay_buffer_active())
+				obs_frontend_replay_buffer_start();
+			if (!obs_data_has_user_value(result, "ok"))
+				obs_data_set_bool(result, "accepted", true);
+			break;
+		case UiOperation::StopReplayBuffer:
+			result = obs_data_create();
+			if (!state->gate.claim_mutation())
+				set_error(result, "OBS_UI_TIMEOUT");
+			else if (obs_frontend_replay_buffer_active())
+				obs_frontend_replay_buffer_stop();
+			if (!obs_data_has_user_value(result, "ok"))
+				obs_data_set_bool(result, "accepted", true);
+			break;
+		case UiOperation::SaveReplayBuffer:
+			result = obs_data_create();
+			if (!state->gate.claim_mutation())
+				set_error(result, "OBS_UI_TIMEOUT");
+			else if (!obs_frontend_replay_buffer_active())
+				set_error(result, "OBS_OUTPUT_NOT_ACTIVE");
+			else {
+				obs_frontend_replay_buffer_save();
+				obs_data_set_bool(result, "accepted", true);
+				obs_data_set_bool(result, "submitted", true);
+			}
+			break;
+		case UiOperation::VirtualCameraStatus:
+			result = virtual_camera_status();
+			break;
+		case UiOperation::StartVirtualCamera:
+			result = obs_data_create();
+			if (!state->gate.claim_mutation())
+				set_error(result, "OBS_UI_TIMEOUT");
+			else if (!obs_frontend_virtualcam_active())
+				obs_frontend_start_virtualcam();
+			if (!obs_data_has_user_value(result, "ok"))
+				obs_data_set_bool(result, "accepted", true);
+			break;
+		case UiOperation::StopVirtualCamera:
+			result = obs_data_create();
+			if (!state->gate.claim_mutation())
+				set_error(result, "OBS_UI_TIMEOUT");
+			else if (obs_frontend_virtualcam_active())
+				obs_frontend_stop_virtualcam();
+			if (!obs_data_has_user_value(result, "ok"))
+				obs_data_set_bool(result, "accepted", true);
+			break;
+		case UiOperation::ListOutputs:
+			result = list_outputs();
+			break;
+		case UiOperation::OutputStatus:
+			result = output_status(state->output_name);
+			break;
+		case UiOperation::StartOutput:
+		case UiOperation::StopOutput:
+			result = obs_data_create();
+			if (!state->gate.claim_mutation()) {
+				set_error(result, "OBS_UI_TIMEOUT");
+				break;
+			}
+			if (state->output_name == "recording") {
+				if (state->operation == UiOperation::StartOutput)
+					obs_frontend_recording_start();
+				else
+					obs_frontend_recording_stop();
+			} else if (state->output_name == "streaming") {
+				if (state->operation == UiOperation::StartOutput)
+					obs_frontend_streaming_start();
+				else
+					obs_frontend_streaming_stop();
+			} else if (state->output_name == "replay_buffer") {
+				if (state->operation == UiOperation::StartOutput)
+					obs_frontend_replay_buffer_start();
+				else
+					obs_frontend_replay_buffer_stop();
+			} else if (state->output_name == "virtual_camera") {
+				if (state->operation == UiOperation::StartOutput)
+					obs_frontend_start_virtualcam();
+				else
+					obs_frontend_stop_virtualcam();
+			} else {
+				set_error(result, "OBS_OUTPUT_NOT_FOUND");
+				break;
+			}
+			obs_data_set_bool(result, "accepted", true);
+			break;
 		}
 	}
 
@@ -278,11 +489,13 @@ void execute_ui_operation(void *private_data)
 	state->condition.notify_one();
 }
 
-bool run_ui_operation(UiOperation operation, const std::string &scene_name, obs_data_t *response)
+bool run_ui_operation(UiOperation operation, const std::string &scene_name, const std::string &output_name,
+		      obs_data_t *response)
 {
 	auto state = std::make_shared<UiState>();
 	state->operation = operation;
 	state->scene_name = scene_name;
+	state->output_name = output_name;
 	auto *holder = new std::shared_ptr<UiState>(state);
 	obs_queue_task(OBS_TASK_UI, execute_ui_operation, holder, false);
 
@@ -314,13 +527,42 @@ UiOperation operation_for(const std::string &request)
 		return UiOperation::StopRecording;
 	if (request == "PauseRecording")
 		return UiOperation::PauseRecording;
-	return UiOperation::ResumeRecording;
+	if (request == "ResumeRecording")
+		return UiOperation::ResumeRecording;
+	if (request == "GetStreamingStatus")
+		return UiOperation::StreamingStatus;
+	if (request == "StartStreaming")
+		return UiOperation::StartStreaming;
+	if (request == "StopStreaming")
+		return UiOperation::StopStreaming;
+	if (request == "GetReplayBufferStatus")
+		return UiOperation::ReplayBufferStatus;
+	if (request == "StartReplayBuffer")
+		return UiOperation::StartReplayBuffer;
+	if (request == "StopReplayBuffer")
+		return UiOperation::StopReplayBuffer;
+	if (request == "SaveReplayBuffer")
+		return UiOperation::SaveReplayBuffer;
+	if (request == "GetVirtualCameraStatus")
+		return UiOperation::VirtualCameraStatus;
+	if (request == "StartVirtualCamera")
+		return UiOperation::StartVirtualCamera;
+	if (request == "StopVirtualCamera")
+		return UiOperation::StopVirtualCamera;
+	if (request == "ListOutputs")
+		return UiOperation::ListOutputs;
+	if (request == "GetOutputStatus")
+		return UiOperation::OutputStatus;
+	if (request == "StartOutput")
+		return UiOperation::StartOutput;
+	return UiOperation::StopOutput;
 }
 
 void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *private_data)
 {
 	const auto *request = static_cast<const char *>(private_data);
 	std::string scene_name;
+	std::string output_name;
 	if (std::string(request) == "ListSources" && request_data != nullptr) {
 		const char *value = obs_data_get_string(request_data, "sceneName");
 		if (value != nullptr)
@@ -330,7 +572,18 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 			return;
 		}
 	}
-	run_ui_operation(operation_for(request), scene_name, response_data);
+	if ((std::string(request) == "GetOutputStatus" || std::string(request) == "StartOutput" ||
+	     std::string(request) == "StopOutput") &&
+	    request_data != nullptr) {
+		const char *value = obs_data_get_string(request_data, "outputName");
+		if (value != nullptr)
+			output_name = value;
+		if (output_name.empty() || output_name.size() > 256) {
+			set_error(response_data, "OBS_ARGUMENT_INVALID");
+			return;
+		}
+	}
+	run_ui_operation(operation_for(request), scene_name, output_name, response_data);
 }
 
 void frontend_event(enum obs_frontend_event, void *)
@@ -345,8 +598,12 @@ void frontend_event(enum obs_frontend_event, void *)
 }
 
 constexpr const char *kRequests[] = {
-	"GetPluginStatus", "ListScenes",    "ListSources",    "GetRecordingStatus",
-	"StartRecording",  "StopRecording", "PauseRecording", "ResumeRecording",
+	"GetPluginStatus",    "ListScenes",        "ListSources",      "GetRecordingStatus",
+	"StartRecording",     "StopRecording",     "PauseRecording",   "ResumeRecording",
+	"GetStreamingStatus", "StartStreaming",    "StopStreaming",    "GetReplayBufferStatus",
+	"StartReplayBuffer",  "StopReplayBuffer",  "SaveReplayBuffer", "GetVirtualCameraStatus",
+	"StartVirtualCamera", "StopVirtualCamera", "ListOutputs",      "GetOutputStatus",
+	"StartOutput",        "StopOutput",
 };
 
 } // namespace

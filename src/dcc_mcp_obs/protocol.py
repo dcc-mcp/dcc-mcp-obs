@@ -29,6 +29,20 @@ VENDOR_REQUESTS = frozenset(
         "StopRecording",
         "PauseRecording",
         "ResumeRecording",
+        "GetStreamingStatus",
+        "StartStreaming",
+        "StopStreaming",
+        "GetReplayBufferStatus",
+        "StartReplayBuffer",
+        "StopReplayBuffer",
+        "SaveReplayBuffer",
+        "GetVirtualCameraStatus",
+        "StartVirtualCamera",
+        "StopVirtualCamera",
+        "ListOutputs",
+        "GetOutputStatus",
+        "StartOutput",
+        "StopOutput",
     }
 )
 
@@ -151,7 +165,14 @@ class ObsWebSocketTransport:
                 raise ProtocolError("OBS_HANDSHAKE_INVALID")
             details = hello["d"]
             rpc_version = details.get("rpcVersion")
-            if not isinstance(rpc_version, int) or isinstance(rpc_version, bool) or rpc_version < 1:
+            ws_version = details.get("obsWebSocketVersion")
+            if (
+                not isinstance(rpc_version, int)
+                or isinstance(rpc_version, bool)
+                or rpc_version != 1
+                or not isinstance(ws_version, str)
+                or not ws_version.startswith("5.")
+            ):
                 raise ProtocolError("OBS_VERSION_UNSUPPORTED")
             identify: dict[str, object] = {"rpcVersion": 1, "eventSubscriptions": 0}
             authentication = details.get("authentication")
@@ -162,6 +183,14 @@ class ObsWebSocketTransport:
             identified = self._read_json(socket, deadline)
             if identified.get("op") != 2:
                 raise ProtocolError("OBS_AUTHENTICATION_FAILED")
+            identified_details = identified.get("d")
+            negotiated_rpc_version = (
+                identified_details.get("negotiatedRpcVersion")
+                if isinstance(identified_details, dict)
+                else None
+            )
+            if type(negotiated_rpc_version) is not int or negotiated_rpc_version != 1:
+                raise ProtocolError("OBS_VERSION_UNSUPPORTED")
         except Exception:
             with suppress(Exception):
                 socket.close()

@@ -127,28 +127,28 @@
     },
     {
       "domain": "replay_buffer",
-      "status": "planned",
+      "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": [],
-      "remaining_operations": ["get_replay_buffer_status", "start_replay_buffer", "stop_replay_buffer", "save_replay_buffer"],
+      "delivered_operations": ["get_replay_buffer_status", "start_replay_buffer", "stop_replay_buffer", "save_replay_buffer"],
+      "remaining_operations": [],
       "dangerous_operations": ["start_replay_buffer", "stop_replay_buffer", "save_replay_buffer"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/2"
     },
     {
       "domain": "streaming",
-      "status": "planned",
+      "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": [],
-      "remaining_operations": ["get_stream_status", "start_stream", "stop_stream"],
-      "dangerous_operations": ["start_stream", "stop_stream"],
+      "delivered_operations": ["get_streaming_status", "start_streaming", "stop_streaming"],
+      "remaining_operations": [],
+      "dangerous_operations": ["start_streaming", "stop_streaming"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/2"
     },
     {
       "domain": "virtual_camera",
-      "status": "planned",
+      "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": [],
-      "remaining_operations": ["get_virtual_camera_status", "start_virtual_camera", "stop_virtual_camera"],
+      "delivered_operations": ["get_virtual_camera_status", "start_virtual_camera", "stop_virtual_camera"],
+      "remaining_operations": [],
       "dangerous_operations": ["start_virtual_camera", "stop_virtual_camera"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/2"
     },
@@ -163,10 +163,10 @@
     },
     {
       "domain": "outputs",
-      "status": "planned",
+      "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": [],
-      "remaining_operations": ["list_outputs", "get_output_status", "start_output", "stop_output"],
+      "delivered_operations": ["list_outputs", "get_output_status", "start_output", "stop_output"],
+      "remaining_operations": [],
       "dangerous_operations": ["start_output", "stop_output"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/2"
     },

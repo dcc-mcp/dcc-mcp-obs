@@ -28,7 +28,7 @@ as shipped tools until their typed contracts land.
 
 ## Full-control roadmap
 
-- [Streaming, replay buffer, virtual camera, and outputs](https://github.com/dcc-mcp/dcc-mcp-obs/issues/2)
+- Streaming, replay buffer, virtual camera, and typed output controls (issue #2)
 - [Profiles, scene collections, bounded hotkeys, screenshots, and operator status](https://github.com/dcc-mcp/dcc-mcp-obs/issues/3)
 - [Disposable real-OBS acceptance](https://github.com/dcc-mcp/dcc-mcp-obs/issues/4)
 - [Inputs, properties, filters, audio, and media](https://github.com/dcc-mcp/dcc-mcp-obs/issues/5)
@@ -84,10 +84,11 @@ dcc-mcp-obs --host-pid <obs-pid>
 ## Agent discovery
 
 The bundled `obs-control` skill includes English and Chinese discovery aliases
-for OBS, Open Broadcaster Software, recording, scene/source inspection, pause,
-resume, 录屏, and 录制视频. Agents search and load the skill before calling the
-exact eight tools in this first slice. Streaming and scene switching remain
-roadmap capabilities, not shipped native controls.
+for OBS, Open Broadcaster Software, recording, streaming, replay buffer,
+virtual camera, outputs, scene/source inspection, pause, resume, 录屏, 直播,
+回放缓冲, and 虚拟摄像头. Agents search and load the skill before calling the
+typed tools. Scene switching remains a roadmap capability, not a shipped
+native control.
 
 OBS control is native-plugin/WebSocket first. Unsupported visual-only actions
 may use DCC-MCP `ui-control` with project-owned DCC-CUA only after exact PID
