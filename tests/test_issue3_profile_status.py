@@ -88,6 +88,62 @@ def test_selection_rejects_truncated_discovery_before_mutation():
     assert len(transport.requests) == 2
 
 
+def test_exact_cap_profile_list_is_complete_and_selectable():
+    profiles = [{"profileName": f"Profile-{index}"} for index in range(128)]
+    target = profiles[-1]["profileName"]
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {**IDENTITY, "profiles": profiles, "truncated": False, "eventSequence": 2},
+            {**IDENTITY, "accepted": True, "eventSequence": 3},
+            {**IDENTITY, "profileName": target, "eventSequence": 4},
+        ]
+    )
+    bridge = ObsControlBridge(transport, expected_pid=1234)
+    assert bridge.set_current_profile(target)["profileName"] == target
+
+
+def test_exact_cap_scene_collection_list_is_complete_and_selectable():
+    collections = [{"sceneCollectionName": f"Collection-{index}"} for index in range(128)]
+    target = collections[-1]["sceneCollectionName"]
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {
+                **IDENTITY,
+                "sceneCollections": collections,
+                "truncated": False,
+                "eventSequence": 2,
+            },
+            {**IDENTITY, "accepted": True, "eventSequence": 3},
+            {**IDENTITY, "sceneCollectionName": target, "eventSequence": 4},
+        ]
+    )
+    bridge = ObsControlBridge(transport, expected_pid=1234)
+    assert bridge.set_current_scene_collection(target)["sceneCollectionName"] == target
+
+
+def test_allowlisted_hotkeys_require_truncated_field():
+    transport = FakeTransport(
+        [{**IDENTITY, "ready": True}, {**IDENTITY, "hotkeys": [], "eventSequence": 2}]
+    )
+    bridge = ObsControlBridge(transport, expected_pid=1234)
+    with pytest.raises(BridgeError, match="OBS_RESPONSE_INVALID"):
+        bridge.list_allowlisted_hotkeys()
+
+
+def test_operator_status_requires_ui_thread_and_redaction_fields():
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {**IDENTITY, "ready": True, "eventSequence": 2},
+        ]
+    )
+    bridge = ObsControlBridge(transport, expected_pid=1234)
+    with pytest.raises(BridgeError, match="OBS_RESPONSE_INVALID"):
+        bridge.get_operator_status()
+
+
 def test_allowlisted_hotkey_and_screenshot_redact_path():
     transport = FakeTransport(
         [

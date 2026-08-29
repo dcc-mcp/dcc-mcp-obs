@@ -686,7 +686,7 @@ class ObsControlBridge:
                 set(response) - (_IDENTITY_KEYS | {"hotkeys", "truncated"})
                 or not isinstance(hotkeys, list)
                 or len(hotkeys) > 128
-                or ("truncated" in response and type(response.get("truncated")) is not bool)
+                or type(response.get("truncated")) is not bool
                 or any(
                     not isinstance(item, dict)
                     or set(item) - {"hotkeyName", "description"}
@@ -718,8 +718,8 @@ class ObsControlBridge:
             if (
                 set(response) - allowed
                 or response.get("ready") is not True
-                or ("uiThreadReady" in response and response["uiThreadReady"] is not True)
-                or ("configPathRedacted" in response and response["configPathRedacted"] is not True)
+                or response.get("uiThreadReady") is not True
+                or response.get("configPathRedacted") is not True
                 or (
                     "profileName" in response
                     and (

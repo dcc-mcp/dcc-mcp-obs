@@ -12,7 +12,7 @@
       "domain": "status",
       "status": "partial",
       "authority": "native_plugin",
-      "delivered_operations": ["get_plugin_status", "get_obs_identity", "get_event_sequence"],
+      "delivered_operations": ["get_plugin_status", "get_obs_identity", "get_event_sequence", "get_operator_status"],
       "remaining_operations": ["get_output_statistics", "get_dropped_frame_statistics"],
       "dangerous_operations": [],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/2"

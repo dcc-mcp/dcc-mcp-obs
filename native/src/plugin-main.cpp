@@ -228,11 +228,13 @@ obs_data_t *list_profiles()
 	char **names = obs_frontend_get_profiles();
 	size_t count = 0;
 	if (names != nullptr) {
-		for (; count < kMaxProfiles && names[count] != nullptr; ++count) {
-			auto *entry = obs_data_create();
-			obs_data_set_string(entry, "profileName", names[count]);
-			obs_data_array_push_back(profiles, entry);
-			obs_data_release(entry);
+		for (; count <= kMaxProfiles && names[count] != nullptr; ++count) {
+			if (count < kMaxProfiles) {
+				auto *entry = obs_data_create();
+				obs_data_set_string(entry, "profileName", names[count]);
+				obs_data_array_push_back(profiles, entry);
+				obs_data_release(entry);
+			}
 		}
 		bfree(names);
 	}
@@ -242,7 +244,7 @@ obs_data_t *list_profiles()
 		bfree(current);
 	}
 	obs_data_set_array(result, "profiles", profiles);
-	obs_data_set_bool(result, "truncated", count >= kMaxProfiles);
+	obs_data_set_bool(result, "truncated", count > kMaxProfiles);
 	obs_data_array_release(profiles);
 	return result;
 }
@@ -269,11 +271,13 @@ obs_data_t *list_scene_collections()
 	char **names = obs_frontend_get_scene_collections();
 	size_t count = 0;
 	if (names != nullptr) {
-		for (; count < kMaxSceneCollections && names[count] != nullptr; ++count) {
-			auto *entry = obs_data_create();
-			obs_data_set_string(entry, "sceneCollectionName", names[count]);
-			obs_data_array_push_back(collections, entry);
-			obs_data_release(entry);
+		for (; count <= kMaxSceneCollections && names[count] != nullptr; ++count) {
+			if (count < kMaxSceneCollections) {
+				auto *entry = obs_data_create();
+				obs_data_set_string(entry, "sceneCollectionName", names[count]);
+				obs_data_array_push_back(collections, entry);
+				obs_data_release(entry);
+			}
 		}
 		bfree(names);
 	}
@@ -283,7 +287,7 @@ obs_data_t *list_scene_collections()
 		bfree(current);
 	}
 	obs_data_set_array(result, "sceneCollections", collections);
-	obs_data_set_bool(result, "truncated", count >= kMaxSceneCollections);
+	obs_data_set_bool(result, "truncated", count > kMaxSceneCollections);
 	obs_data_array_release(collections);
 	return result;
 }

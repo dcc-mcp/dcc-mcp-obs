@@ -40,3 +40,7 @@ def test_native_deadline_and_response_contracts_are_explicit() -> None:
     assert "OBS_SCREENSHOT_UNVERIFIED" in source
     assert "OBS_UI_INDETERMINATE" in source
     assert "names[count] != nullptr" in source
+    assert "count <= kMaxProfiles" in source
+    assert "count > kMaxProfiles" in source
+    assert "count <= kMaxSceneCollections" in source
+    assert "count > kMaxSceneCollections" in source
