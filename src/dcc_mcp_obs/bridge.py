@@ -122,7 +122,7 @@ class ObsControlBridge:
         *,
         expected_pid: int,
         expected_instance_id: str | None = None,
-        postcondition_attempts: int = 6,
+        postcondition_attempts: int = 20,
         postcondition_poll_seconds: float = 0.1,
         deadline: float | None = None,
         clock: Callable[[], float] = time.monotonic,

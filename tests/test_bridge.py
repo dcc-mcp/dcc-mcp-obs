@@ -123,6 +123,38 @@ def test_recording_mutation_reconciles_bounded_delayed_postcondition() -> None:
     ) == 2
 
 
+def test_recording_stop_allows_bounded_obs_finalization_delay() -> None:
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {**IDENTITY, "accepted": True, "eventSequence": 8},
+            *[
+                {
+                    **IDENTITY,
+                    "outputActive": True,
+                    "outputPaused": False,
+                    "eventSequence": 9 + offset,
+                }
+                for offset in range(6)
+            ],
+            {**IDENTITY, "outputActive": False, "outputPaused": False, "eventSequence": 15},
+        ]
+    )
+    bridge = ObsControlBridge(
+        transport,
+        expected_pid=4242,
+        postcondition_poll_seconds=0,
+    )
+
+    result = bridge.stop_recording()
+
+    assert result["verified"] is True
+    assert result["outputActive"] is False
+    assert [request for request, _data, _deadline in transport.requests].count(
+        "GetRecordingStatus"
+    ) == 7
+
+
 def test_cross_instance_drift_fails_before_following_call() -> None:
     transport = FakeTransport(
         [
