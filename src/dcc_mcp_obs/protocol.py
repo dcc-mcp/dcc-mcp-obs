@@ -274,9 +274,8 @@ class ObsWebSocketTransport:
                 raise ProtocolError("OBS_VERSION_UNSUPPORTED")
             identify: dict[str, object] = {"rpcVersion": 1, "eventSubscriptions": 0}
             authentication = details.get("authentication")
-            if authentication is None:
-                raise ProtocolError("OBS_AUTHENTICATION_REQUIRED")
-            identify["authentication"] = self._authentication(authentication)
+            if authentication is not None:
+                identify["authentication"] = self._authentication(authentication)
             self._send_json(socket, {"op": 1, "d": identify}, deadline)
             identified = self._read_json(socket, deadline)
             if identified.get("op") != 2:

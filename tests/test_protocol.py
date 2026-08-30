@@ -204,19 +204,19 @@ def test_post_send_malformed_response_is_indeterminate_for_mutation() -> None:
         transport.vendor_request("SetCurrentSceneCollection", {"sceneCollectionName": "Main"})
 
 
-def test_rejects_hello_without_authentication_before_identify() -> None:
+def test_identifies_without_authentication_when_server_does_not_require_it() -> None:
     hello = _hello()
     del hello["d"]["authentication"]
-    socket = ScriptedSocket([hello])
-    transport = ObsWebSocketTransport(
-        ObsEndpointConfig(password="secret"), connector=lambda _url, _timeout: socket
-    )
+    socket = ScriptedSocket([hello, {"op": 2, "d": {"negotiatedRpcVersion": 1}}, _response()])
+    transport = ObsWebSocketTransport(ObsEndpointConfig(), connector=lambda _url, _timeout: socket)
 
-    with pytest.raises(ProtocolError, match="OBS_AUTHENTICATION_REQUIRED"):
-        transport.vendor_request("GetPluginStatus", {})
+    result = transport.vendor_request("GetPluginStatus", {})
 
-    assert socket.sent == []
-    assert socket.closed is True
+    assert socket.sent[0] == {
+        "op": 1,
+        "d": {"rpcVersion": 1, "eventSubscriptions": 0},
+    }
+    assert result == {"instanceId": "one", "ready": True}
 
 
 def test_unknown_vendor_request_is_rejected_locally() -> None:
