@@ -75,6 +75,7 @@ PUBLIC_DOWNSTREAM_ERRORS = frozenset(
 _IDENTITY_KEYS = frozenset(
     {"instanceId", "pluginVersion", "obsVersion", "hostPid", "eventSequence", "ok"}
 )
+WINDOW_CAPTURE_METHODS = frozenset({"automatic", "bitblt", "windows_graphics_capture"})
 
 
 def _public_error_code(raw: object, *, fallback: str) -> str:
@@ -337,6 +338,7 @@ class ObsControlBridge:
         window_title: str,
         capture_cursor: bool = True,
         client_area: bool = True,
+        capture_method: str = "automatic",
         enabled: bool = True,
     ) -> dict[str, object]:
         payload = self._window_capture_payload(
@@ -347,6 +349,7 @@ class ObsControlBridge:
             window_title=window_title,
             capture_cursor=capture_cursor,
             client_area=client_area,
+            capture_method=capture_method,
             enabled=enabled,
         )
         deadline = self._operation_deadline()
@@ -365,6 +368,7 @@ class ObsControlBridge:
         window_title: str,
         capture_cursor: bool = True,
         client_area: bool = True,
+        capture_method: str = "automatic",
         enabled: bool = True,
     ) -> dict[str, object]:
         payload = self._window_capture_payload(
@@ -375,9 +379,40 @@ class ObsControlBridge:
             window_title=window_title,
             capture_cursor=capture_cursor,
             client_area=client_area,
+            capture_method=capture_method,
             enabled=enabled,
         )
         return self._readback_window_capture(payload, deadline=self._operation_deadline())
+
+    def set_window_capture_method(
+        self,
+        *,
+        scene_name: str,
+        source_name: str,
+        process_id: int,
+        window_handle: int,
+        window_title: str,
+        capture_cursor: bool = True,
+        client_area: bool = True,
+        capture_method: str,
+        enabled: bool = True,
+    ) -> dict[str, object]:
+        payload = self._window_capture_payload(
+            scene_name=scene_name,
+            source_name=source_name,
+            process_id=process_id,
+            window_handle=window_handle,
+            window_title=window_title,
+            capture_cursor=capture_cursor,
+            client_area=client_area,
+            capture_method=capture_method,
+            enabled=enabled,
+        )
+        deadline = self._operation_deadline()
+        accepted = self._checked("SetWindowCaptureMethod", payload, deadline=deadline)
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        return self._readback_window_capture(payload, deadline=deadline)
 
     def update_scene_item(
         self,
@@ -723,6 +758,7 @@ class ObsControlBridge:
         window_title: str,
         capture_cursor: bool,
         client_area: bool,
+        capture_method: str,
         enabled: bool,
     ) -> dict[str, object]:
         scene_name = self._require_name(scene_name)
@@ -734,6 +770,8 @@ class ObsControlBridge:
             raise BridgeError("OBS_ARGUMENT_INVALID")
         if any(type(value) is not bool for value in (capture_cursor, client_area, enabled)):
             raise BridgeError("OBS_ARGUMENT_INVALID")
+        if type(capture_method) is not str or capture_method not in WINDOW_CAPTURE_METHODS:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
         return {
             "sceneName": scene_name,
             "sourceName": source_name,
@@ -742,6 +780,7 @@ class ObsControlBridge:
             "windowTitle": window_title,
             "captureCursor": capture_cursor,
             "clientArea": client_area,
+            "captureMethod": capture_method,
             "enabled": enabled,
             "capability": "window_capture",
         }
@@ -764,6 +803,7 @@ class ObsControlBridge:
                         ("windowTitle", "windowTitle"),
                         ("captureCursor", "captureCursor"),
                         ("clientArea", "clientArea"),
+                        ("captureMethod", "captureMethod"),
                         ("enabled", "enabled"),
                     )
                 )
@@ -1550,6 +1590,7 @@ class ObsControlBridge:
             "RemoveScene",
             "CreateSceneItem",
             "CreateWindowCaptureSource",
+            "SetWindowCaptureMethod",
             "UpdateSceneItem",
             "SetSceneItemEnabled",
             "SetSceneItemTransform",
@@ -1579,6 +1620,7 @@ class ObsControlBridge:
             elif request_type in {
                 "CreateSceneItem",
                 "CreateWindowCaptureSource",
+                "SetWindowCaptureMethod",
                 "UpdateSceneItem",
                 "SetSceneItemEnabled",
                 "SetSceneItemTransform",
@@ -1597,7 +1639,7 @@ class ObsControlBridge:
                     "scaleY",
                     "rotation",
                 }
-                if request_type == "CreateWindowCaptureSource":
+                if request_type in {"CreateWindowCaptureSource", "SetWindowCaptureMethod"}:
                     allowed |= {
                         "processId",
                         "windowHandle",
@@ -1606,6 +1648,7 @@ class ObsControlBridge:
                         "executable",
                         "captureCursor",
                         "clientArea",
+                        "captureMethod",
                         "bindingVerified",
                     }
             elif request_type in {"TriggerStudioModeTransition", "TriggerTransition"}:
@@ -1640,12 +1683,13 @@ class ObsControlBridge:
             if request_type in {
                 "CreateSceneItem",
                 "CreateWindowCaptureSource",
+                "SetWindowCaptureMethod",
                 "UpdateSceneItem",
                 "SetSceneItemEnabled",
                 "SetSceneItemTransform",
                 "RemoveSceneItem",
             }:
-                if request_type == "CreateWindowCaptureSource":
+                if request_type in {"CreateWindowCaptureSource", "SetWindowCaptureMethod"}:
                     if not ObsControlBridge._valid_window_capture_source(response, mutation=True):
                         raise BridgeError("OBS_RESPONSE_INVALID")
                 elif request_type != "RemoveSceneItem":
@@ -1749,6 +1793,7 @@ class ObsControlBridge:
             "executable",
             "captureCursor",
             "clientArea",
+            "captureMethod",
             "bindingVerified",
         }
         if mutation:
@@ -1775,6 +1820,7 @@ class ObsControlBridge:
             )
             and type(source.get("captureCursor")) is bool
             and type(source.get("clientArea")) is bool
+            and source.get("captureMethod") in WINDOW_CAPTURE_METHODS
             and source.get("bindingVerified") is True
             and (not mutation or source.get("accepted") is True)
             and ("capability" not in source or source.get("capability") == "window_capture")

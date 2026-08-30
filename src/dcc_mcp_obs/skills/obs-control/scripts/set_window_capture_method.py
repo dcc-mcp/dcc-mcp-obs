@@ -10,16 +10,16 @@ def main(
     process_id,
     window_handle,
     window_title,
+    capture_method,
     capture_cursor=True,
     client_area=True,
-    capture_method="automatic",
     enabled=True,
     **_kwargs,
 ):
     with obs_bridge() as bridge:
         return skill_success(
-            "Window capture source created and exact binding verified.",
-            **bridge.create_window_capture_source(
+            "Window capture method updated and exact binding verified.",
+            **bridge.set_window_capture_method(
                 scene_name=scene_name,
                 source_name=source_name,
                 process_id=process_id,

@@ -4,7 +4,9 @@ The native plugin exposes a deliberately bounded Windows-only window-capture
 surface. It does not forward arbitrary OBS input settings.
 
 `create_window_capture_source` requires an exact scene name, source name,
-process ID, window handle, and current window title. The native plugin then:
+process ID, window handle, and current window title. It also accepts one typed
+capture method: `automatic`, `bitblt`, or `windows_graphics_capture`. The
+native plugin then:
 
 1. verifies that the HWND is live, visible, and owned by the requested PID;
 2. derives the current title, window class, executable basename, and process
@@ -17,6 +19,17 @@ process ID, window handle, and current window title. The native plugin then:
 OBS. Call it immediately before recording. A missing window, PID/HWND reuse,
 title drift, changed source settings, duplicate scene item, or changed process
 object fails closed with a stable public error code.
+
+`set_window_capture_method` changes only the capture method on an existing
+exactly bound source. The plugin verifies the scene item, private binding
+metadata, live process object, HWND, title, class, executable, cursor setting,
+client-area setting, visibility, and current source kind before mutation. It
+then reads the source back; a failed postcondition rolls the method back.
+
+OBS automatic mode chooses BitBlt for window classes outside its WGC allowlist.
+Use explicit `windows_graphics_capture` when a live game window produces a
+black or incorrect BitBlt frame. The public API maps the enum internally and
+does not accept raw integer settings.
 
 The source stores only the exact binding metadata needed for later readback.
 It returns the executable basename, never the full executable path. The API

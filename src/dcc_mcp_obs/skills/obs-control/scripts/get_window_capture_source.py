@@ -12,6 +12,7 @@ def main(
     window_title,
     capture_cursor=True,
     client_area=True,
+    capture_method="automatic",
     enabled=True,
     **_kwargs,
 ):
@@ -26,6 +27,7 @@ def main(
                 window_title=window_title,
                 capture_cursor=capture_cursor,
                 client_area=client_area,
+                capture_method=capture_method,
                 enabled=enabled,
             ),
         )

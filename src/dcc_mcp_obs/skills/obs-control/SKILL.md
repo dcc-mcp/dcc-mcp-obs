@@ -67,7 +67,10 @@ surface and live-host validation boundary.
 For Windows game or application recording, use
 `create_window_capture_source` only after exact window discovery. Use
 `get_window_capture_source` immediately before recording to revalidate the
-binding. These tools never accept arbitrary OBS input settings. See
+binding. The optional `capture_method` is limited to `automatic`, `bitblt`,
+and `windows_graphics_capture`; use `set_window_capture_method` to change an
+existing exact source when automatic BitBlt produces a black or incorrect
+game frame. These tools never accept arbitrary OBS input settings. See
 [the window-capture reference](../../../docs/window-capture.md).
 
 ## UI fallback

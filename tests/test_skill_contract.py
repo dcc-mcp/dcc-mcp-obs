@@ -6,10 +6,31 @@ from pathlib import Path
 import jsonschema
 import yaml
 from dcc_mcp_core.skill import skill_success
+from yaml.nodes import MappingNode, Node, SequenceNode
 
 from dcc_mcp_obs import __version__
 
 ROOT = Path(__file__).parents[1]
+
+
+def _assert_unique_yaml_keys(node: Node, path: str = "$") -> None:
+    if isinstance(node, MappingNode):
+        seen: set[str] = set()
+        for key_node, value_node in node.value:
+            key = key_node.value
+            assert key not in seen, f"duplicate YAML key at {path}: {key}"
+            seen.add(key)
+            _assert_unique_yaml_keys(value_node, f"{path}.{key}")
+    elif isinstance(node, SequenceNode):
+        for index, value_node in enumerate(node.value):
+            _assert_unique_yaml_keys(value_node, f"{path}[{index}]")
+
+
+def test_obs_skill_yaml_has_unique_mapping_keys() -> None:
+    text = (ROOT / "src/dcc_mcp_obs/skills/obs-control/tools.yaml").read_text(encoding="utf-8")
+    node = yaml.compose(text)
+    assert node is not None
+    _assert_unique_yaml_keys(node)
 
 
 def test_obs_skill_has_bilingual_discovery_aliases_and_no_raw_escape_hatch() -> None:
