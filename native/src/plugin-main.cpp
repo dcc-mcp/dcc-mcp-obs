@@ -10,9 +10,11 @@
 #include <cmath>
 #include <memory>
 #include <mutex>
+#include <limits>
 #include <random>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -107,6 +109,8 @@ enum class UiOperation {
 	ListSceneItems,
 	GetSceneItem,
 	CreateSceneItem,
+	CreateWindowCaptureSource,
+	GetWindowCaptureSource,
 	SetSceneItemEnabled,
 	SetSceneItemTransform,
 	RemoveSceneItem,
@@ -121,6 +125,14 @@ enum class UiOperation {
 	TriggerStudioModeTransition,
 };
 
+struct WindowCaptureBinding {
+	uint32_t process_id = 0;
+	uint64_t window_handle = 0;
+	std::string window_title;
+	bool capture_cursor = true;
+	bool client_area = true;
+};
+
 struct UiState {
 	UiOperation operation;
 	std::string scene_name;
@@ -130,6 +142,7 @@ struct UiState {
 	std::string source_name;
 	std::string source_kind;
 	std::string transition_name;
+	WindowCaptureBinding window_capture;
 	int64_t scene_item_id = 0;
 	bool enabled = true, studio_enabled = false, has_duration = false;
 	int duration_ms = 0;
@@ -496,6 +509,239 @@ obs_data_t *scene_item_status(const std::string &scene_name, int64_t item_id)
 	return result;
 }
 
+#ifdef _WIN32
+constexpr char kWindowBindingSchema[] = "windows-window-v1";
+
+struct ValidatedWindowBinding {
+	HANDLE process_handle = nullptr;
+	uint64_t process_created = 0;
+	std::string title;
+	std::string window_class;
+	std::string executable;
+	std::string selector;
+
+	ValidatedWindowBinding() = default;
+	ValidatedWindowBinding(const ValidatedWindowBinding &) = delete;
+	ValidatedWindowBinding &operator=(const ValidatedWindowBinding &) = delete;
+
+	~ValidatedWindowBinding()
+	{
+		if (process_handle != nullptr)
+			CloseHandle(process_handle);
+	}
+};
+
+std::string utf8_from_wide(const std::wstring &value)
+{
+	if (value.empty())
+		return {};
+	const int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
+					     static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+	if (size <= 0)
+		return {};
+	std::string result(static_cast<size_t>(size), '\0');
+	if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()),
+				result.data(), size, nullptr, nullptr) != size)
+		return {};
+	return result;
+}
+
+std::string encode_window_component(const std::string &value)
+{
+	std::string encoded;
+	encoded.reserve(value.size());
+	for (const char character : value) {
+		if (character == '#')
+			encoded += "#22";
+		else if (character == ':')
+			encoded += "#3A";
+		else
+			encoded += character;
+	}
+	return encoded;
+}
+
+uint64_t file_time_value(const FILETIME &value)
+{
+	return (static_cast<uint64_t>(value.dwHighDateTime) << 32) | value.dwLowDateTime;
+}
+
+bool read_window_text(HWND window, std::string &title)
+{
+	const int length = GetWindowTextLengthW(window);
+	if (length <= 0 || length > 1024)
+		return false;
+	std::vector<wchar_t> buffer(static_cast<size_t>(length) + 1);
+	if (GetWindowTextW(window, buffer.data(), static_cast<int>(buffer.size())) != length)
+		return false;
+	title = utf8_from_wide(std::wstring(buffer.data(), static_cast<size_t>(length)));
+	return !title.empty() && title.size() <= 256;
+}
+
+bool read_window_class(HWND window, std::string &window_class)
+{
+	std::vector<wchar_t> buffer(512);
+	const int length = GetClassNameW(window, buffer.data(), static_cast<int>(buffer.size()));
+	if (length <= 0 || length >= static_cast<int>(buffer.size()))
+		return false;
+	window_class = utf8_from_wide(std::wstring(buffer.data(), static_cast<size_t>(length)));
+	return !window_class.empty() && window_class.size() <= 256;
+}
+
+bool read_process_identity(HANDLE process, uint64_t &created, std::string &executable)
+{
+	FILETIME creation{}, exit{}, kernel{}, user{};
+	if (!GetProcessTimes(process, &creation, &exit, &kernel, &user))
+		return false;
+	std::vector<wchar_t> path(32768);
+	DWORD path_size = static_cast<DWORD>(path.size());
+	if (!QueryFullProcessImageNameW(process, 0, path.data(), &path_size) || path_size == 0)
+		return false;
+	const std::wstring full_path(path.data(), path_size);
+	const size_t separator = full_path.find_last_of(L"\\/");
+	const std::wstring base_name = separator == std::wstring::npos ? full_path : full_path.substr(separator + 1);
+	executable = utf8_from_wide(base_name);
+	created = file_time_value(creation);
+	return created > 0 && !executable.empty() && executable.size() <= 256;
+}
+
+const char *validate_exact_window(const WindowCaptureBinding &expected, ValidatedWindowBinding &actual)
+{
+	HWND window = reinterpret_cast<HWND>(static_cast<uintptr_t>(expected.window_handle));
+	if (!IsWindow(window) || !IsWindowVisible(window))
+		return "OBS_WINDOW_NOT_FOUND";
+	DWORD process_id = 0;
+	if (GetWindowThreadProcessId(window, &process_id) == 0 || process_id != expected.process_id)
+		return "OBS_WINDOW_IDENTITY_DRIFT";
+	if (!read_window_text(window, actual.title) || actual.title != expected.window_title ||
+	    !read_window_class(window, actual.window_class))
+		return "OBS_WINDOW_IDENTITY_DRIFT";
+	actual.process_handle =
+		OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, expected.process_id);
+	if (actual.process_handle == nullptr ||
+	    !read_process_identity(actual.process_handle, actual.process_created, actual.executable))
+		return "OBS_WINDOW_IDENTITY_DRIFT";
+	actual.selector = encode_window_component(actual.title) + ":" + encode_window_component(actual.window_class) +
+			  ":" + encode_window_component(actual.executable);
+	return nullptr;
+}
+
+bool exact_window_is_still_live(const WindowCaptureBinding &expected, const ValidatedWindowBinding &actual)
+{
+	DWORD exit_code = 0;
+	if (!GetExitCodeProcess(actual.process_handle, &exit_code) || exit_code != STILL_ACTIVE)
+		return false;
+	HWND window = reinterpret_cast<HWND>(static_cast<uintptr_t>(expected.window_handle));
+	DWORD process_id = 0;
+	std::string title, window_class, executable;
+	uint64_t process_created = 0;
+	return IsWindow(window) && IsWindowVisible(window) && GetWindowThreadProcessId(window, &process_id) != 0 &&
+	       process_id == expected.process_id && read_window_text(window, title) && title == actual.title &&
+	       read_window_class(window, window_class) && window_class == actual.window_class &&
+	       read_process_identity(actual.process_handle, process_created, executable) &&
+	       process_created == actual.process_created && executable == actual.executable;
+}
+#endif
+
+#ifdef _WIN32
+struct SceneSourceMatch {
+	const std::string &source_name;
+	obs_sceneitem_t *item = nullptr;
+	size_t count = 0;
+};
+
+bool find_scene_source_item(obs_scene_t *, obs_sceneitem_t *item, void *private_data)
+{
+	auto *match = static_cast<SceneSourceMatch *>(private_data);
+	auto *source = obs_sceneitem_get_source(item);
+	if (source != nullptr && match->source_name == obs_source_get_name(source)) {
+		match->item = item;
+		++match->count;
+	}
+	return match->count < 2;
+}
+#endif
+
+obs_data_t *window_capture_source_status(const UiState &state)
+{
+	auto *result = obs_data_create();
+#ifndef _WIN32
+	UNUSED_PARAMETER(state);
+	set_error(result, "OBS_UNSUPPORTED_PLATFORM");
+#else
+	ValidatedWindowBinding actual;
+	if (const char *error = validate_exact_window(state.window_capture, actual); error != nullptr) {
+		set_error(result, error);
+		return result;
+	}
+	auto *scene_source = scene_source_by_name(state.scene_name);
+	auto *source = state.source_name.empty() ? nullptr : obs_get_source_by_name(state.source_name.c_str());
+	if (scene_source == nullptr || source == nullptr) {
+		set_error(result, scene_source == nullptr ? "OBS_SCENE_NOT_FOUND" : "OBS_SOURCE_NOT_FOUND");
+		if (source != nullptr)
+			obs_source_release(source);
+		if (scene_source != nullptr)
+			obs_source_release(scene_source);
+		return result;
+	}
+	if (std::string(obs_source_get_id(source)) != "window_capture") {
+		set_error(result, "OBS_WINDOW_IDENTITY_DRIFT");
+		obs_source_release(source);
+		obs_source_release(scene_source);
+		return result;
+	}
+	auto *scene = obs_scene_from_source(scene_source);
+	SceneSourceMatch match{state.source_name};
+	if (scene != nullptr)
+		obs_scene_enum_items(scene, find_scene_source_item, &match);
+	if (match.count != 1 || match.item == nullptr) {
+		set_error(result, match.count > 1 ? "OBS_TARGET_AMBIGUOUS" : "OBS_SCENE_ITEM_NOT_FOUND");
+		obs_source_release(source);
+		obs_source_release(scene_source);
+		return result;
+	}
+	auto *settings = obs_source_get_settings(source);
+	const bool settings_match =
+		settings != nullptr &&
+		std::string(obs_data_get_string(settings, "_dcc_binding_schema")) == kWindowBindingSchema &&
+		obs_data_get_int(settings, "_dcc_process_id") == state.window_capture.process_id &&
+		obs_data_get_int(settings, "_dcc_window_handle") ==
+			static_cast<long long>(state.window_capture.window_handle) &&
+		obs_data_get_int(settings, "_dcc_process_created") == static_cast<long long>(actual.process_created) &&
+		std::string(obs_data_get_string(settings, "_dcc_window_title")) == actual.title &&
+		std::string(obs_data_get_string(settings, "_dcc_window_class")) == actual.window_class &&
+		std::string(obs_data_get_string(settings, "_dcc_executable")) == actual.executable &&
+		std::string(obs_data_get_string(settings, "window")) == actual.selector &&
+		obs_data_get_bool(settings, "cursor") == state.window_capture.capture_cursor &&
+		obs_data_get_bool(settings, "client_area") == state.window_capture.client_area &&
+		obs_sceneitem_visible(match.item) == state.enabled;
+	if (settings != nullptr)
+		obs_data_release(settings);
+	if (!settings_match || !exact_window_is_still_live(state.window_capture, actual)) {
+		set_error(result, "OBS_WINDOW_IDENTITY_DRIFT");
+		obs_source_release(source);
+		obs_source_release(scene_source);
+		return result;
+	}
+	obs_data_set_string(result, "sceneName", state.scene_name.c_str());
+	obs_data_set_int(result, "sceneItemId", obs_sceneitem_get_id(match.item));
+	obs_data_set_string(result, "sourceName", state.source_name.c_str());
+	obs_data_set_string(result, "sourceKind", "window_capture");
+	obs_data_set_bool(result, "enabled", state.enabled);
+	obs_data_set_int(result, "processId", state.window_capture.process_id);
+	obs_data_set_int(result, "windowHandle", static_cast<long long>(state.window_capture.window_handle));
+	obs_data_set_string(result, "windowTitle", actual.title.c_str());
+	obs_data_set_string(result, "windowClass", actual.window_class.c_str());
+	obs_data_set_string(result, "executable", actual.executable.c_str());
+	obs_data_set_bool(result, "captureCursor", state.window_capture.capture_cursor);
+	obs_data_set_bool(result, "clientArea", state.window_capture.client_area);
+	obs_data_set_bool(result, "bindingVerified", true);
+	obs_source_release(source);
+	obs_source_release(scene_source);
+#endif
+	return result;
+}
+
 obs_data_t *list_transitions()
 {
 	auto *result = obs_data_create();
@@ -643,6 +889,7 @@ void execute_ui_operation(void *private_data)
 		state->operation == UiOperation::SetCurrentScene || state->operation == UiOperation::CreateScene ||
 		state->operation == UiOperation::RenameScene || state->operation == UiOperation::RemoveScene ||
 		state->operation == UiOperation::CreateSceneItem ||
+		state->operation == UiOperation::CreateWindowCaptureSource ||
 		state->operation == UiOperation::SetSceneItemEnabled ||
 		state->operation == UiOperation::SetSceneItemTransform ||
 		state->operation == UiOperation::RemoveSceneItem ||
@@ -835,6 +1082,81 @@ void execute_ui_operation(void *private_data)
 				obs_source_release(source);
 			if (scene_source != nullptr)
 				obs_source_release(scene_source);
+			break;
+		}
+		case UiOperation::GetWindowCaptureSource:
+			result = window_capture_source_status(*state);
+			break;
+		case UiOperation::CreateWindowCaptureSource: {
+			result = obs_data_create();
+#ifndef _WIN32
+			set_error(result, "OBS_UNSUPPORTED_PLATFORM");
+#else
+			ValidatedWindowBinding actual;
+			if (const char *error = validate_exact_window(state->window_capture, actual);
+			    error != nullptr) {
+				set_error(result, error);
+				break;
+			}
+			auto *scene_source = scene_source_by_name(state->scene_name);
+			auto *existing = state->source_name.empty()
+						 ? nullptr
+						 : obs_get_source_by_name(state->source_name.c_str());
+			if (scene_source == nullptr)
+				set_error(result, "OBS_SCENE_NOT_FOUND");
+			else if (existing != nullptr)
+				set_error(result, "OBS_TARGET_AMBIGUOUS");
+			else if (!state->gate.claim_mutation(state->deadline))
+				set_error(result, "OBS_UI_TIMEOUT");
+			else if (!exact_window_is_still_live(state->window_capture, actual))
+				set_error(result, "OBS_WINDOW_IDENTITY_DRIFT");
+			else {
+				auto *settings = obs_data_create();
+				obs_data_set_string(settings, "window", actual.selector.c_str());
+				obs_data_set_int(settings, "method", 0);
+				obs_data_set_int(settings, "priority", 1);
+				obs_data_set_bool(settings, "cursor", state->window_capture.capture_cursor);
+				obs_data_set_bool(settings, "client_area", state->window_capture.client_area);
+				obs_data_set_bool(settings, "capture_audio", false);
+				obs_data_set_string(settings, "_dcc_binding_schema", kWindowBindingSchema);
+				obs_data_set_int(settings, "_dcc_process_id", state->window_capture.process_id);
+				obs_data_set_int(settings, "_dcc_window_handle",
+						 static_cast<long long>(state->window_capture.window_handle));
+				obs_data_set_int(settings, "_dcc_process_created",
+						 static_cast<long long>(actual.process_created));
+				obs_data_set_string(settings, "_dcc_window_title", actual.title.c_str());
+				obs_data_set_string(settings, "_dcc_window_class", actual.window_class.c_str());
+				obs_data_set_string(settings, "_dcc_executable", actual.executable.c_str());
+				auto *source = obs_source_create("window_capture", state->source_name.c_str(), settings,
+								 nullptr);
+				obs_data_release(settings);
+				auto *scene = obs_scene_from_source(scene_source);
+				auto *item = source == nullptr || scene == nullptr ? nullptr
+										   : obs_scene_add(scene, source);
+				if (item == nullptr)
+					set_error(result, "OBS_MUTATION_REJECTED");
+				else {
+					obs_sceneitem_set_visible(item, state->enabled);
+					auto *verified = window_capture_source_status(*state);
+					if (obs_data_has_user_value(verified, "ok")) {
+						obs_sceneitem_remove(item);
+						obs_source_remove(source);
+					}
+					obs_data_release(result);
+					result = verified;
+					if (!obs_data_has_user_value(result, "ok")) {
+						obs_data_set_bool(result, "accepted", true);
+						obs_data_set_string(result, "capability", "window_capture");
+					}
+				}
+				if (source != nullptr)
+					obs_source_release(source);
+			}
+			if (existing != nullptr)
+				obs_source_release(existing);
+			if (scene_source != nullptr)
+				obs_source_release(scene_source);
+#endif
 			break;
 		}
 		case UiOperation::SetSceneItemEnabled:
@@ -1349,8 +1671,8 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, cons
 		      const std::string &source_name, const std::string &source_kind,
 		      const std::string &transition_name, int64_t scene_item_id, bool enabled, bool studio_enabled,
 		      bool has_duration, int duration_ms, bool has_pos, bool has_scale, bool has_rotation, float pos_x,
-		      float pos_y, float scale_x, float scale_y, float rotation, uint64_t deadline_at_ms,
-		      obs_data_t *response)
+		      float pos_y, float scale_x, float scale_y, float rotation,
+		      const WindowCaptureBinding &window_capture, uint64_t deadline_at_ms, obs_data_t *response)
 {
 	auto state = std::make_shared<UiState>();
 	state->operation = operation;
@@ -1362,6 +1684,7 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, cons
 	state->source_name = source_name;
 	state->source_kind = source_kind;
 	state->transition_name = transition_name;
+	state->window_capture = window_capture;
 	state->scene_item_id = scene_item_id;
 	state->enabled = enabled;
 	state->studio_enabled = studio_enabled;
@@ -1434,6 +1757,10 @@ UiOperation operation_for(const std::string &request)
 		return UiOperation::GetSceneItem;
 	if (request == "CreateSceneItem")
 		return UiOperation::CreateSceneItem;
+	if (request == "CreateWindowCaptureSource")
+		return UiOperation::CreateWindowCaptureSource;
+	if (request == "GetWindowCaptureSource")
+		return UiOperation::GetWindowCaptureSource;
 	if (request == "SetSceneItemEnabled")
 		return UiOperation::SetSceneItemEnabled;
 	if (request == "SetSceneItemTransform")
@@ -1529,6 +1856,7 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 	std::string source_name;
 	std::string source_kind;
 	std::string transition_name;
+	WindowCaptureBinding window_capture;
 	int64_t scene_item_id = 0;
 	bool enabled = true, studio_enabled = false, has_duration = false;
 	int duration_ms = 0;
@@ -1599,9 +1927,10 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 				   request_name == "CreateScene" || request_name == "RenameScene" ||
 				   request_name == "RemoveScene" || request_name == "ListSceneItems" ||
 				   request_name == "GetSceneItem" || request_name == "CreateSceneItem" ||
-				   request_name == "SetSceneItemEnabled" || request_name == "SetSceneItemTransform" ||
-				   request_name == "RemoveSceneItem" || request_name == "TriggerTransition" ||
-				   request_name == "SetCurrentPreviewScene";
+				   request_name == "CreateWindowCaptureSource" ||
+				   request_name == "GetWindowCaptureSource" || request_name == "SetSceneItemEnabled" ||
+				   request_name == "SetSceneItemTransform" || request_name == "RemoveSceneItem" ||
+				   request_name == "TriggerTransition" || request_name == "SetCurrentPreviewScene";
 	if (scene_request && request_data != nullptr) {
 		const char *value = obs_data_get_string(request_data, "sceneName");
 		if (value != nullptr)
@@ -1626,6 +1955,29 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 		if (request_name == "CreateSceneItem" && (scene_name.empty() || source_name.empty())) {
 			set_error(response_data, "OBS_ARGUMENT_INVALID");
 			return;
+		}
+		if (request_name == "CreateWindowCaptureSource" || request_name == "GetWindowCaptureSource") {
+			const long long process_id = obs_data_get_int(request_data, "processId");
+			const long long window_handle = obs_data_get_int(request_data, "windowHandle");
+			const char *window_title = obs_data_get_string(request_data, "windowTitle");
+			if (scene_name.empty() || source_name.empty() || process_id <= 0 ||
+			    static_cast<uint64_t>(process_id) > std::numeric_limits<uint32_t>::max() ||
+			    window_handle <= 0 ||
+			    static_cast<uint64_t>(window_handle) >
+				    static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
+			    window_title == nullptr || !*window_title || std::string(window_title).size() > 256 ||
+			    !obs_data_has_user_value(request_data, "captureCursor") ||
+			    !obs_data_has_user_value(request_data, "clientArea") ||
+			    !obs_data_has_user_value(request_data, "enabled")) {
+				set_error(response_data, "OBS_ARGUMENT_INVALID");
+				return;
+			}
+			window_capture.process_id = static_cast<uint32_t>(process_id);
+			window_capture.window_handle = static_cast<uint64_t>(window_handle);
+			window_capture.window_title = window_title;
+			window_capture.capture_cursor = obs_data_get_bool(request_data, "captureCursor");
+			window_capture.client_area = obs_data_get_bool(request_data, "clientArea");
+			enabled = obs_data_get_bool(request_data, "enabled");
 		}
 		if (request_name == "GetSceneItem" || request_name == "SetSceneItemEnabled" ||
 		    request_name == "SetSceneItemTransform" || request_name == "RemoveSceneItem") {
@@ -1669,9 +2021,15 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 	const char *required_capability = nullptr;
 	if (request_name == "SetCurrentScene" || request_name == "CreateScene" || request_name == "RenameScene" ||
 	    request_name == "RemoveScene" || request_name == "CreateSceneItem" ||
+	    request_name == "CreateWindowCaptureSource" || request_name == "GetWindowCaptureSource" ||
 	    request_name == "SetSceneItemEnabled" || request_name == "SetSceneItemTransform" ||
 	    request_name == "RemoveSceneItem")
-		required_capability = request_name == "SetCurrentScene" ? "scene_switch" : "scene_graph";
+		required_capability = request_name == "SetCurrentScene"
+					      ? "scene_switch"
+					      : (request_name == "CreateWindowCaptureSource" ||
+								 request_name == "GetWindowCaptureSource"
+							 ? "window_capture"
+							 : "scene_graph");
 	else if (request_name == "SetCurrentTransition" || request_name == "TriggerTransition")
 		required_capability = "transitions";
 	else if (request_name == "SetStudioMode")
@@ -1727,7 +2085,7 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 	run_ui_operation(operation_for(request), scene_name, output_name, target_name, hotkey_name, image_format,
 			 source_name, source_kind, transition_name, scene_item_id, enabled, studio_enabled,
 			 has_duration, duration_ms, has_pos, has_scale, has_rotation, pos_x, pos_y, scale_x, scale_y,
-			 rotation, deadline_at_ms, response_data);
+			 rotation, window_capture, deadline_at_ms, response_data);
 }
 
 void frontend_event(enum obs_frontend_event, void *)
@@ -1752,6 +2110,8 @@ constexpr const char *kRequests[] = {
 	"ListSceneItems",
 	"GetSceneItem",
 	"CreateSceneItem",
+	"CreateWindowCaptureSource",
+	"GetWindowCaptureSource",
 	"SetSceneItemEnabled",
 	"SetSceneItemTransform",
 	"RemoveSceneItem",

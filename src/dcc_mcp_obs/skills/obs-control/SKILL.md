@@ -1,6 +1,6 @@
 ---
 name: obs-control
-description: Inspect and control typed OBS profiles, scene collections, scenes, scene items, transitions, Studio Mode, recording, streaming, replay buffer, virtual camera, allowlisted hotkeys, and outputs for OBS Studio and Open Broadcaster Software.
+description: Inspect and control typed OBS profiles, scene collections, scenes, scene items, exact Windows window-capture sources, transitions, Studio Mode, recording, streaming, replay buffer, virtual camera, allowlisted hotkeys, and outputs for OBS Studio and Open Broadcaster Software.
 license: GPL-2.0-or-later
 compatibility: "Python 3.10+, OBS Studio 28+ with obs-websocket 5.x"
 metadata:
@@ -8,7 +8,7 @@ metadata:
     dcc: obs
     layer: domain
     version: "1.1.0"  # x-release-please-version
-    tags: [obs, profiles, scene-collections, scenes, scene-items, transitions, studio-mode, recording, streaming, replay-buffer, virtual-camera, allowlisted-hotkeys, screenshots, outputs, sources]
+    tags: [obs, profiles, scene-collections, scenes, scene-items, window-capture, transitions, studio-mode, recording, streaming, replay-buffer, virtual-camera, allowlisted-hotkeys, screenshots, outputs, sources]
     search-hint: "OBS Open Broadcaster Software profiles scene collections scenes scene graph scene items transitions Studio Mode preview program hotkeys screenshots operator status recording streaming replay buffer virtual camera outputs record video pause resume 录屏 录制视频 直播 回放 缓冲 虚拟摄像头 配置文件 场景集合 场景图 场景项 转场 导播台 预览 节目 快捷键 截图 输出"
     tools: tools.yaml
 ---
@@ -44,7 +44,11 @@ screenshots, outputs, scene/source inspection, 录屏, 直播, 回放缓冲,
    the numeric item ID returned by discovery. Select transitions and scenes by
    exact discovered names; Studio Mode preview/program changes require typed
    status readback.
-9. Hotkey actions accept only identifiers returned by the allowlist contract.
+9. Windows window-capture creation requires an exact PID, HWND, and current
+   title. The native plugin derives and revalidates the window class,
+   executable basename, and process creation time before and after mutation;
+   identity drift fails closed.
+10. Hotkey actions accept only identifiers returned by the allowlist contract.
    Screenshot capture is intentionally not exposed until OBS provides a
    completion/artifact readback contract; never synthesize success or verified
    output for the fire-and-forget API.
@@ -59,6 +63,12 @@ editing an item, changing Studio Mode preview, or transitioning to program,
 inspect the typed readback and continue only when `verified` is true. See
 [the scene-graph reference](../../../docs/scene-graph.md) for the operation
 surface and live-host validation boundary.
+
+For Windows game or application recording, use
+`create_window_capture_source` only after exact window discovery. Use
+`get_window_capture_source` immediately before recording to revalidate the
+binding. These tools never accept arbitrary OBS input settings. See
+[the window-capture reference](../../../docs/window-capture.md).
 
 ## UI fallback
 
