@@ -29,6 +29,11 @@ dcc-mcp-obs-install uninstall
 在 sidecar 观察到精确的真实 OBS 插件会话前，两者都保持
 `verify.directly_usable=false` 和 `LIVE_OBS_VERIFICATION_REQUIRED`。
 
+默认插件目录遵循 OBS 的平台布局。Windows 使用
+`%PROGRAMDATA%\obs-studio\plugins\dcc-mcp-obs`；macOS 与 Linux 仍使用当前用户的
+OBS 插件目录。只有当 OBS 本身已配置为扫描另一个由操作者拥有的目录时，才应传入
+`--plugin-dir`。
+
 在 Linux 和 macOS 上，成功的文件系统验证是同步的时间点验证，不代表持久锁。
 未特权 POSIX 进程既不能撤销已打开写描述符的能力，也不能在操作者自有父目录保持
 可写时固定受管理根目录名称。因此安装器会在返回前恢复内部验证 guard，并在
