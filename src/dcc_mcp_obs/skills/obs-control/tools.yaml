@@ -281,7 +281,6 @@ tools:
     enforce_thread_affinity: true
     timeout_hint_secs: 30
     annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
-    call_examples: [{arguments: {}, note: Start streaming only after explicit operator intent.}]
     next-tools: {on-success: [obs_control__get_streaming_status], on-failure: [obs_control__get_status]}
     call_examples: [{arguments: {}, note: Start streaming only after explicit operator intent.}]
   - name: stop_streaming
@@ -294,7 +293,6 @@ tools:
     enforce_thread_affinity: true
     timeout_hint_secs: 30
     annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
-    call_examples: [{arguments: {}, note: Stop streaming only after explicit operator intent.}]
     next-tools: {on-success: [obs_control__get_streaming_status], on-failure: [obs_control__get_status]}
     call_examples: [{arguments: {}, note: Stop streaming only after explicit operator intent.}]
   - name: get_replay_buffer_status
@@ -878,6 +876,7 @@ tools:
             executable: {type: string, minLength: 1, maxLength: 256}
             captureCursor: {type: boolean}
             clientArea: {type: boolean}
+            captureMethod: {type: string, enum: [automatic, bitblt, windows_graphics_capture]}
             bindingVerified: {type: boolean}
         postcondition:
           type: object
@@ -887,7 +886,6 @@ tools:
     execution: sync
     affinity: any
     timeout_hint_secs: 10
-    annotations: {read_only_hint: true, destructive_hint: false}
     call_examples: [{arguments: {}, note: Read the bound scene.}]
     annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
   - name: set_current_scene
@@ -908,7 +906,6 @@ tools:
     execution: sync
     affinity: any
     timeout_hint_secs: 10
-    annotations: {read_only_hint: true, destructive_hint: false}
     call_examples: [{arguments: {scene_name: Main}, note: Read bounded scene items.}]
     annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
   - name: create_scene_item
@@ -924,7 +921,7 @@ tools:
   - name: get_window_capture_source
     description: Verify one exact Windows PID and HWND binding for a typed window-capture source.
     source_file: scripts/get_window_capture_source.py
-    input_schema: &window_capture_input {type: object, properties: {scene_name: {type: string, minLength: 1, maxLength: 256}, source_name: {type: string, minLength: 1, maxLength: 256}, process_id: {type: integer, minimum: 1, maximum: 4294967295}, window_handle: {type: integer, minimum: 1, maximum: 9223372036854775807}, window_title: {type: string, minLength: 1, maxLength: 256}, capture_cursor: {type: boolean}, client_area: {type: boolean}, enabled: {type: boolean}}, required: [scene_name, source_name, process_id, window_handle, window_title], additionalProperties: false}
+    input_schema: &window_capture_input {type: object, properties: {scene_name: {type: string, minLength: 1, maxLength: 256}, source_name: {type: string, minLength: 1, maxLength: 256}, process_id: {type: integer, minimum: 1, maximum: 4294967295}, window_handle: {type: integer, minimum: 1, maximum: 9223372036854775807}, window_title: {type: string, minLength: 1, maxLength: 256}, capture_cursor: {type: boolean}, client_area: {type: boolean}, capture_method: {type: string, enum: [automatic, bitblt, windows_graphics_capture], default: automatic}, enabled: {type: boolean}}, required: [scene_name, source_name, process_id, window_handle, window_title], additionalProperties: false}
     output_schema: *scene_read_output
     execution: sync
     affinity: any
@@ -941,6 +938,16 @@ tools:
     timeout_hint_secs: 30
     call_examples: [{arguments: {scene_name: RL - Bazaar, source_name: RL - Bazaar Window, process_id: 30520, window_handle: 147140366, window_title: The Bazaar, capture_cursor: false}, note: Create only after exact window discovery.}]
     annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: false, open_world_hint: false, deferred_hint: false}
+  - name: set_window_capture_method
+    description: Change one exact Windows window-capture source to a typed capture method and verify native readback.
+    source_file: scripts/set_window_capture_method.py
+    input_schema: *window_capture_input
+    output_schema: *scene_mutation_output
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 30
+    call_examples: [{arguments: {scene_name: RL - Bazaar, source_name: RL - Bazaar Window, process_id: 30520, window_handle: 147140366, window_title: The Bazaar, capture_cursor: false, capture_method: windows_graphics_capture}, note: Prefer typed WGC when automatic BitBlt yields a black or incorrect game frame.}]
+    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
   - name: set_scene_item_enabled
     description: Set one exact scene item visibility and verify readback.
     source_file: scripts/set_scene_item_enabled.py
@@ -969,7 +976,6 @@ tools:
     execution: sync
     affinity: any
     timeout_hint_secs: 10
-    annotations: {read_only_hint: true, destructive_hint: false}
     call_examples: [{arguments: {}, note: Read bounded transitions.}]
     annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
   - name: set_current_transition
@@ -1000,7 +1006,6 @@ tools:
     execution: sync
     affinity: any
     timeout_hint_secs: 10
-    annotations: {read_only_hint: true, destructive_hint: false}
     call_examples: [{arguments: {}, note: Read preview/program status.}]
     annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
   - name: set_studio_mode

@@ -251,6 +251,7 @@ def test_transport_allowlist_is_exactly_the_typed_public_requests() -> None:
         "CreateSceneItem",
         "CreateWindowCaptureSource",
         "GetWindowCaptureSource",
+        "SetWindowCaptureMethod",
         "UpdateSceneItem",
         "RemoveSceneItem",
         "SetSceneItemEnabled",
