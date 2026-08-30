@@ -33,6 +33,17 @@ def test_obs_skill_yaml_has_unique_mapping_keys() -> None:
     _assert_unique_yaml_keys(node)
 
 
+def test_every_obs_skill_tool_references_a_bundled_script() -> None:
+    skill_root = ROOT / "src/dcc_mcp_obs/skills/obs-control"
+    tools = yaml.safe_load((skill_root / "tools.yaml").read_text(encoding="utf-8"))["tools"]
+
+    missing = [
+        tool["source_file"] for tool in tools if not (skill_root / tool["source_file"]).is_file()
+    ]
+
+    assert missing == []
+
+
 def test_obs_skill_has_bilingual_discovery_aliases_and_no_raw_escape_hatch() -> None:
     skill = (ROOT / "src" / "dcc_mcp_obs" / "skills" / "obs-control" / "SKILL.md").read_text(
         encoding="utf-8"
