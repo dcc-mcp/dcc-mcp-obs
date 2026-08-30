@@ -18,6 +18,7 @@ script or raw WebSocket tool.
 - Bounded scene discovery and current-scene readback
 - Bounded source discovery for the current or an exact named scene
 - Typed scene switching, scene-item CRUD, transitions, and Studio Mode
+- Exact Windows PID/HWND window-capture source creation and readback
   preview/program operations with verified readback
 - Recording status
 - Start, stop, pause, and resume recording
@@ -35,6 +36,7 @@ as shipped tools until their typed contracts land.
 - [Disposable real-OBS acceptance](https://github.com/dcc-mcp/dcc-mcp-obs/issues/4)
 - [Inputs, properties, filters, audio, and media](https://github.com/dcc-mcp/dcc-mcp-obs/issues/5)
 - [Typed scene graph controls](docs/scene-graph.md)
+- [Exact Windows window capture](docs/window-capture.md)
 
 ## Requirements
 

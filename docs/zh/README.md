@@ -14,6 +14,7 @@ OBS WebSocket 只承担鉴权传输，不提供不受限制的 raw request 或�
 - 精确插件版本、OBS 版本、PID、实例 ID、readiness 和事件序号
 - 有界场景枚举和当前场景读回
 - 当前场景或精确指定场景的有界 source 枚举
+- 按精确 PID、HWND 和标题创建并回读 Windows 窗口捕获 source
 - 类型化场景切换、场景项 CRUD、转场和 Studio Mode 预览/节目操作
 - 录制状态
 - 开始、停止、暂停、继续录制
@@ -30,6 +31,7 @@ OBS WebSocket 只承担鉴权传输，不提供不受限制的 raw request 或�
 - [可丢弃真实 OBS 验收](https://github.com/dcc-mcp/dcc-mcp-obs/issues/4)
 - [输入、属性、滤镜、音频和媒体](https://github.com/dcc-mcp/dcc-mcp-obs/issues/5)
 - [类型化场景图控制](../scene-graph.md)
+- [Windows 精确窗口捕获](../window-capture.md)
 
 ## 要求
 
