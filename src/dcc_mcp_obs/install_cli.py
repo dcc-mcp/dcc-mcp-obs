@@ -354,7 +354,8 @@ class _RecoveryRetirementLease:
 
 def default_plugin_dir() -> Path:
     if sys.platform == "win32":
-        root = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+        system_drive = os.environ.get("SYSTEMDRIVE", "C:")
+        root = Path(os.environ.get("PROGRAMDATA", f"{system_drive}\\ProgramData"))
         return root / "obs-studio" / "plugins" / "dcc-mcp-obs"
     if sys.platform == "darwin":
         return (

@@ -34,6 +34,11 @@ File installation returns `requires_restart`; file-only status/verify returns
 `LIVE_OBS_VERIFICATION_REQUIRED` until an exact live OBS plugin session is
 observed through the sidecar.
 
+The default plugin directory follows the OBS platform layout. On Windows it is
+`%PROGRAMDATA%\obs-studio\plugins\dcc-mcp-obs`; on macOS and Linux it remains
+inside the current user's OBS plugin directory. Use `--plugin-dir` only when
+OBS itself is configured to scan a different operator-owned location.
+
 On Linux and macOS, successful filesystem verification is synchronous and
 point-in-time. Unprivileged POSIX processes cannot revoke already-open writable
 descriptors or pin the managed root name while its operator-owned parent stays

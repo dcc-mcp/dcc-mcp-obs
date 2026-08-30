@@ -49,6 +49,16 @@ def _bundle(
     return archive, hashlib.sha256(archive.read_bytes()).hexdigest(), payload
 
 
+def test_windows_default_plugin_directory_uses_program_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(install_cli.sys, "platform", "win32")
+    monkeypatch.setenv("PROGRAMDATA", str(tmp_path))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "legacy-user-profile"))
+
+    assert install_cli.default_plugin_dir() == (tmp_path / "obs-studio" / "plugins" / "dcc-mcp-obs")
+
+
 def test_full_install_status_verify_uninstall_lifecycle(tmp_path: Path) -> None:
     archive, digest, payload = _bundle(tmp_path)
     target = tmp_path / "installed"
