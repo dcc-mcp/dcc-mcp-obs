@@ -1051,6 +1051,7 @@ void execute_ui_operation(void *private_data)
 		state->operation == UiOperation::RenameScene || state->operation == UiOperation::RemoveScene ||
 		state->operation == UiOperation::CreateSceneItem ||
 		state->operation == UiOperation::CreateWindowCaptureSource ||
+		state->operation == UiOperation::RebindWindowCaptureSource ||
 		state->operation == UiOperation::SetWindowCaptureMethod ||
 		state->operation == UiOperation::SetSceneItemEnabled ||
 		state->operation == UiOperation::SetSceneItemTransform ||

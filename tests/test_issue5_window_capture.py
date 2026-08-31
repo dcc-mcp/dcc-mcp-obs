@@ -383,6 +383,7 @@ def test_native_window_rebind_is_transactional_and_owns_the_stored_identity() ->
     source = (Path(__file__).parents[1] / "native/src/plugin-main.cpp").read_text(encoding="utf-8")
 
     assert "case UiOperation::RebindWindowCaptureSource" in source
+    assert "state->operation == UiOperation::RebindWindowCaptureSource" in source
     assert 'request == "RebindWindowCaptureSource"' in source
     assert '"expectedProcessId"' in source
     assert '"expectedWindowHandle"' in source
