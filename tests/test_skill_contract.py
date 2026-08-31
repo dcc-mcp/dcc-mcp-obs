@@ -74,9 +74,10 @@ def test_obs_skill_has_bilingual_discovery_aliases_and_no_raw_escape_hatch() -> 
     for unsupported in ("scene switching", "场景切换"):
         assert unsupported.casefold() not in discovery.casefold()
 
-    assert [tool["name"] for tool in tools["tools"]][:31] == [
+    assert [tool["name"] for tool in tools["tools"]][:32] == [
         "get_status",
         "list_scenes",
+        "capture_program_frame",
         "list_sources",
         "get_recording_status",
         "start_recording",

@@ -7,6 +7,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cstring>
 #include <cmath>
 #include <memory>
 #include <mutex>
@@ -40,6 +41,8 @@ constexpr size_t kMaxSources = 512;
 constexpr size_t kMaxOutputs = 8;
 constexpr size_t kMaxProfiles = 128;
 constexpr size_t kMaxSceneCollections = 128;
+constexpr size_t kMaxProgramFrameDataUrlBytes = 400000;
+constexpr unsigned int kObsWebSocketSuccessStatus = 100;
 
 // This is deliberately a small, reviewable allowlist.  Callers can only
 // trigger these named actions; arbitrary OBS hotkey ids/names are never
@@ -101,6 +104,7 @@ enum class UiOperation {
 	ListAllowlistedHotkeys,
 	TriggerAllowlistedHotkey,
 	CaptureScreenshot,
+	CaptureProgramFrame,
 	SetCurrentScene,
 	GetCurrentScene,
 	CreateScene,
@@ -890,6 +894,52 @@ obs_data_t *output_status(const std::string &name)
 	obs_data_set_string(result, "outputName", name.c_str());
 	obs_data_set_string(result, "outputKind", kind);
 	obs_data_set_bool(result, "outputActive", active);
+	return result;
+}
+
+obs_data_t *capture_program_frame()
+{
+	obs_data_t *result = obs_data_create();
+	obs_source_t *program = obs_frontend_get_current_scene();
+	if (program == nullptr) {
+		set_error(result, "OBS_SCENE_NOT_FOUND");
+		return result;
+	}
+	const char *source_name = obs_source_get_name(program);
+	if (source_name == nullptr || !*source_name || std::strlen(source_name) > 256) {
+		obs_source_release(program);
+		set_error(result, "OBS_RESPONSE_INVALID");
+		return result;
+	}
+
+	obs_data_t *screenshot_request = obs_data_create();
+	obs_data_set_string(screenshot_request, "sourceName", source_name);
+	obs_data_set_string(screenshot_request, "imageFormat", "png");
+	obs_data_set_int(screenshot_request, "imageWidth", 320);
+	obs_data_set_int(screenshot_request, "imageHeight", 180);
+	auto *screenshot_response = obs_websocket_call_request("GetSourceScreenshot", screenshot_request);
+	obs_data_release(screenshot_request);
+
+	obs_data_t *screenshot_data = nullptr;
+	if (screenshot_response != nullptr && screenshot_response->status_code == kObsWebSocketSuccessStatus &&
+	    screenshot_response->response_data != nullptr &&
+	    std::strlen(screenshot_response->response_data) <= kMaxProgramFrameDataUrlBytes + 1024)
+		screenshot_data = obs_data_create_from_json(screenshot_response->response_data);
+	const char *image_data = screenshot_data != nullptr ? obs_data_get_string(screenshot_data, "imageData")
+							    : nullptr;
+	constexpr char kPngDataUrlPrefix[] = "data:image/png;base64,";
+	if (image_data == nullptr || std::strncmp(image_data, kPngDataUrlPrefix, sizeof(kPngDataUrlPrefix) - 1) != 0 ||
+	    std::strlen(image_data) > kMaxProgramFrameDataUrlBytes) {
+		set_error(result, "OBS_SCREENSHOT_UNVERIFIED");
+	} else {
+		obs_data_set_string(result, "sourceName", source_name);
+		obs_data_set_string(result, "imageFormat", "png");
+		obs_data_set_string(result, "imageData", image_data);
+	}
+	if (screenshot_data != nullptr)
+		obs_data_release(screenshot_data);
+	obs_websocket_request_response_free(screenshot_response);
+	obs_source_release(program);
 	return result;
 }
 
@@ -1744,6 +1794,9 @@ void execute_ui_operation(void *private_data)
 				obs_source_release(screenshot_source);
 			break;
 		}
+		case UiOperation::CaptureProgramFrame:
+			result = capture_program_frame();
+			break;
 		case UiOperation::Invalid:
 			result = obs_data_create();
 			set_error(result, "OBS_REQUEST_INVALID");
@@ -1942,6 +1995,8 @@ UiOperation operation_for(const std::string &request)
 		return UiOperation::TriggerAllowlistedHotkey;
 	if (request == "CaptureSourceScreenshot" || request == "CaptureScreenshot")
 		return UiOperation::CaptureScreenshot;
+	if (request == "CaptureProgramFrame")
+		return UiOperation::CaptureProgramFrame;
 	return UiOperation::Invalid;
 }
 
@@ -2171,6 +2226,16 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 	if (request_name == "SetStudioMode" && request_data != nullptr)
 		studio_enabled = obs_data_get_bool(request_data, "studioModeEnabled");
 	std::string image_format = "png";
+	if (request_name == "CaptureProgramFrame") {
+		const char *format = request_data != nullptr ? obs_data_get_string(request_data, "imageFormat")
+							     : nullptr;
+		const long long width = request_data != nullptr ? obs_data_get_int(request_data, "imageWidth") : 0;
+		const long long height = request_data != nullptr ? obs_data_get_int(request_data, "imageHeight") : 0;
+		if (format == nullptr || std::string(format) != "png" || width != 320 || height != 180) {
+			set_error(response_data, "OBS_ARGUMENT_INVALID");
+			return;
+		}
+	}
 	if (request_name == "CaptureSourceScreenshot" || request_name == "CaptureScreenshot") {
 		const char *source = request_data != nullptr ? obs_data_get_string(request_data, "sourceName")
 							     : nullptr;
@@ -2261,6 +2326,7 @@ constexpr const char *kRequests[] = {
 	"TriggerAllowlistedHotkey",
 	"CaptureSourceScreenshot",
 	"CaptureScreenshot",
+	"CaptureProgramFrame",
 };
 
 } // namespace

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
 import math
 import threading
 import time
@@ -76,6 +79,11 @@ _IDENTITY_KEYS = frozenset(
     {"instanceId", "pluginVersion", "obsVersion", "hostPid", "eventSequence", "ok"}
 )
 WINDOW_CAPTURE_METHODS = frozenset({"automatic", "bitblt", "windows_graphics_capture"})
+PROGRAM_FRAME_WIDTH = 320
+PROGRAM_FRAME_HEIGHT = 180
+MAX_PROGRAM_FRAME_BYTES = 400_000
+_PNG_DATA_URL_PREFIX = "data:image/png;base64,"
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 def _public_error_code(raw: object, *, fallback: str) -> str:
@@ -731,6 +739,25 @@ class ObsControlBridge:
         # artifact readback contract.  Never claim a screenshot was captured.
         raise BridgeError("OBS_SCREENSHOT_UNVERIFIED")
 
+    def capture_program_frame(self) -> dict[str, object]:
+        response = self._checked(
+            "CaptureProgramFrame",
+            {
+                "imageFormat": "png",
+                "imageWidth": PROGRAM_FRAME_WIDTH,
+                "imageHeight": PROGRAM_FRAME_HEIGHT,
+            },
+            deadline=self._operation_deadline(),
+        )
+        image = self._decode_program_frame(response)
+        return {
+            **response,
+            "imageWidth": PROGRAM_FRAME_WIDTH,
+            "imageHeight": PROGRAM_FRAME_HEIGHT,
+            "byteLength": len(image),
+            "sha256": hashlib.sha256(image).hexdigest(),
+        }
+
     def get_operator_status(self) -> dict[str, object]:
         return self._checked("GetOperatorStatus", deadline=self._operation_deadline())
 
@@ -1188,6 +1215,7 @@ class ObsControlBridge:
             "ListAllowlistedHotkeys",
             "GetOperatorStatus",
             "CaptureScreenshot",
+            "CaptureProgramFrame",
         } and (not set(response) >= _IDENTITY_KEYS or response.get("ok") is not True):
             raise BridgeError("OBS_RESPONSE_INVALID")
         if request_type == "GetPluginStatus":
@@ -1568,6 +1596,9 @@ class ObsControlBridge:
             ):
                 raise BridgeError("OBS_RESPONSE_INVALID")
             return
+        if request_type == "CaptureProgramFrame":
+            ObsControlBridge._decode_program_frame(response)
+            return
         if request_type in {
             "StartRecording",
             "StopRecording",
@@ -1830,6 +1861,63 @@ class ObsControlBridge:
         if self._bound_deadline is not None:
             return self._bound_deadline
         return self._clock() + DEFAULT_OPERATION_TIMEOUT_SECONDS
+
+    @staticmethod
+    def _decode_program_frame(response: Mapping[str, object]) -> bytes:
+        allowed = _IDENTITY_KEYS | {"sourceName", "imageFormat", "imageData"}
+        image_data = response.get("imageData")
+        if (
+            set(response) != allowed
+            or not isinstance(response.get("sourceName"), str)
+            or not 1 <= len(response["sourceName"]) <= 256
+            or response.get("imageFormat") != "png"
+            or not isinstance(image_data, str)
+            or not image_data.startswith(_PNG_DATA_URL_PREFIX)
+        ):
+            raise BridgeError("OBS_RESPONSE_INVALID")
+        try:
+            image = base64.b64decode(image_data[len(_PNG_DATA_URL_PREFIX) :], validate=True)
+        except (binascii.Error, ValueError):
+            raise BridgeError("OBS_RESPONSE_INVALID") from None
+        if (
+            not 33 <= len(image) <= MAX_PROGRAM_FRAME_BYTES
+            or not image.startswith(_PNG_SIGNATURE)
+            or image[12:16] != b"IHDR"
+            or int.from_bytes(image[16:20], "big") != PROGRAM_FRAME_WIDTH
+            or int.from_bytes(image[20:24], "big") != PROGRAM_FRAME_HEIGHT
+            or image[-8:-4] != b"IEND"
+        ):
+            raise BridgeError("OBS_RESPONSE_INVALID")
+        offset = len(_PNG_SIGNATURE)
+        chunk_count = 0
+        saw_idat = False
+        saw_iend = False
+        while offset < len(image):
+            chunk_count += 1
+            if chunk_count > 128 or offset + 12 > len(image):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            chunk_length = int.from_bytes(image[offset : offset + 4], "big")
+            chunk_type = image[offset + 4 : offset + 8]
+            chunk_end = offset + 12 + chunk_length
+            if chunk_end > len(image):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            chunk_payload = image[offset + 8 : offset + 8 + chunk_length]
+            expected_crc = int.from_bytes(image[offset + 8 + chunk_length : chunk_end], "big")
+            actual_crc = binascii.crc32(chunk_type + chunk_payload) & 0xFFFFFFFF
+            if actual_crc != expected_crc:
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            if chunk_count == 1 and (chunk_type != b"IHDR" or chunk_length != 13):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            if chunk_type == b"IDAT":
+                saw_idat = True
+            if chunk_type == b"IEND":
+                if chunk_length != 0 or chunk_end != len(image):
+                    raise BridgeError("OBS_RESPONSE_INVALID")
+                saw_iend = True
+            offset = chunk_end
+        if not saw_idat or not saw_iend:
+            raise BridgeError("OBS_RESPONSE_INVALID")
+        return image
 
     @staticmethod
     def _parse_identity(response: Mapping[str, object]) -> _Identity:

@@ -30,6 +30,16 @@ def main() -> None:
             "scenes": [{"sceneName": "Main"}],
             "truncated": False,
         },
+        "capture_program_frame": {
+            **identity,
+            "sourceName": "Main",
+            "imageFormat": "png",
+            "imageData": "data:image/png;base64," + ("A" * 64),
+            "imageWidth": 320,
+            "imageHeight": 180,
+            "byteLength": 48,
+            "sha256": "0" * 64,
+        },
         "list_sources": {
             **identity,
             "sceneName": "Main",

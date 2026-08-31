@@ -49,9 +49,9 @@ screenshots, outputs, scene/source inspection, 录屏, 直播, 回放缓冲,
    executable basename, and process creation time before and after mutation;
    identity drift fails closed.
 10. Hotkey actions accept only identifiers returned by the allowlist contract.
-   Screenshot capture is intentionally not exposed until OBS provides a
-   completion/artifact readback contract; never synthesize success or verified
-   output for the fire-and-forget API.
+    `capture_program_frame` returns a bounded in-memory PNG through OBS's
+    completed `GetSourceScreenshot` readback. The legacy fire-and-forget
+    source/file screenshot path remains unexposed; never synthesize its success.
 
 ## Scene graph workflow
 
@@ -72,6 +72,11 @@ and `windows_graphics_capture`; use `set_window_capture_method` to change an
 existing exact source when automatic BitBlt produces a black or incorrect
 game frame. These tools never accept arbitrary OBS input settings. See
 [the window-capture reference](../../../docs/window-capture.md).
+
+Call `capture_program_frame` before every long recording and inspect the
+returned PNG. Do not treat scene/source metadata or an active recording flag
+as visual evidence. If the frame is black or incorrect, stop before recording,
+repair the exact source binding or capture method, and capture a fresh frame.
 
 ## UI fallback
 
