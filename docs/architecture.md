@@ -1,11 +1,17 @@
 # Architecture
 
 ```text
-Agent -> DCC-MCP Core/Gateway -> Python sidecar
+Agent -> DCC-MCP Core/Gateway -> out-of-process OBS sidecar
       -> authenticated OBS WebSocket 5.x CallVendorRequest
       -> native dcc-mcp-obs plugin -> bounded OBS UI task
       -> libobs / OBS frontend API -> event + typed readback
 ```
+
+Release standalone bundles embed a private Python 3.10 runtime, the adapter,
+and one exact `dcc-mcp-core` version in that sidecar process. The OBS process
+still loads only the native plugin; Python is never embedded into OBS. A
+PyPI/source installation is an optional development and integration path with
+the same process boundary.
 
 The native plugin creates a fresh instance ID at load, reports the host PID and
 OBS/plugin versions on every response, and increments an event sequence from

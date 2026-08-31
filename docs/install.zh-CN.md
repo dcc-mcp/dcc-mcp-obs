@@ -2,9 +2,10 @@
 
 ## 安全模型
 
-Python 包与原生插件是两个独立 Release artifact。只安装与 Python 版本来自同一个
-GitHub Release 的原生包，并把公布的 SHA-256 传给安装器。bundle manifest 会绑定
-产品、版本、平台、每个目标路径和每个文件哈希。
+推荐的 standalone 包同时包含 sidecar 私有 Python 运行时和精确匹配的原生插件
+Release artifact。manifest 会绑定产品、版本、平台、每个文件路径、大小和 SHA-256；
+发布器还会验证内嵌原生插件与单独发布的原生 artifact 字节完全一致。用户无需安装
+系统 Python，也无需单独安装 `dcc-mcp-core`。
 
 安装器拒绝路径穿越、链接、多链接 receipt、平台不匹配、成员漂移和 Windows
 非可移植别名。receipt 会记录精确的受管理文件路径；verify 忽略无关条目，但任何
@@ -13,6 +14,37 @@ GitHub Release 的原生包，并把公布的 SHA-256 传给安装器。bundle m
 恢复此前由 receipt 管理的安装。
 
 ## 命令
+
+先使用 Core 安装规划器。它会把本仓库维护的安装说明作为第一个 next step，且不会
+静默修改 OBS 插件目录：
+
+```console
+dcc-mcp-cli install --dcc-type obs
+```
+
+standalone Release 包：
+
+```console
+dcc-mcp-obs install-bundled
+dcc-mcp-obs upgrade-bundled
+```
+
+同一个 standalone 包内包含 EXE、私有运行时、manifest 和精确匹配的
+`dcc-mcp-obs-plugin.zip`。把整包解压到稳定目录后，将
+`DCC_MCP_OBS_EXECUTABLE` 设为 launcher 的绝对路径。原生插件只使用这条显式配置，
+并仅附加当前 OBS PID 启动 sidecar；不会搜索 `PATH`、不会调用 shell，变量未设置时
+也不会启动任何进程。Windows 用户级部署可持久化该变量：
+
+```powershell
+$obsExe = (Resolve-Path .\dcc-mcp-obs.exe).Path
+$env:DCC_MCP_OBS_EXECUTABLE = $obsExe
+[Environment]::SetEnvironmentVariable("DCC_MCP_OBS_EXECUTABLE", $obsExe, "User")
+```
+
+standalone 进程内部会把 `DCC_MCP_PYTHON_EXECUTABLE` 设置为自身 EXE，使 Core 无需
+系统 Python 也能运行内置 Agent Skill。多 DCC 工作站不要全局持久化这个通用变量。
+
+可选的 PyPI/源码安装：
 
 ```console
 dcc-mcp-obs-install install --plugin-archive <bundle> --sha256 <digest>
@@ -29,6 +61,10 @@ dcc-mcp-obs-install uninstall
 在 sidecar 观察到精确的真实 OBS 插件会话前，两者都保持
 `verify.directly_usable=false` 和 `LIVE_OBS_VERIFICATION_REQUIRED`。
 
+`install-bundled` 与 `upgrade-bundled` 会读取同目录、由 Release 绑定的
+`dcc-mcp-obs-plugin.zip`，再把 manifest 中的 digest 传给同一份 Install SOP
+实现，不会形成第二套安装逻辑。
+
 默认插件目录遵循 OBS 的平台布局。Windows 使用
 `%PROGRAMDATA%\obs-studio\plugins\dcc-mcp-obs`；macOS 与 Linux 仍使用当前用户的
 OBS 插件目录。只有当 OBS 本身已配置为扫描另一个由操作者拥有的目录时，才应传入
@@ -42,4 +78,4 @@ OBS 插件目录。只有当 OBS 本身已配置为扫描另一个由操作者�
 
 安装、升级或卸载已加载的原生插件前应关闭 OBS。安装完成后启用 OBS WebSocket，
 只通过 `DCC_MCP_OBS_WEBSOCKET_PASSWORD` 设置密码，重启 OBS，再用精确 OBS PID
-启动 sidecar。
+启动 sidecar，并运行 `dcc-mcp-cli wait-ready --dcc-type obs` 验证注册和就绪状态。

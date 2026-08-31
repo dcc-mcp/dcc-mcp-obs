@@ -4,8 +4,9 @@ DCC-MCP 生态中的原生、类型化 OBS Studio 控制产品。
 
 本产品由 OBS 原生插件和 DCC-MCP sidecar 组成。C++ 插件运行在精确的 OBS
 进程内，负责宿主生命周期、UI 线程派发，并通过官方 OBS WebSocket 5.x API
-注册有界 vendor requests。Python sidecar 负责 MCP、Gateway、Install SOP v1
-CLI 和内置 Agent Skill。
+注册有界 vendor requests。进程外 sidecar 负责 MCP、Gateway、Install SOP v1
+CLI 和内置 Agent Skill；Release standalone 包自带私有 Python 运行时，不要求用户
+安装系统 Python。
 
 OBS WebSocket 只承担鉴权传输，不提供不受限制的 raw request 或任意脚本工具。
 
@@ -39,13 +40,22 @@ OBS WebSocket 只承担鉴权传输，不提供不受限制的 raw request 或�
 ## 要求
 
 - OBS Studio 28+，并启用 OBS WebSocket 5.x
-- Python 3.10+
-- `dcc-mcp-core>=0.20.14,<1.0.0`
-- 与 Windows、macOS 或 Linux 匹配的原生插件包
+- 与 Windows、macOS 或 Linux 匹配的 standalone Release 包
+
+只有选择 PyPI/源码安装时才需要 Python 3.10+ 和
+`dcc-mcp-core>=0.20.14,<1.0.0`；Core 会由 pip 自动解析，无需单独手装。
 
 ## 安装
 
-先安装 Python 控制面，再使用同一 Release 公布的 SHA-256 安装原生插件包：
+下载并解压对应平台的 `*-standalone` Release 包。它同时包含 sidecar、私有运行时和
+精确匹配的原生插件包。关闭 OBS 后执行：
+
+```console
+dcc-mcp-obs.exe install-bundled
+dcc-mcp-obs.exe --host-pid <obs-pid>
+```
+
+macOS/Linux 使用 `./dcc-mcp-obs`。开发者或明确希望使用 Python 包的用户仍可走：
 
 ```console
 python -m pip install dcc-mcp-obs
@@ -55,7 +65,7 @@ dcc-mcp-obs-install install \
 dcc-mcp-obs-install verify
 ```
 
-安装器只输出一个 Install SOP v1 JSON 对象。`--dry-run` 只执行包与所有权预检，
+两种安装入口都只输出一个 Install SOP v1 JSON 对象。`--dry-run` 只执行包与所有权预检，
 不会修改 OBS 插件目录。详见[安装说明](../install.zh-CN.md)。
 
 ## 密码与端点

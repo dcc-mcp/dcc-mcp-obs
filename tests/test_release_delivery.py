@@ -92,6 +92,8 @@ class FakeGitHub:
 @pytest.fixture
 def release_fixture(tmp_path: Path) -> tuple[Path, dict, FakeGitHub]:
     (tmp_path / "pyproject.toml").write_text('[project]\nversion = "1.0.0"\n')
+    (tmp_path / "packaging").mkdir()
+    (tmp_path / "packaging/standalone.toml").write_text('core_version = "0.20.22"\n')
     for args in (
         ["init", "-q"],
         ["add", "pyproject.toml"],
@@ -139,9 +141,58 @@ def make_artifacts(root: Path) -> None:
             "platform": platform,
             "files": [{"source": "payload/plugin", "sha256": hashlib.sha256(payload).hexdigest()}],
         }
-        with zipfile.ZipFile(parent / f"dcc-mcp-obs-1.0.0-{platform}.zip", "w") as archive:
+        native_archive_path = parent / f"dcc-mcp-obs-1.0.0-{platform}.zip"
+        with zipfile.ZipFile(native_archive_path, "w") as archive:
             archive.writestr("dcc-mcp-obs-plugin.json", json.dumps(manifest))
             archive.writestr("payload/plugin", payload)
+        standalone = root / f"release-artifacts/standalone-{platform}"
+        standalone.mkdir()
+        executable = "dcc-mcp-obs.exe" if platform == "windows" else "dcc-mcp-obs"
+        standalone_payload = b"offline-standalone-fixture"
+        bundled_plugin = native_archive_path.read_bytes()
+        standalone_manifest = {
+            "schema_version": 1,
+            "product": "dcc-mcp-obs-standalone",
+            "version": "1.0.0",
+            "core_version": "0.20.22",
+            "platform": platform,
+            "files": [
+                {
+                    "path": executable,
+                    "sha256": hashlib.sha256(standalone_payload).hexdigest(),
+                    "size": len(standalone_payload),
+                },
+                {
+                    "path": "dcc-mcp-obs-plugin.zip",
+                    "sha256": hashlib.sha256(bundled_plugin).hexdigest(),
+                    "size": len(bundled_plugin),
+                },
+            ],
+        }
+        archive_name = (
+            f"dcc-mcp-obs-1.0.0-{platform}-standalone.zip"
+            if platform == "windows"
+            else f"dcc-mcp-obs-1.0.0-{platform}-standalone.tar.gz"
+        )
+        archive_path = standalone / archive_name
+        if platform == "windows":
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr(executable, standalone_payload)
+                archive.writestr("dcc-mcp-obs-plugin.zip", bundled_plugin)
+                archive.writestr("dcc-mcp-obs-standalone.json", json.dumps(standalone_manifest))
+        else:
+            with tarfile.open(archive_path, "w:gz") as archive:
+                executable_info = tarfile.TarInfo(executable)
+                executable_info.mode = 0o755
+                executable_info.size = len(standalone_payload)
+                archive.addfile(executable_info, io.BytesIO(standalone_payload))
+                plugin_info = tarfile.TarInfo("dcc-mcp-obs-plugin.zip")
+                plugin_info.size = len(bundled_plugin)
+                archive.addfile(plugin_info, io.BytesIO(bundled_plugin))
+                manifest_payload = json.dumps(standalone_manifest).encode()
+                manifest_info = tarfile.TarInfo("dcc-mcp-obs-standalone.json")
+                manifest_info.size = len(manifest_payload)
+                archive.addfile(manifest_info, io.BytesIO(manifest_payload))
     sums = "".join(
         f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(root).as_posix()}\n"
         for p in sorted((root / "release-artifacts").rglob("*"))
@@ -150,15 +201,83 @@ def make_artifacts(root: Path) -> None:
     (root / "SHA256SUMS").write_text(sums)
 
 
+def refresh_checksums(root: Path) -> None:
+    sums = "".join(
+        f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to(root).as_posix()}\n"
+        for path in sorted((root / "release-artifacts").rglob("*"))
+        if path.is_file()
+    )
+    (root / "SHA256SUMS").write_text(sums)
+
+
+def rewrite_windows_standalone(root: Path, mutate) -> None:
+    archive_path = (
+        root / "release-artifacts/standalone-windows/dcc-mcp-obs-1.0.0-windows-standalone.zip"
+    )
+    with zipfile.ZipFile(archive_path) as archive:
+        contents = {name: archive.read(name) for name in archive.namelist()}
+    mutate(contents)
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        for name, payload in contents.items():
+            archive.writestr(name, payload)
+    refresh_checksums(root)
+
+
 def test_created_owned_release_accepts_complete_artifacts(release_fixture: tuple) -> None:
     root, env, api = release_fixture
     make_artifacts(root)
     delivery.deliver("check", root, env, api)
     assert api.writes == []
     delivery.deliver("upload", root, env, api)
-    assert len(api.writes) == 6
+    assert len(api.writes) == 9
     assert "SHA256SUMS" in api.writes
-    assert len(api.release["assets"]) == 6
+    assert len(api.release["assets"]) == 9
+
+
+def test_standalone_cannot_substitute_its_native_plugin(release_fixture: tuple) -> None:
+    root, _env, _api = release_fixture
+    make_artifacts(root)
+
+    def substitute(contents: dict[str, bytes]) -> None:
+        replacement = b"foreign-native-plugin"
+        contents["dcc-mcp-obs-plugin.zip"] = replacement
+        manifest = json.loads(contents["dcc-mcp-obs-standalone.json"])
+        entry = next(item for item in manifest["files"] if item["path"] == "dcc-mcp-obs-plugin.zip")
+        entry["size"] = len(replacement)
+        entry["sha256"] = hashlib.sha256(replacement).hexdigest()
+        contents["dcc-mcp-obs-standalone.json"] = json.dumps(manifest).encode()
+
+    rewrite_windows_standalone(root, substitute)
+
+    with pytest.raises(ValueError, match="differs from release asset"):
+        delivery.artifact_paths(root, "1.0.0")
+
+
+@pytest.mark.parametrize("drift", ["core", "path"])
+def test_standalone_rejects_core_or_member_path_drift(release_fixture: tuple, drift: str) -> None:
+    root, _env, _api = release_fixture
+    make_artifacts(root)
+
+    def mutate(contents: dict[str, bytes]) -> None:
+        manifest = json.loads(contents["dcc-mcp-obs-standalone.json"])
+        if drift == "core":
+            manifest["core_version"] = "0.20.21"
+        else:
+            payload = b"escape"
+            contents["../escape"] = payload
+            manifest["files"].append(
+                {
+                    "path": "../escape",
+                    "size": len(payload),
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                }
+            )
+        contents["dcc-mcp-obs-standalone.json"] = json.dumps(manifest).encode()
+
+    rewrite_windows_standalone(root, mutate)
+
+    with pytest.raises(ValueError):
+        delivery.artifact_paths(root, "1.0.0")
 
 
 @pytest.mark.parametrize(
@@ -253,6 +372,7 @@ def test_handoff_outputs_and_permission_graph_are_exact() -> None:
         "identity",
         "python-artifacts",
         "native-artifacts",
+        "standalone-artifacts",
         "publish",
     }
     assert caller["permissions"] == {"contents": "read"}
@@ -263,13 +383,26 @@ def test_handoff_outputs_and_permission_graph_are_exact() -> None:
     for name in ("python-artifacts", "native-artifacts"):
         assert jobs[name]["needs"] == "identity"
         assert "if" not in jobs[name]
-    assert jobs["publish"]["needs"] == ["identity", "python-artifacts", "native-artifacts"]
+    assert jobs["standalone-artifacts"]["needs"] == ["identity", "native-artifacts"]
+    assert "if" not in jobs["standalone-artifacts"]
+    assert jobs["publish"]["needs"] == [
+        "identity",
+        "python-artifacts",
+        "native-artifacts",
+        "standalone-artifacts",
+    ]
     assert "if" not in jobs["publish"]  # default success() propagates a skipped/failed identity job
-    for name in ("identity", "python-artifacts", "native-artifacts"):
+    for name in ("identity", "python-artifacts", "native-artifacts", "standalone-artifacts"):
         assert jobs[name].get("permissions", caller["permissions"]) == {"contents": "read"}
     assert jobs["publish"]["permissions"] == {"contents": "write", "id-token": "write"}
     assert jobs["publish"]["environment"] == "pypi"
-    for name in ("identity", "python-artifacts", "native-artifacts", "publish"):
+    for name in (
+        "identity",
+        "python-artifacts",
+        "native-artifacts",
+        "standalone-artifacts",
+        "publish",
+    ):
         owner = "release-please" if name == "identity" else "identity"
         checkout = next(
             step
@@ -303,7 +436,7 @@ def test_no_release_cannot_reach_publisher_or_oidc(created: str) -> None:
     # Interpret the frozen comparison and default success dependencies, not string truthiness.
     states = {"release-please": "success"}
     states["identity"] = "success" if created == "true" else "skipped"
-    for name in ("python-artifacts", "native-artifacts", "publish"):
+    for name in ("python-artifacts", "native-artifacts", "standalone-artifacts", "publish"):
         needs = jobs[name]["needs"]
         needs = [needs] if isinstance(needs, str) else needs
         states[name] = (

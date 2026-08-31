@@ -20,7 +20,11 @@ target_compile_features(${CMAKE_PROJECT_NAME} PRIVATE cxx_std_17)
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE native/vendor)
 target_sources(
   ${CMAKE_PROJECT_NAME}
-  PRIVATE native/src/agent-input-overlay.cpp native/src/dcc-mcp-menu.cpp native/src/plugin-main.cpp
+  PRIVATE
+    native/src/agent-input-overlay.cpp
+    native/src/dcc-mcp-menu.cpp
+    native/src/plugin-main.cpp
+    native/src/sidecar-launcher.cpp
 )
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})

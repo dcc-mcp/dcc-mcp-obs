@@ -2,7 +2,7 @@
 name: obs-control
 description: Inspect and control typed OBS lifecycle, profiles, scene collections, scenes, scene items, exact Windows window-capture sources, built-in Agent keyboard and mouse activity overlays, transitions, Studio Mode, recording, streaming, replay buffer, virtual camera, allowlisted hotkeys, and outputs for OBS Studio and Open Broadcaster Software.
 license: GPL-2.0-or-later
-compatibility: "Python 3.10+, OBS Studio 28+ with obs-websocket 5.x"
+compatibility: "OBS Studio 28+ with obs-websocket 5.x; standalone bundles need no system Python; PyPI/source installs need Python 3.10+"
 metadata:
   dcc-mcp:
     dcc: obs

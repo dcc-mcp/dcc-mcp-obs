@@ -8,11 +8,12 @@ import io
 import json
 import os
 import re
+import stat
 import subprocess
 import tarfile
 import zipfile
 from email.parser import BytesParser
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 
 try:
@@ -21,6 +22,14 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10
     import tomli as tomllib
 
 REPOSITORY = "dcc-mcp/dcc-mcp-obs"
+WINDOWS_RESERVED_NAMES = {
+    "AUX",
+    "CON",
+    "NUL",
+    "PRN",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
 
 
 def require(condition: bool, message: str) -> None:
@@ -115,14 +124,144 @@ def content_digest(data: bytes) -> tuple[int, str]:
     return len(data), f"sha256:{hashlib.sha256(data).hexdigest()}"
 
 
+def _validate_native_archive(data: bytes, version: str, platform: str) -> None:
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        manifest = json.loads(archive.read("dcc-mcp-obs-plugin.json"))
+        require(
+            manifest["version"] == version
+            and manifest["product"] == "dcc-mcp-obs"
+            and manifest["platform"] == platform,
+            "native identity drift",
+        )
+        entries = manifest["files"]
+        names = ["dcc-mcp-obs-plugin.json", *(entry["source"] for entry in entries)]
+        require(
+            entries
+            and len(names) == len(set(names))
+            and sorted(names) == sorted(archive.namelist()),
+            "native inventory drift",
+        )
+        for entry in entries:
+            require(
+                hashlib.sha256(archive.read(entry["source"])).hexdigest() == entry["sha256"],
+                "native digest drift",
+            )
+
+
+def _standalone_contents(path: Path, data: bytes) -> dict[str, bytes]:
+    if path.suffix == ".zip":
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            members = archive.infolist()
+            names = [member.filename for member in members]
+            require(
+                all(not stat.S_ISLNK(member.external_attr >> 16) for member in members),
+                "standalone links are forbidden",
+            )
+            _require_portable_standalone_names(names)
+            return {member.filename: archive.read(member) for member in members}
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+        members = archive.getmembers()
+        names = [member.name for member in members]
+        require(
+            all(member.isfile() for member in members),
+            "standalone inventory is unsafe",
+        )
+        _require_portable_standalone_names(names)
+        contents = {}
+        for member in members:
+            stream = archive.extractfile(member)
+            require(stream is not None, "standalone member is unreadable")
+            contents[member.name] = stream.read()
+        return contents
+
+
+def _require_portable_standalone_names(names: list[str]) -> None:
+    require(
+        names
+        and len(names) == len(set(names))
+        and len(names) == len({name.casefold() for name in names}),
+        "standalone duplicate member",
+    )
+    for name in names:
+        path = PurePosixPath(name)
+        require(
+            name == path.as_posix()
+            and not path.is_absolute()
+            and "\\" not in name
+            and ":" not in name
+            and 0 < len(name) <= 240
+            and all(part not in {"", ".", ".."} for part in path.parts),
+            "standalone member path is unsafe",
+        )
+        for part in path.parts:
+            require(
+                part == part.rstrip(" .")
+                and all(ord(character) >= 32 for character in part)
+                and part.split(".", maxsplit=1)[0].upper() not in WINDOWS_RESERVED_NAMES,
+                "standalone member path is not portable",
+            )
+
+
+def _validate_standalone_archive(
+    path: Path,
+    data: bytes,
+    version: str,
+    platform: str,
+    core_version: str,
+    native_archive: bytes,
+) -> None:
+    contents = _standalone_contents(path, data)
+    manifest = json.loads(contents["dcc-mcp-obs-standalone.json"])
+    require(
+        manifest.get("schema_version") == 1
+        and manifest.get("product") == "dcc-mcp-obs-standalone"
+        and manifest.get("version") == version
+        and manifest.get("platform") == platform
+        and manifest.get("core_version") == core_version,
+        "standalone identity drift",
+    )
+    entries = manifest.get("files")
+    require(isinstance(entries, list) and entries, "standalone manifest is empty")
+    names = [entry.get("path") for entry in entries]
+    require(
+        all(isinstance(name, str) for name in names)
+        and len(names) == len(set(names))
+        and set(contents) == {"dcc-mcp-obs-standalone.json", *names},
+        "standalone inventory drift",
+    )
+    executable = "dcc-mcp-obs.exe" if platform == "windows" else "dcc-mcp-obs"
+    require(
+        executable in names and "dcc-mcp-obs-plugin.zip" in names, "standalone payload incomplete"
+    )
+    for entry in entries:
+        payload = contents[entry["path"]]
+        require(
+            entry.get("size") == len(payload)
+            and entry.get("sha256") == hashlib.sha256(payload).hexdigest(),
+            "standalone digest drift",
+        )
+    bundled_plugin = contents["dcc-mcp-obs-plugin.zip"]
+    require(bundled_plugin == native_archive, "standalone native plugin differs from release asset")
+    _validate_native_archive(bundled_plugin, version, platform)
+
+
 def artifact_paths(root: Path, version: str) -> dict[Path, tuple[int, str]]:
     """Freeze the digest of the same bytes used for archive and manifest validation."""
     directory = root / "release-artifacts"
+    standalone_config = tomllib.loads(
+        (root / "packaging" / "standalone.toml").read_text(encoding="utf-8")
+    )
+    core_version = standalone_config["core_version"]
     expected = {
         f"python-dist/dcc_mcp_obs-{version}-py3-none-any.whl",
         f"python-dist/dcc_mcp_obs-{version}.tar.gz",
         *(
             f"native-{platform}/dcc-mcp-obs-{version}-{platform}.zip"
+            for platform in ("linux", "macos", "windows")
+        ),
+        *(
+            f"standalone-{platform}/dcc-mcp-obs-{version}-{platform}-standalone."
+            f"{'zip' if platform == 'windows' else 'tar.gz'}"
             for platform in ("linux", "macos", "windows")
         ),
     }
@@ -132,34 +271,18 @@ def artifact_paths(root: Path, version: str) -> dict[Path, tuple[int, str]]:
         "release artifact set is not exact",
     )
     snapshots = {}
+    artifact_data = {path.relative_to(directory).as_posix(): path.read_bytes() for path in files}
     for path in files:
-        data = path.read_bytes()
+        relative = path.relative_to(directory).as_posix()
+        data = artifact_data[relative]
         require(not path.is_symlink() and len(data) > 0, "invalid artifact")
         snapshots[path] = content_digest(data)
-        if path.suffix == ".zip":
-            with zipfile.ZipFile(io.BytesIO(data)) as archive:
-                manifest = json.loads(archive.read("dcc-mcp-obs-plugin.json"))
-                require(
-                    manifest["version"] == version and manifest["product"] == "dcc-mcp-obs",
-                    "native version drift",
-                )
-                require(
-                    path.parent.name == f"native-{manifest['platform']}", "native platform drift"
-                )
-                entries = manifest["files"]
-                names = ["dcc-mcp-obs-plugin.json", *(entry["source"] for entry in entries)]
-                require(
-                    entries
-                    and len(names) == len(set(names))
-                    and sorted(names) == sorted(archive.namelist()),
-                    "native inventory drift",
-                )
-                for entry in entries:
-                    require(
-                        hashlib.sha256(archive.read(entry["source"])).hexdigest()
-                        == entry["sha256"],
-                        "native digest drift",
-                    )
+        if path.parent.name.startswith("native-"):
+            _validate_native_archive(data, version, path.parent.name.removeprefix("native-"))
+        elif path.parent.name.startswith("standalone-"):
+            platform = path.parent.name.removeprefix("standalone-")
+            native = artifact_data[f"native-{platform}/dcc-mcp-obs-{version}-{platform}.zip"]
+            _validate_standalone_archive(path, data, version, platform, core_version, native)
         else:
             if path.suffix == ".whl":
                 with zipfile.ZipFile(io.BytesIO(data)) as archive:

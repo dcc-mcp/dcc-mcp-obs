@@ -2,10 +2,12 @@
 
 ## Security model
 
-The Python package and native plugin are separate release artifacts. Install
-only a native bundle from the same GitHub Release as the Python version, and
-pass its published SHA-256 to the installer. The bundle contains a manifest
-that binds product, version, platform, every target path, and every file hash.
+The recommended standalone archive contains the sidecar's private Python
+runtime and the exact native plugin release artifact. Its manifest binds the
+product, version, platform, every file path, size, and SHA-256. The release
+publisher also verifies that the nested native plugin is byte-identical to the
+separately published native artifact. No system Python or separately installed
+`dcc-mcp-core` is required.
 
 The installer rejects path traversal, links, multi-link receipts, mismatched
 platforms, member drift, and non-portable Windows aliases. The receipt records
@@ -16,6 +18,39 @@ managed directory only when it is empty. Files are staged beside the target,
 and a failed publication restores the prior managed installation.
 
 ## Commands
+
+Start with the Core planner. It returns this adapter-owned runbook as the first
+next step and does not silently modify the OBS plugin directory:
+
+```console
+dcc-mcp-cli install --dcc-type obs
+```
+
+Standalone release bundle:
+
+```console
+dcc-mcp-obs install-bundled
+dcc-mcp-obs upgrade-bundled
+```
+
+The same standalone archive contains the executable, private runtime, manifest,
+and matching `dcc-mcp-obs-plugin.zip`. After extracting it to a stable location,
+set `DCC_MCP_OBS_EXECUTABLE` to the launcher's absolute path. The native plugin
+uses that explicit value to start the sidecar with the current OBS PID; it does
+not search `PATH`, invoke a shell, or launch anything when the variable is
+absent. On Windows, a user-level deployment can persist the value as follows:
+
+```powershell
+$obsExe = (Resolve-Path .\dcc-mcp-obs.exe).Path
+$env:DCC_MCP_OBS_EXECUTABLE = $obsExe
+[Environment]::SetEnvironmentVariable("DCC_MCP_OBS_EXECUTABLE", $obsExe, "User")
+```
+
+Inside the standalone process, `DCC_MCP_PYTHON_EXECUTABLE` is set to the same
+executable so Core can run the bundled Agent skill without a system Python.
+Do not persist that generic variable globally on a mixed-DCC workstation.
+
+Optional PyPI/source installation:
 
 ```console
 dcc-mcp-obs-install install --plugin-archive <bundle> --sha256 <digest>
@@ -34,6 +69,10 @@ File installation returns `requires_restart`; file-only status/verify returns
 `LIVE_OBS_VERIFICATION_REQUIRED` until an exact live OBS plugin session is
 observed through the sidecar.
 
+`install-bundled` and `upgrade-bundled` resolve the adjacent, release-bound
+`dcc-mcp-obs-plugin.zip` and pass its manifest digest into the same Install SOP
+implementation. They do not introduce a second installation mechanism.
+
 The default plugin directory follows the OBS platform layout. On Windows it is
 `%PROGRAMDATA%\obs-studio\plugins\dcc-mcp-obs`; on macOS and Linux it remains
 inside the current user's OBS plugin directory. Use `--plugin-dir` only when
@@ -51,4 +90,8 @@ drift fails closed on that follow-up command.
 Close OBS before installing, upgrading, or uninstalling a loaded native
 plugin. After installation, enable OBS WebSocket, set the password only in
 `DCC_MCP_OBS_WEBSOCKET_PASSWORD`, restart OBS, and start the sidecar with the
-exact OBS PID.
+exact OBS PID. Confirm the registered runtime with:
+
+```console
+dcc-mcp-cli wait-ready --dcc-type obs
+```

@@ -125,8 +125,62 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+  standalone-artifacts:
+    needs: [identity, native-artifacts]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            platform: windows
+            executable: dist/standalone/dcc-mcp-obs.exe
+          - os: macos-15
+            platform: macos
+            executable: dist/standalone/dcc-mcp-obs
+          - os: ubuntu-24.04
+            platform: linux
+            executable: dist/standalone/dcc-mcp-obs
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.identity.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: native-${{ matrix.platform }}
+          path: native-artifact
+      - name: Build self-contained distribution
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check pyoxidizer==0.24.0
+          rustc --version
+          plugin_archive=$(find native-artifact -type f -name '*.zip')
+          test "$(printf '%s\n' "$plugin_archive" | sed '/^$/d' | wc -l)" -eq 1
+          python tools/build_standalone.py \
+            --platform '${{ matrix.platform }}' \
+            --plugin-archive "$plugin_archive"
+      - name: Smoke bundled installer and sidecar
+        shell: bash
+        run: |
+          '${{ matrix.executable }}' --version
+          '${{ matrix.executable }}' install --help
+          test "$('${{ matrix.executable }}' tools/standalone_skill_smoke.py \
+            --message standalone)" = '{"message":"standalone"}'
+          '${{ matrix.executable }}' install-bundled --dry-run \
+            --plugin-dir "$RUNNER_TEMP/dcc-mcp-obs-plugin"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: standalone-${{ matrix.platform }}
+          path: dist/dcc-mcp-obs-*-standalone.*
+          if-no-files-found: error
+          retention-days: 3
+
   publish:
-    needs: [identity, python-artifacts, native-artifacts]
+    needs: [identity, python-artifacts, native-artifacts, standalone-artifacts]
     env:
       RELEASE_TAG: ${{ needs.identity.outputs.tag }}
       RELEASE_SHA: ${{ needs.identity.outputs.sha }}
@@ -151,7 +205,7 @@ jobs:
         shell: bash
         run: |
           find release-artifacts -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
-          test "$(find release-artifacts -type f | wc -l)" -eq 5
+          test "$(find release-artifacts -type f | wc -l)" -eq 8
       - name: Verify no-clobber publication targets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
