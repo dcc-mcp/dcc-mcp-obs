@@ -7,7 +7,9 @@ Native OBS Studio control product: https://github.com/dcc-mcp/dcc-mcp-obs
 - Typed scene switching, scene-item CRUD, transitions, and Studio Mode preview/program operations are available through the native contract.
 - Search and load the skill before calling tools.
 - Native plugin/WebSocket tools are authoritative; no raw request or script tool exists.
-- Every mutation requires typed readback and exact instance identity.
+- Every state mutation requires typed readback and exact instance identity.
+- Use request_graceful_shutdown for a terminal normal exit; it refuses active
+  outputs and never claims in-band process-exit verification.
 - The OBS password is operator-owned and must never be requested or emitted.
 - DCC-CUA is a scoped fallback only for unsupported visual UI actions with exact
   PID/HWND, fresh snapshot, and post-action readback. No generic Computer Use fallback.

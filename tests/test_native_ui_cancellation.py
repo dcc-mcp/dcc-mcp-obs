@@ -57,3 +57,42 @@ def test_every_destructive_obs_mutation_claims_after_state_probes() -> None:
     assert timeout.index("state->gate.cancel_pending()") < timeout.index(
         'set_error(response, "OBS_UI_TIMEOUT");'
     )
+
+
+def test_graceful_shutdown_is_output_safe_capability_gated_and_deferred() -> None:
+    source = (ROOT / "native" / "src" / "plugin-main.cpp").read_text(encoding="utf-8")
+    start = source.index("case UiOperation::RequestGracefulShutdown:")
+    end = source.index("case UiOperation::RecordingStatus:", start)
+    branch = source[start:end]
+
+    claim = branch.index("claim_mutation")
+    for probe in (
+        "obs_frontend_recording_active()",
+        "obs_frontend_streaming_active()",
+        "obs_frontend_replay_buffer_active()",
+        "obs_frontend_virtualcam_active()",
+        "obs_frontend_get_main_window()",
+    ):
+        assert branch.index(probe) < claim
+    assert 'set_error(result, "OBS_INSTANCE_NOT_READY")' in branch
+    assert 'set_error(result, "OBS_OUTPUT_ACTIVE")' in branch
+    assert 'obs_data_set_bool(result, "shutdownScheduled", true)' in branch
+    assert "QWidget" not in branch
+
+    assert 'required_capability = "application_lifecycle"' in source
+    run_call = source.index("run_ui_operation(operation_for(request)")
+    deferred_exit = source.index(
+        "obs_queue_task(OBS_TASK_UI, request_frontend_exit, nullptr, false)", run_call
+    )
+    assert run_call < deferred_exit
+    exit_callback = source.split("void request_frontend_exit(void *)", maxsplit=1)[1].split(
+        "void vendor_request", maxsplit=1
+    )[0]
+    assert "obs_frontend_get_main_window()" in exit_callback
+    assert "QMetaObject::invokeMethod" in exit_callback
+    assert "Qt::QueuedConnection" in exit_callback
+    assert "obs_frontend_exit" not in source
+
+    cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "find_package(Qt6 REQUIRED COMPONENTS Widgets)" in cmake
+    assert "Qt6::Widgets" in cmake

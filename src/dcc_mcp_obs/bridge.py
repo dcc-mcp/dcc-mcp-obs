@@ -46,6 +46,7 @@ PUBLIC_DOWNSTREAM_ERRORS = frozenset(
         "OBS_EVENT_OVERFLOW",
         "OBS_FRAME_TOO_LARGE",
         "OBS_HANDSHAKE_INVALID",
+        "OBS_INSTANCE_NOT_READY",
         "OBS_RECORDING_NOT_ACTIVE",
         "OBS_REQUEST_FAILED",
         "OBS_REQUEST_INVALID",
@@ -58,6 +59,7 @@ PUBLIC_DOWNSTREAM_ERRORS = frozenset(
         "OBS_STUDIO_MODE_INACTIVE",
         "OBS_OUTPUT_NOT_FOUND",
         "OBS_OUTPUT_NOT_ACTIVE",
+        "OBS_OUTPUT_ACTIVE",
         "OBS_MUTATION_REJECTED",
         "OBS_TIMEOUT",
         "OBS_UI_TIMEOUT",
@@ -1136,6 +1138,21 @@ class ObsControlBridge:
     def stop_recording(self) -> dict[str, object]:
         return self._recording_mutation("StopRecording", active=False, paused=False)
 
+    def request_graceful_shutdown(self) -> dict[str, object]:
+        """Ask OBS to exit after the typed response has been submitted.
+
+        This is intentionally a terminal operation.  Process disappearance is
+        verified by the caller rather than claimed as an in-band postcondition.
+        """
+        response = self._checked(
+            "RequestGracefulShutdown",
+            {"capability": "application_lifecycle"},
+            deadline=self._operation_deadline(),
+        )
+        if response.get("accepted") is not True or response.get("shutdownScheduled") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        return response
+
     def pause_recording(self) -> dict[str, object]:
         return self._recording_mutation("PauseRecording", active=True, paused=True)
 
@@ -1820,6 +1837,7 @@ class ObsControlBridge:
             "SetCurrentPreviewScene",
             "TriggerStudioModeTransition",
             "TriggerAllowlistedHotkey",
+            "RequestGracefulShutdown",
         }:
             allowed = set(_IDENTITY_KEYS) | {"accepted"}
             if request_type == "SetCurrentProfile":
@@ -1897,6 +1915,8 @@ class ObsControlBridge:
                 allowed |= {"studioModeEnabled", "capability"}
             if request_type == "SaveReplayBuffer":
                 allowed |= {"submitted"}
+            elif request_type == "RequestGracefulShutdown":
+                allowed |= {"shutdownScheduled"}
             if (
                 set(response) - allowed
                 or response.get("ok") is not True
@@ -1986,6 +2006,11 @@ class ObsControlBridge:
                 request_type == "SaveReplayBuffer"
                 and "submitted" in response
                 and type(response.get("submitted")) is not bool
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            if (
+                request_type == "RequestGracefulShutdown"
+                and response.get("shutdownScheduled") is not True
             ):
                 raise BridgeError("OBS_RESPONSE_INVALID")
             return

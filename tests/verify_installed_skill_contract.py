@@ -24,6 +24,11 @@ def main() -> None:
     }
     results = {
         "get_status": {**identity, "ready": True},
+        "request_graceful_shutdown": {
+            **identity,
+            "accepted": True,
+            "shutdownScheduled": True,
+        },
         "list_scenes": {
             **identity,
             "currentSceneName": "Main",

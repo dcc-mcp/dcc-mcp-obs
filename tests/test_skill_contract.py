@@ -44,6 +44,39 @@ def test_every_obs_skill_tool_references_a_bundled_script() -> None:
     assert missing == []
 
 
+def test_graceful_shutdown_skill_is_terminal_bounded_and_destructive() -> None:
+    tools = yaml.safe_load(
+        (ROOT / "src/dcc_mcp_obs/skills/obs-control/tools.yaml").read_text(encoding="utf-8")
+    )["tools"]
+    tool = next(tool for tool in tools if tool["name"] == "request_graceful_shutdown")
+
+    assert tool["input_schema"] == {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    }
+    assert tool["annotations"] == {
+        "read_only_hint": False,
+        "destructive_hint": True,
+        "idempotent_hint": False,
+        "open_world_hint": False,
+        "deferred_hint": True,
+    }
+    context = tool["output_schema"]["properties"]["context"]
+    assert set(context["required"]) == {
+        "instanceId",
+        "pluginVersion",
+        "obsVersion",
+        "hostPid",
+        "eventSequence",
+        "ok",
+        "accepted",
+        "shutdownScheduled",
+    }
+    assert context["additionalProperties"] is False
+    assert "next-tools" not in tool
+
+
 def test_obs_skill_has_bilingual_discovery_aliases_and_no_raw_escape_hatch() -> None:
     skill = (ROOT / "src" / "dcc_mcp_obs" / "skills" / "obs-control" / "SKILL.md").read_text(
         encoding="utf-8"
@@ -74,8 +107,9 @@ def test_obs_skill_has_bilingual_discovery_aliases_and_no_raw_escape_hatch() -> 
     for unsupported in ("scene switching", "场景切换"):
         assert unsupported.casefold() not in discovery.casefold()
 
-    assert [tool["name"] for tool in tools["tools"]][:32] == [
+    assert [tool["name"] for tool in tools["tools"]][:33] == [
         "get_status",
+        "request_graceful_shutdown",
         "list_scenes",
         "capture_program_frame",
         "list_sources",
@@ -117,7 +151,11 @@ def test_obs_skill_has_bilingual_discovery_aliases_and_no_raw_escape_hatch() -> 
         if tool["name"].startswith("get_") or tool["name"].startswith("list_")
     )
     assert all("call_examples" in tool for tool in tools["tools"])
-    assert all("next-tools" in tool for tool in tools["tools"][:8])
+    assert all(
+        "next-tools" in tool
+        for tool in tools["tools"][:9]
+        if tool["name"] != "request_graceful_shutdown"
+    )
 
 
 def test_ui_fallback_is_explicitly_scoped_to_dcc_cua() -> None:
@@ -214,6 +252,16 @@ def test_skill_outputs_publish_strict_typed_envelopes_with_context_parity() -> N
     }
     expected_context_keys.update(
         {
+            "request_graceful_shutdown": {
+                "instanceId",
+                "pluginVersion",
+                "obsVersion",
+                "hostPid",
+                "eventSequence",
+                "ok",
+                "accepted",
+                "shutdownScheduled",
+            },
             "get_streaming_status": mutation_context_keys - {"outputActive", "outputPaused"}
             | {"streamingActive"},
             "start_streaming": mutation_context_keys - {"outputActive", "outputPaused"}
@@ -449,6 +497,11 @@ def test_every_skill_output_schema_accepts_the_real_core_success_envelope() -> N
     }
     results.update(
         {
+            "request_graceful_shutdown": {
+                **identity,
+                "accepted": True,
+                "shutdownScheduled": True,
+            },
             "get_streaming_status": {**identity, "streamingActive": False},
             "start_streaming": {**identity, "streamingActive": True, "verified": True},
             "stop_streaming": {**identity, "streamingActive": False, "verified": True},

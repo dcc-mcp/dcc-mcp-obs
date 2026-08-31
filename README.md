@@ -95,6 +95,12 @@ and load the skill before calling the typed tools. Scene-graph mutations are
 available only through the native typed contract and require verified
 postconditions.
 
+Use `request_graceful_shutdown` instead of terminating the OBS process. The
+native plugin refuses the request while recording, streaming, replay buffer,
+or virtual camera output is active, returns a terminal queued acknowledgement,
+and then asks the OBS frontend to exit normally. Callers verify process and
+plugin-instance disappearance outside the closed connection.
+
 OBS control is native-plugin/WebSocket first. Unsupported visual-only actions
 may use DCC-MCP `ui-control` with project-owned DCC-CUA only after exact PID
 and HWND binding, a fresh snapshot, and post-action readback. There is no
