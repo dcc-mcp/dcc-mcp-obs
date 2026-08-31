@@ -3,16 +3,21 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
+from pathlib import Path
 
 import pytest
 
 from dcc_mcp_obs.config import ObsEndpointConfig
 from dcc_mcp_obs.protocol import (
     MAX_FRAME_BYTES,
+    MUTATING_VENDOR_REQUESTS,
     VENDOR_REQUESTS,
     ObsWebSocketTransport,
     ProtocolError,
 )
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class ScriptedSocket:
@@ -259,6 +264,11 @@ def test_transport_allowlist_is_exactly_the_typed_public_requests() -> None:
     assert {
         "GetPluginStatus",
         "GetOperatorStatus",
+        "RequestGracefulShutdown",
+        "CreateAgentInputOverlay",
+        "GetAgentInputOverlay",
+        "EmitAgentInputActivity",
+        "ClearAgentInputOverlay",
         "ListScenes",
         "GetCurrentScene",
         "SetCurrentScene",
@@ -275,7 +285,6 @@ def test_transport_allowlist_is_exactly_the_typed_public_requests() -> None:
         "RestoreWindowCaptureCandidate",
         "RebindWindowCaptureSource",
         "SetWindowCaptureMethod",
-        "UpdateSceneItem",
         "RemoveSceneItem",
         "SetSceneItemEnabled",
         "SetSceneItemTransform",
@@ -319,6 +328,26 @@ def test_transport_allowlist_is_exactly_the_typed_public_requests() -> None:
         "CaptureSourceScreenshot",
         "CaptureProgramFrame",
     } == VENDOR_REQUESTS
+
+
+def test_transport_allowlist_matches_native_vendor_registration() -> None:
+    native_source = (ROOT / "native" / "src" / "plugin-main.cpp").read_text(encoding="utf-8")
+    request_block = re.search(
+        r"constexpr const char \*kRequests\[\] = \{(?P<body>.*?)\};",
+        native_source,
+        flags=re.DOTALL,
+    )
+    assert request_block is not None
+    native_requests = frozenset(re.findall(r'"([A-Za-z0-9]+)"', request_block.group("body")))
+
+    assert native_requests == VENDOR_REQUESTS
+    assert {
+        "RequestGracefulShutdown",
+        "CreateAgentInputOverlay",
+        "EmitAgentInputActivity",
+        "ClearAgentInputOverlay",
+    } <= MUTATING_VENDOR_REQUESTS
+    assert "GetAgentInputOverlay" not in MUTATING_VENDOR_REQUESTS
 
 
 def test_bounded_events_are_reconciled_before_response() -> None:
