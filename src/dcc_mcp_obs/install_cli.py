@@ -374,6 +374,38 @@ def default_plugin_dir() -> Path:
     )
 
 
+def _legacy_windows_user_plugin_dir() -> Path | None:
+    if sys.platform != "win32":
+        return None
+    app_data = os.environ.get("APPDATA")
+    if not app_data:
+        return None
+    return Path(app_data) / "obs-studio" / "plugins" / "dcc-mcp-obs"
+
+
+def _verified_legacy_windows_user_plugin(target: Path) -> Path | None:
+    canonical_target = Path(os.path.abspath(default_plugin_dir().expanduser()))
+    legacy_target = _legacy_windows_user_plugin_dir()
+    if target != canonical_target or legacy_target is None:
+        return None
+    legacy_target = Path(os.path.abspath(legacy_target.expanduser()))
+    if legacy_target == target or not os.path.lexists(legacy_target):
+        return None
+    _require_safe_target_path(legacy_target)
+    _release_active_result_lease(legacy_target)
+    _verify(legacy_target)
+    return legacy_target
+
+
+def _remove_legacy_windows_user_plugin(
+    legacy_target: Path | None, steps: list[dict[str, str]]
+) -> None:
+    if legacy_target is None:
+        return
+    _uninstall(legacy_target)
+    steps.append({"id": "legacy-user-plugin", "status": "ok"})
+
+
 def run(argv: Sequence[str]) -> tuple[int, dict[str, Any]]:
     parser = argparse.ArgumentParser(description="Install or verify the native DCC-MCP OBS plugin.")
     parser.add_argument("command", choices=("install", "upgrade", "status", "verify", "uninstall"))
@@ -394,9 +426,11 @@ def run(argv: Sequence[str]) -> tuple[int, dict[str, Any]]:
             if args.dry_run:
                 steps.append({"id": "plugin", "status": "planned"})
                 return EXIT_OK, _report("planned", steps, target, directly_usable=False)
+            legacy_target = _verified_legacy_windows_user_plugin(target)
             _install(plan, target, allow_existing=args.command == "upgrade")
             steps.append({"id": "plugin", "status": "ok"})
             verified_receipt = _verify(target)
+            _remove_legacy_windows_user_plugin(legacy_target, steps)
             return EXIT_OK, _commit_verified_report(
                 target,
                 verified_receipt,
