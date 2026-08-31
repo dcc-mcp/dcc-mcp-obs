@@ -38,7 +38,9 @@ constexpr auto kUiTimeout = std::chrono::seconds(5);
 constexpr size_t kMaxScenes = 256;
 constexpr size_t kMaxTransitions = 128;
 constexpr size_t kMaxSources = 512;
+#ifdef _WIN32
 constexpr size_t kMaxWindowCaptureCandidates = 64;
+#endif
 constexpr size_t kMaxOutputs = 8;
 constexpr size_t kMaxProfiles = 128;
 constexpr size_t kMaxSceneCollections = 128;
