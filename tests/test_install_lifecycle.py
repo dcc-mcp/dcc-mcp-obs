@@ -59,6 +59,89 @@ def test_windows_default_plugin_directory_uses_program_data(
     assert install_cli.default_plugin_dir() == (tmp_path / "obs-studio" / "plugins" / "dcc-mcp-obs")
 
 
+def test_windows_default_install_reconciles_verified_legacy_user_plugin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    canonical_target = tmp_path / "program-data" / "obs-studio" / "plugins" / "dcc-mcp-obs"
+    legacy_target = tmp_path / "app-data" / "obs-studio" / "plugins" / "dcc-mcp-obs"
+    monkeypatch.setattr(install_cli, "default_plugin_dir", lambda: canonical_target)
+    monkeypatch.setattr(install_cli, "_legacy_windows_user_plugin_dir", lambda: legacy_target)
+    legacy_archive, legacy_digest, _legacy_payload = _bundle(
+        tmp_path,
+        target="bin/64bit/dcc-mcp-obs.dll",
+        payload=b"legacy-plugin-binary",
+        name="legacy-plugin.zip",
+    )
+    code, _report = run(
+        [
+            "install",
+            "--plugin-archive",
+            str(legacy_archive),
+            "--sha256",
+            legacy_digest,
+            "--plugin-dir",
+            str(legacy_target),
+        ]
+    )
+    assert code == 0
+    unmanaged = legacy_target / "operator-owned.txt"
+    unmanaged.write_text("preserve", encoding="utf-8")
+
+    archive, digest, payload = _bundle(
+        tmp_path,
+        target="bin/64bit/dcc-mcp-obs.dll",
+        payload=b"current-plugin-binary",
+        name="current-plugin.zip",
+    )
+    code, report = run(
+        [
+            "install",
+            "--plugin-archive",
+            str(archive),
+            "--sha256",
+            digest,
+        ]
+    )
+
+    assert code == 0 and report["status"] == "requires_restart"
+    assert (canonical_target / "bin" / "64bit" / "dcc-mcp-obs.dll").read_bytes() == payload
+    assert not (legacy_target / "bin" / "64bit" / "dcc-mcp-obs.dll").exists()
+    assert not (legacy_target / RECEIPT_NAME).exists()
+    assert unmanaged.read_text(encoding="utf-8") == "preserve"
+
+
+def test_windows_default_install_rejects_unmanaged_legacy_user_plugin_before_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    canonical_target = tmp_path / "program-data" / "obs-studio" / "plugins" / "dcc-mcp-obs"
+    legacy_target = tmp_path / "app-data" / "obs-studio" / "plugins" / "dcc-mcp-obs"
+    monkeypatch.setattr(install_cli, "default_plugin_dir", lambda: canonical_target)
+    monkeypatch.setattr(install_cli, "_legacy_windows_user_plugin_dir", lambda: legacy_target)
+    legacy_target.mkdir(parents=True)
+    unmanaged = legacy_target / "operator-owned.txt"
+    unmanaged.write_text("preserve", encoding="utf-8")
+    archive, digest, _payload = _bundle(
+        tmp_path,
+        target="bin/64bit/dcc-mcp-obs.dll",
+        name="current-plugin.zip",
+    )
+
+    code, report = run(
+        [
+            "install",
+            "--plugin-archive",
+            str(archive),
+            "--sha256",
+            digest,
+        ]
+    )
+
+    assert code == 40
+    assert report["verify"]["failure_reason"] == "OBS_PLUGIN_DRIFT"
+    assert unmanaged.read_text(encoding="utf-8") == "preserve"
+    assert not canonical_target.exists()
+
+
 def test_full_install_status_verify_uninstall_lifecycle(tmp_path: Path) -> None:
     archive, digest, payload = _bundle(tmp_path)
     target = tmp_path / "installed"
