@@ -16,6 +16,7 @@ OBS WebSocket 只承担鉴权传输，不提供不受限制的 raw request 或�
 - 当前场景或精确指定场景的有界 source 枚举
 - 按精确 PID、HWND 和标题创建并回读 Windows 窗口捕获 source
 - 类型化场景切换、场景项 CRUD、转场和 Studio Mode 预览/节目操作
+- 插件内置、隐私安全的 Agent 键盘/鼠标活动提示 source
 - 录制状态
 - 开始、停止、暂停、继续录制
 - 每次写操作后独立的类型化状态读回
@@ -32,6 +33,7 @@ OBS WebSocket 只承担鉴权传输，不提供不受限制的 raw request 或�
 - [输入、属性、滤镜、音频和媒体](https://github.com/dcc-mcp/dcc-mcp-obs/issues/5)
 - [类型化场景图控制](../scene-graph.md)
 - [Windows 精确窗口捕获](../window-capture.md)
+- [内置 Agent 输入提示](../agent-input-overlay.md)
 
 ## 要求
 
@@ -77,9 +79,15 @@ dcc-mcp-obs --host-pid <obs-pid>
 
 内置 `obs-control` Skill 覆盖 OBS、Open Broadcaster Software、recording、
 场景/source 查看、场景图、场景项、转场、Studio Mode、pause、resume、录屏、
-录制视频等中英文检索词。Agent 先搜索并加载 Skill，再调用场景、场景图、录制、
+录制视频、按键展示、键盘、鼠标、输入提示等中英文检索词。Agent 先搜索并加载 Skill，再调用场景、场景图、录制、
 直播、回放缓冲、虚拟摄像头和输出域的类型化工具。场景图写操作必须经过原生
 插件的精确实例校验、截止时间和状态读回。
+
+录制 Agent 演示时，先用 `create_agent_input_overlay` 将同一个共享
+`DCC-MCP Agent Input` source 分别挂到三个游戏场景，再在动作前调用
+`emit_agent_input_activity`。提示只接受白名单快捷键、鼠标按键、滚轮方向或打字
+字符数；不会监听全局输入，也不接收任意文本。代码仍由正常的窗口/屏幕 source
+展示，Agent 在运行代码前显示对应的语义提示。详见[内置 Agent 输入提示](../agent-input-overlay.md)。
 
 关闭 OBS 时使用 `request_graceful_shutdown`，不要强制结束进程。录制、直播、
 回放缓冲或虚拟摄像头仍活动时，原生插件会拒绝退出；全部停止后仅返回“已接受并

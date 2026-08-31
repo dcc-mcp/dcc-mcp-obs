@@ -80,6 +80,7 @@ def test_capability_matrix_freezes_full_product_scope() -> None:
         "scene_items",
         "sources",
         "inputs",
+        "agent_input_overlay",
         "properties",
         "filters",
         "audio",
@@ -102,6 +103,13 @@ def test_capability_matrix_freezes_full_product_scope() -> None:
     assert 'if (request == "GetOperatorStatus")' in native_source
     assert "list_scenes" in domains["scenes"]["delivered_operations"]
     assert "list_sources" in domains["sources"]["delivered_operations"]
+    assert domains["agent_input_overlay"]["status"] == "delivered"
+    assert domains["agent_input_overlay"]["delivered_operations"] == [
+        "get_agent_input_overlay",
+        "create_agent_input_overlay",
+        "emit_agent_input_activity",
+        "clear_agent_input_overlay",
+    ]
     assert domains["recording"]["status"] == "delivered"
     assert all(
         entry["tracking_issue"].startswith("https://github.com/dcc-mcp/")

@@ -81,6 +81,34 @@ _IDENTITY_KEYS = frozenset(
     {"instanceId", "pluginVersion", "obsVersion", "hostPid", "eventSequence", "ok"}
 )
 WINDOW_CAPTURE_METHODS = frozenset({"automatic", "bitblt", "windows_graphics_capture"})
+AGENT_INPUT_OVERLAY_SOURCE_KIND = "dcc_mcp_agent_input_overlay"
+AGENT_INPUT_OVERLAY_THEME = "dcc_mcp_dark"
+AGENT_INPUT_OVERLAY_ANCHORS = frozenset({"bottom_left", "bottom_center", "bottom_right"})
+AGENT_INPUT_EVENT_KINDS = frozenset({"shortcut", "mouse_button", "mouse_wheel", "typing"})
+AGENT_INPUT_KEYS = frozenset(
+    {
+        "ctrl",
+        "shift",
+        "alt",
+        "meta",
+        "enter",
+        "escape",
+        "tab",
+        "space",
+        "backspace",
+        "delete",
+        "up",
+        "down",
+        "left",
+        "right",
+    }
+    | {chr(code) for code in range(ord("a"), ord("z") + 1)}
+    | {str(number) for number in range(10)}
+    | {f"f{number}" for number in range(1, 13)}
+)
+AGENT_INPUT_MOUSE_BUTTONS = frozenset({"none", "left", "right", "middle", "back", "forward"})
+AGENT_INPUT_WHEEL_DIRECTIONS = frozenset({"none", "up", "down", "left", "right"})
+DEFAULT_AGENT_INPUT_OVERLAY_SOURCE_NAME = "DCC-MCP Agent Input"
 PROGRAM_FRAME_WIDTH = 320
 PROGRAM_FRAME_HEIGHT = 180
 MAX_PROGRAM_FRAME_BYTES = 400_000
@@ -1153,6 +1181,183 @@ class ObsControlBridge:
             raise BridgeError("OBS_MUTATION_REJECTED")
         return response
 
+    def create_agent_input_overlay(
+        self,
+        *,
+        scene_name: str,
+        source_name: str = DEFAULT_AGENT_INPUT_OVERLAY_SOURCE_NAME,
+        anchor: str = "bottom_right",
+    ) -> dict[str, object]:
+        scene_name = self._require_name(scene_name)
+        source_name = self._require_name(source_name)
+        if anchor not in AGENT_INPUT_OVERLAY_ANCHORS:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        self._select_exact_name(
+            self.list_scenes(),
+            "scenes",
+            "sceneName",
+            scene_name,
+            missing_code="OBS_SCENE_NOT_FOUND",
+        )
+        deadline = self._operation_deadline()
+        accepted = self._checked(
+            "CreateAgentInputOverlay",
+            {
+                "sceneName": scene_name,
+                "sourceName": source_name,
+                "anchor": anchor,
+                "capability": "agent_input_overlay",
+            },
+            deadline=deadline,
+        )
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        readback = self._get_agent_input_overlay(
+            scene_name=scene_name, source_name=source_name, deadline=deadline
+        )
+        if readback.get("anchor") != anchor:
+            raise BridgeError("OBS_POSTCONDITION_FAILED")
+        return {**readback, "verified": True}
+
+    def get_agent_input_overlay(
+        self,
+        *,
+        scene_name: str,
+        source_name: str = DEFAULT_AGENT_INPUT_OVERLAY_SOURCE_NAME,
+    ) -> dict[str, object]:
+        return self._get_agent_input_overlay(
+            scene_name=self._require_name(scene_name),
+            source_name=self._require_name(source_name),
+            deadline=self._operation_deadline(),
+        )
+
+    def _get_agent_input_overlay(
+        self, *, scene_name: str, source_name: str, deadline: float
+    ) -> dict[str, object]:
+        response = self._checked(
+            "GetAgentInputOverlay",
+            {"sceneName": scene_name, "sourceName": source_name},
+            deadline=deadline,
+        )
+        if response.get("sceneName") != scene_name or response.get("sourceName") != source_name:
+            raise BridgeError("OBS_POSTCONDITION_FAILED")
+        keys_csv = str(response["keysCsv"])
+        public_response = {key: value for key, value in response.items() if key != "keysCsv"}
+        return {**public_response, "keys": keys_csv.split(",") if keys_csv else []}
+
+    def emit_agent_input_activity(
+        self,
+        *,
+        scene_name: str,
+        event_kind: str,
+        source_name: str = DEFAULT_AGENT_INPUT_OVERLAY_SOURCE_NAME,
+        keys: list[str] | None = None,
+        mouse_button: str = "none",
+        wheel_direction: str = "none",
+        character_count: int = 0,
+        duration_ms: int = 1600,
+    ) -> dict[str, object]:
+        scene_name = self._require_name(scene_name)
+        source_name = self._require_name(source_name)
+        if keys is not None and not isinstance(keys, list):
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        normalized_keys = list(keys or [])
+        if (
+            event_kind not in AGENT_INPUT_EVENT_KINDS
+            or type(duration_ms) is not int
+            or not 250 <= duration_ms <= 5000
+            or mouse_button not in AGENT_INPUT_MOUSE_BUTTONS
+            or wheel_direction not in AGENT_INPUT_WHEEL_DIRECTIONS
+            or not isinstance(character_count, int)
+            or isinstance(character_count, bool)
+            or not 0 <= character_count <= 10000
+            or not 0 <= len(normalized_keys) <= 4
+            or any(type(key) is not str or key not in AGENT_INPUT_KEYS for key in normalized_keys)
+        ):
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        if (
+            (event_kind == "shortcut" and not normalized_keys)
+            or (event_kind != "shortcut" and normalized_keys)
+            or (event_kind == "mouse_button" and mouse_button == "none")
+            or (event_kind != "mouse_button" and mouse_button != "none")
+            or (event_kind == "mouse_wheel" and wheel_direction == "none")
+            or (event_kind != "mouse_wheel" and wheel_direction != "none")
+            or (event_kind == "typing" and character_count == 0)
+            or (event_kind != "typing" and character_count != 0)
+        ):
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        deadline = self._operation_deadline()
+        request = {
+            "sceneName": scene_name,
+            "sourceName": source_name,
+            "eventKind": event_kind,
+            "keysCsv": ",".join(normalized_keys),
+            "mouseButton": mouse_button,
+            "wheelDirection": wheel_direction,
+            "characterCount": character_count,
+            "durationMs": duration_ms,
+            "capability": "agent_input_overlay",
+        }
+        accepted = self._checked("EmitAgentInputActivity", request, deadline=deadline)
+        activity_sequence = accepted.get("activitySequence")
+        if accepted.get("accepted") is not True or type(activity_sequence) is not int:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        readback = self._get_agent_input_overlay(
+            scene_name=scene_name, source_name=source_name, deadline=deadline
+        )
+        if (
+            readback.get("active") is not True
+            or readback.get("activitySequence") != activity_sequence
+            or readback.get("eventKind") != event_kind
+            or readback.get("keys") != normalized_keys
+            or readback.get("mouseButton") != mouse_button
+            or readback.get("wheelDirection") != wheel_direction
+            or readback.get("characterCount") != character_count
+            or readback.get("durationMs") != duration_ms
+            or not 0 < readback.get("remainingMs", 0) <= duration_ms
+        ):
+            raise BridgeError("OBS_POSTCONDITION_FAILED")
+        return {**readback, "verified": True}
+
+    def clear_agent_input_overlay(
+        self,
+        *,
+        scene_name: str,
+        source_name: str = DEFAULT_AGENT_INPUT_OVERLAY_SOURCE_NAME,
+    ) -> dict[str, object]:
+        scene_name = self._require_name(scene_name)
+        source_name = self._require_name(source_name)
+        deadline = self._operation_deadline()
+        accepted = self._checked(
+            "ClearAgentInputOverlay",
+            {
+                "sceneName": scene_name,
+                "sourceName": source_name,
+                "capability": "agent_input_overlay",
+            },
+            deadline=deadline,
+        )
+        activity_sequence = accepted.get("activitySequence")
+        if accepted.get("accepted") is not True or type(activity_sequence) is not int:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        readback = self._get_agent_input_overlay(
+            scene_name=scene_name, source_name=source_name, deadline=deadline
+        )
+        if (
+            readback.get("active") is not False
+            or readback.get("activitySequence") != activity_sequence
+            or readback.get("eventKind") != "none"
+            or readback.get("keys") != []
+            or readback.get("mouseButton") != "none"
+            or readback.get("wheelDirection") != "none"
+            or readback.get("characterCount") != 0
+            or readback.get("cueLabel") != ""
+            or readback.get("durationMs") != 0
+            or readback.get("remainingMs") != 0
+        ):
+            raise BridgeError("OBS_POSTCONDITION_FAILED")
+        return {**readback, "verified": True}
+
     def pause_recording(self) -> dict[str, object]:
         return self._recording_mutation("PauseRecording", active=True, paused=True)
 
@@ -1368,6 +1573,7 @@ class ObsControlBridge:
             "GetOutputStatus",
             "ListAllowlistedHotkeys",
             "GetOperatorStatus",
+            "GetAgentInputOverlay",
             "CaptureScreenshot",
             "CaptureProgramFrame",
         } and (not set(response) >= _IDENTITY_KEYS or response.get("ok") is not True):
@@ -1481,6 +1687,59 @@ class ObsControlBridge:
             return
         if request_type == "GetWindowCaptureSource":
             if not ObsControlBridge._valid_window_capture_source(response):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type == "GetAgentInputOverlay":
+            allowed = _IDENTITY_KEYS | {
+                "sceneName",
+                "sceneItemId",
+                "sourceName",
+                "sourceKind",
+                "theme",
+                "anchor",
+                "active",
+                "activitySequence",
+                "eventKind",
+                "keysCsv",
+                "mouseButton",
+                "wheelDirection",
+                "characterCount",
+                "cueLabel",
+                "durationMs",
+                "remainingMs",
+            }
+            keys_csv = response.get("keysCsv")
+            keys = keys_csv.split(",") if isinstance(keys_csv, str) and keys_csv else []
+            if (
+                set(response) != allowed
+                or not isinstance(response.get("sceneName"), str)
+                or not 1 <= len(response["sceneName"]) <= 256
+                or type(response.get("sceneItemId")) is not int
+                or response["sceneItemId"] <= 0
+                or not isinstance(response.get("sourceName"), str)
+                or not 1 <= len(response["sourceName"]) <= 256
+                or response.get("sourceKind") != AGENT_INPUT_OVERLAY_SOURCE_KIND
+                or response.get("theme") != AGENT_INPUT_OVERLAY_THEME
+                or response.get("anchor") not in AGENT_INPUT_OVERLAY_ANCHORS | {"custom"}
+                or type(response.get("active")) is not bool
+                or type(response.get("activitySequence")) is not int
+                or response["activitySequence"] < 0
+                or response.get("eventKind") not in AGENT_INPUT_EVENT_KINDS | {"none"}
+                or not isinstance(keys_csv, str)
+                or len(keys_csv) > 32
+                or len(keys) > 4
+                or any(type(key) is not str or key not in AGENT_INPUT_KEYS for key in keys)
+                or response.get("mouseButton") not in AGENT_INPUT_MOUSE_BUTTONS
+                or response.get("wheelDirection") not in AGENT_INPUT_WHEEL_DIRECTIONS
+                or type(response.get("characterCount")) is not int
+                or not 0 <= response["characterCount"] <= 10000
+                or not isinstance(response.get("cueLabel"), str)
+                or len(response["cueLabel"]) > 96
+                or type(response.get("durationMs")) is not int
+                or not 0 <= response["durationMs"] <= 5000
+                or type(response.get("remainingMs")) is not int
+                or not 0 <= response["remainingMs"] <= 5000
+            ):
                 raise BridgeError("OBS_RESPONSE_INVALID")
             return
         if request_type in {"ListTransitions", "GetCurrentTransition"}:
@@ -1838,6 +2097,9 @@ class ObsControlBridge:
             "TriggerStudioModeTransition",
             "TriggerAllowlistedHotkey",
             "RequestGracefulShutdown",
+            "CreateAgentInputOverlay",
+            "EmitAgentInputActivity",
+            "ClearAgentInputOverlay",
         }:
             allowed = set(_IDENTITY_KEYS) | {"accepted"}
             if request_type == "SetCurrentProfile":
@@ -1917,6 +2179,8 @@ class ObsControlBridge:
                 allowed |= {"submitted"}
             elif request_type == "RequestGracefulShutdown":
                 allowed |= {"shutdownScheduled"}
+            elif request_type in {"EmitAgentInputActivity", "ClearAgentInputOverlay"}:
+                allowed |= {"activitySequence"}
             if (
                 set(response) - allowed
                 or response.get("ok") is not True
@@ -2011,6 +2275,11 @@ class ObsControlBridge:
             if (
                 request_type == "RequestGracefulShutdown"
                 and response.get("shutdownScheduled") is not True
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            if request_type in {"EmitAgentInputActivity", "ClearAgentInputOverlay"} and (
+                type(response.get("activitySequence")) is not int
+                or response["activitySequence"] < 1
             ):
                 raise BridgeError("OBS_RESPONSE_INVALID")
             return

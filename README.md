@@ -20,6 +20,7 @@ script or raw WebSocket tool.
 - Typed scene switching, scene-item CRUD, transitions, and Studio Mode
 - Exact Windows PID/HWND window-capture source creation and readback
   preview/program operations with verified readback
+- A built-in privacy-safe Agent keyboard/mouse activity overlay source
 - Recording status
 - Start, stop, pause, and resume recording
 - A separate typed status readback after every mutation
@@ -37,6 +38,7 @@ as shipped tools until their typed contracts land.
 - [Inputs, properties, filters, audio, and media](https://github.com/dcc-mcp/dcc-mcp-obs/issues/5)
 - [Typed scene graph controls](docs/scene-graph.md)
 - [Exact Windows window capture](docs/window-capture.md)
+- [Built-in Agent input overlay](docs/agent-input-overlay.md)
 
 ## Requirements
 
@@ -90,10 +92,19 @@ dcc-mcp-obs --host-pid <obs-pid>
 The bundled `obs-control` skill includes English and Chinese discovery aliases
 for OBS, Open Broadcaster Software, recording, streaming, replay buffer,
 virtual camera, outputs, scene/source inspection, pause, resume, 录屏, 直播,
-回放缓冲, 虚拟摄像头, 场景图, 场景切换, 转场, and Studio Mode. Agents search
+回放缓冲, 虚拟摄像头, 场景图, 场景切换, 按键展示, 键盘, 鼠标, 转场, and
+Studio Mode. Agents search
 and load the skill before calling the typed tools. Scene-graph mutations are
 available only through the native typed contract and require verified
 postconditions.
+
+For recorded Agent demonstrations, `create_agent_input_overlay` attaches the
+plugin's shared `DCC-MCP Agent Input` source to each selected scene. The Agent
+then uses `emit_agent_input_activity` to display only an allowlisted shortcut,
+mouse button, wheel direction, or typing count. It never captures global input
+or accepts arbitrary text. This keeps code visible through a normal scene
+source while the overlay explains the action immediately before the Agent runs
+it. See the [Agent input overlay contract](docs/agent-input-overlay.md).
 
 Use `request_graceful_shutdown` instead of terminating the OBS process. The
 native plugin refuses the request while recording, streaming, replay buffer,
