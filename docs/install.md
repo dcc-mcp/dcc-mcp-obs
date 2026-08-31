@@ -19,12 +19,36 @@ and a failed publication restores the prior managed installation.
 
 ## Commands
 
+Start with the Core planner. It returns this adapter-owned runbook as the first
+next step and does not silently modify the OBS plugin directory:
+
+```console
+dcc-mcp-cli install --dcc-type obs
+```
+
 Standalone release bundle:
 
 ```console
 dcc-mcp-obs install-bundled
 dcc-mcp-obs upgrade-bundled
 ```
+
+The same standalone archive contains the executable, private runtime, manifest,
+and matching `dcc-mcp-obs-plugin.zip`. After extracting it to a stable location,
+set `DCC_MCP_OBS_EXECUTABLE` to the launcher's absolute path. The native plugin
+uses that explicit value to start the sidecar with the current OBS PID; it does
+not search `PATH`, invoke a shell, or launch anything when the variable is
+absent. On Windows, a user-level deployment can persist the value as follows:
+
+```powershell
+$obsExe = (Resolve-Path .\dcc-mcp-obs.exe).Path
+$env:DCC_MCP_OBS_EXECUTABLE = $obsExe
+[Environment]::SetEnvironmentVariable("DCC_MCP_OBS_EXECUTABLE", $obsExe, "User")
+```
+
+Inside the standalone process, `DCC_MCP_PYTHON_EXECUTABLE` is set to the same
+executable so Core can run the bundled Agent skill without a system Python.
+Do not persist that generic variable globally on a mixed-DCC workstation.
 
 Optional PyPI/source installation:
 
@@ -66,4 +90,8 @@ drift fails closed on that follow-up command.
 Close OBS before installing, upgrading, or uninstalling a loaded native
 plugin. After installation, enable OBS WebSocket, set the password only in
 `DCC_MCP_OBS_WEBSOCKET_PASSWORD`, restart OBS, and start the sidecar with the
-exact OBS PID.
+exact OBS PID. Confirm the registered runtime with:
+
+```console
+dcc-mcp-cli wait-ready --dcc-type obs
+```

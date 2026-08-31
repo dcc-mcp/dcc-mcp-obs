@@ -36,6 +36,7 @@
 #include "obs-websocket-api.h"
 #include "agent-input-overlay.hpp"
 #include "dcc-mcp-menu.hpp"
+#include "sidecar-launcher.hpp"
 #include "ui-task-gate.hpp"
 
 OBS_DECLARE_MODULE()
@@ -85,6 +86,7 @@ std::atomic<uint64_t> g_event_sequence{0};
 std::string g_instance_id;
 std::atomic<bool> g_plugin_loaded{false};
 std::unique_ptr<dcc_mcp_obs::DccMcpMenu> g_dcc_mcp_menu;
+std::unique_ptr<dcc_mcp_obs::SidecarLauncher> g_sidecar_launcher;
 
 QMainWindow *obs_main_window()
 {
@@ -200,6 +202,38 @@ void remove_dcc_mcp_menu(void *)
 		return;
 	g_dcc_mcp_menu->remove();
 	g_dcc_mcp_menu.reset();
+}
+
+void start_configured_sidecar(void *)
+{
+	if (!g_plugin_loaded.load())
+		return;
+	if (g_sidecar_launcher == nullptr) {
+		g_sidecar_launcher = std::make_unique<dcc_mcp_obs::SidecarLauncher>([](const std::string &error) {
+			blog(LOG_ERROR, "dcc-mcp-obs sidecar process error: %s", error.c_str());
+		});
+	}
+	const auto result = g_sidecar_launcher->start_from_environment();
+	switch (result.state) {
+	case dcc_mcp_obs::SidecarLaunchState::Disabled:
+		blog(LOG_INFO, "dcc-mcp-obs sidecar autostart is disabled; set %s to an absolute standalone executable",
+		     dcc_mcp_obs::kObsExecutableEnvironment.data());
+		break;
+	case dcc_mcp_obs::SidecarLaunchState::Starting:
+		blog(LOG_INFO, "dcc-mcp-obs starting sidecar: %s", result.executable.c_str());
+		break;
+	case dcc_mcp_obs::SidecarLaunchState::AlreadyRunning:
+		break;
+	case dcc_mcp_obs::SidecarLaunchState::InvalidExecutable:
+		blog(LOG_ERROR, "%s is invalid: %s", dcc_mcp_obs::kObsExecutableEnvironment.data(),
+		     result.message.c_str());
+		break;
+	}
+}
+
+void stop_configured_sidecar(void *)
+{
+	g_sidecar_launcher.reset();
 }
 
 enum class UiOperation {
@@ -3007,11 +3041,13 @@ void obs_module_post_load(void)
 	}
 	for (const char *request : kRequests)
 		obs_websocket_vendor_register_request(g_vendor, request, vendor_request, const_cast<char *>(request));
+	obs_queue_task(OBS_TASK_UI, start_configured_sidecar, nullptr, true);
 }
 
 void obs_module_unload(void)
 {
 	g_plugin_loaded.store(false);
+	obs_queue_task(OBS_TASK_UI, stop_configured_sidecar, nullptr, true);
 	obs_queue_task(OBS_TASK_UI, remove_dcc_mcp_menu, nullptr, true);
 	obs_frontend_remove_event_callback(frontend_event, nullptr);
 	if (g_vendor != nullptr) {

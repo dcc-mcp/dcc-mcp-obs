@@ -15,12 +15,34 @@ Release artifact。manifest 会绑定产品、版本、平台、每个文件路�
 
 ## 命令
 
+先使用 Core 安装规划器。它会把本仓库维护的安装说明作为第一个 next step，且不会
+静默修改 OBS 插件目录：
+
+```console
+dcc-mcp-cli install --dcc-type obs
+```
+
 standalone Release 包：
 
 ```console
 dcc-mcp-obs install-bundled
 dcc-mcp-obs upgrade-bundled
 ```
+
+同一个 standalone 包内包含 EXE、私有运行时、manifest 和精确匹配的
+`dcc-mcp-obs-plugin.zip`。把整包解压到稳定目录后，将
+`DCC_MCP_OBS_EXECUTABLE` 设为 launcher 的绝对路径。原生插件只使用这条显式配置，
+并仅附加当前 OBS PID 启动 sidecar；不会搜索 `PATH`、不会调用 shell，变量未设置时
+也不会启动任何进程。Windows 用户级部署可持久化该变量：
+
+```powershell
+$obsExe = (Resolve-Path .\dcc-mcp-obs.exe).Path
+$env:DCC_MCP_OBS_EXECUTABLE = $obsExe
+[Environment]::SetEnvironmentVariable("DCC_MCP_OBS_EXECUTABLE", $obsExe, "User")
+```
+
+standalone 进程内部会把 `DCC_MCP_PYTHON_EXECUTABLE` 设置为自身 EXE，使 Core 无需
+系统 Python 也能运行内置 Agent Skill。多 DCC 工作站不要全局持久化这个通用变量。
 
 可选的 PyPI/源码安装：
 
@@ -56,4 +78,4 @@ OBS 插件目录。只有当 OBS 本身已配置为扫描另一个由操作者�
 
 安装、升级或卸载已加载的原生插件前应关闭 OBS。安装完成后启用 OBS WebSocket，
 只通过 `DCC_MCP_OBS_WEBSOCKET_PASSWORD` 设置密码，重启 OBS，再用精确 OBS PID
-启动 sidecar。
+启动 sidecar，并运行 `dcc-mcp-cli wait-ready --dcc-type obs` 验证注册和就绪状态。

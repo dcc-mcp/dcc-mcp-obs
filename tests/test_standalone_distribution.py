@@ -157,3 +157,17 @@ def test_ci_and_release_build_all_standalone_platforms() -> None:
         "native-artifacts",
         "standalone-artifacts",
     ]
+
+
+def test_cli_install_runbook_selects_the_bundled_runtime_and_environment_override() -> None:
+    runbook = (ROOT / "install.md").read_text(encoding="utf-8")
+    detailed = (ROOT / "docs" / "install.md").read_text(encoding="utf-8")
+
+    for text in (runbook, detailed):
+        assert "dcc-mcp-cli install --dcc-type obs" in text
+        assert "DCC_MCP_OBS_EXECUTABLE" in text
+        assert "DCC_MCP_PYTHON_EXECUTABLE" in text
+        assert "install-bundled" in text
+        assert "dcc-mcp-cli wait-ready --dcc-type obs" in text
+
+    assert "Python 3.10+ remains optional" in runbook
