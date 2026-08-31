@@ -28,6 +28,22 @@ class FakeWindowCaptureHost:
         }
         if request_type == "GetPluginStatus":
             return {**identity, "ready": True}
+        if request_type == "ListWindowCaptureCandidates":
+            return {
+                **identity,
+                "executable": data["executable"],
+                "windowTitle": data.get("windowTitle"),
+                "candidates": [
+                    {
+                        "processId": 120000,
+                        "windowHandle": 220000000,
+                        "windowTitle": "b1  ",
+                        "windowClass": "UnrealWindow",
+                        "executable": "b1-Win64-Shipping.exe",
+                    }
+                ],
+                "truncated": False,
+            }
         capture = {
             "sceneName": data["sceneName"],
             "sceneItemId": 7,
@@ -44,7 +60,11 @@ class FakeWindowCaptureHost:
             "captureMethod": data.get("captureMethod", "automatic"),
             "bindingVerified": True,
         }
-        if request_type in {"CreateWindowCaptureSource", "SetWindowCaptureMethod"}:
+        if request_type in {
+            "CreateWindowCaptureSource",
+            "RebindWindowCaptureSource",
+            "SetWindowCaptureMethod",
+        }:
             return {**identity, **capture, "accepted": True, "capability": "window_capture"}
         if request_type == "GetWindowCaptureSource":
             return {**identity, **capture}
@@ -106,6 +126,104 @@ def test_window_capture_method_is_typed_and_can_be_updated_in_place() -> None:
     assert request_type == "SetWindowCaptureMethod"
     assert payload["captureMethod"] == "windows_graphics_capture"
     assert host.calls[-1][0] == "GetWindowCaptureSource"
+
+
+def test_window_capture_source_can_be_atomically_rebound_after_process_restart() -> None:
+    host = FakeWindowCaptureHost()
+    result = make_bridge(host).rebind_window_capture_source(
+        scene_name="RL - Wukong",
+        source_name="RL - Wukong Window",
+        expected_process_id=117716,
+        expected_window_handle=195967510,
+        expected_window_title="b1  ",
+        process_id=120000,
+        window_handle=220000000,
+        window_title="The Bazaar",
+        capture_cursor=False,
+        client_area=True,
+        capture_method="windows_graphics_capture",
+    )
+
+    assert result["verified"] is True
+    assert result["processId"] == 120000
+    request_type, payload = host.calls[-2]
+    assert request_type == "RebindWindowCaptureSource"
+    assert payload == {
+        "sceneName": "RL - Wukong",
+        "sourceName": "RL - Wukong Window",
+        "expectedProcessId": 117716,
+        "expectedWindowHandle": 195967510,
+        "expectedWindowTitle": "b1  ",
+        "processId": 120000,
+        "windowHandle": 220000000,
+        "windowTitle": "The Bazaar",
+        "captureCursor": False,
+        "clientArea": True,
+        "captureMethod": "windows_graphics_capture",
+        "enabled": True,
+        "capability": "window_capture",
+    }
+    assert host.calls[-1][0] == "GetWindowCaptureSource"
+
+
+def test_window_capture_candidates_are_bounded_by_exact_executable_and_title() -> None:
+    host = FakeWindowCaptureHost()
+    result = make_bridge(host).list_window_capture_candidates(
+        executable="b1-Win64-Shipping.exe",
+        window_title="b1  ",
+    )
+
+    assert result == {
+        "instanceId": "instance-1",
+        "pluginVersion": "1.1.0",
+        "obsVersion": "32.2.1",
+        "hostPid": 42,
+        "eventSequence": 2,
+        "ok": True,
+        "executable": "b1-Win64-Shipping.exe",
+        "windowTitle": "b1  ",
+        "candidates": [
+            {
+                "processId": 120000,
+                "windowHandle": 220000000,
+                "windowTitle": "b1  ",
+                "windowClass": "UnrealWindow",
+                "executable": "b1-Win64-Shipping.exe",
+            }
+        ],
+        "truncated": False,
+    }
+    assert host.calls == [
+        ("GetPluginStatus", {}),
+        (
+            "ListWindowCaptureCandidates",
+            {"executable": "b1-Win64-Shipping.exe", "windowTitle": "b1  "},
+        ),
+    ]
+
+
+def test_window_capture_rebind_rejects_untyped_native_response_fields() -> None:
+    host = FakeWindowCaptureHost()
+    original = host.vendor_request
+
+    def leaked(request_type, data, *, deadline=None):
+        response = original(request_type, data, deadline=deadline)
+        if request_type == "RebindWindowCaptureSource":
+            response["previousExecutablePath"] = "C:/private/game.exe"
+        return response
+
+    host.vendor_request = leaked  # type: ignore[method-assign]
+    with pytest.raises(BridgeError, match="OBS_RESPONSE_INVALID"):
+        make_bridge(host).rebind_window_capture_source(
+            scene_name="RL - Wukong",
+            source_name="RL - Wukong Window",
+            expected_process_id=117716,
+            expected_window_handle=195967510,
+            expected_window_title="b1  ",
+            process_id=120000,
+            window_handle=220000000,
+            window_title="The Bazaar",
+        )
 
 
 @pytest.mark.parametrize(
@@ -179,10 +297,14 @@ def test_window_capture_readback_rejects_private_or_untyped_fields() -> None:
 def test_window_capture_vendor_surface_and_skill_are_bounded() -> None:
     assert "CreateWindowCaptureSource" in VENDOR_REQUESTS
     assert "GetWindowCaptureSource" in VENDOR_REQUESTS
+    assert "ListWindowCaptureCandidates" in VENDOR_REQUESTS
+    assert "RebindWindowCaptureSource" in VENDOR_REQUESTS
     assert "SetWindowCaptureMethod" in VENDOR_REQUESTS
     assert "CreateWindowCaptureSource" in MUTATING_VENDOR_REQUESTS
+    assert "RebindWindowCaptureSource" in MUTATING_VENDOR_REQUESTS
     assert "SetWindowCaptureMethod" in MUTATING_VENDOR_REQUESTS
     assert "GetWindowCaptureSource" not in MUTATING_VENDOR_REQUESTS
+    assert "ListWindowCaptureCandidates" not in MUTATING_VENDOR_REQUESTS
 
     root = Path(__file__).parents[1]
     tools = yaml.safe_load(
@@ -210,6 +332,36 @@ def test_window_capture_vendor_surface_and_skill_are_bounded() -> None:
     assert update["source_file"] == "scripts/set_window_capture_method.py"
     assert update["annotations"]["open_world_hint"] is False
     assert update["annotations"]["idempotent_hint"] is True
+    rebind = by_name["rebind_window_capture_source"]
+    assert rebind["source_file"] == "scripts/rebind_window_capture_source.py"
+    assert set(rebind["input_schema"]["required"]) == {
+        "scene_name",
+        "source_name",
+        "expected_process_id",
+        "expected_window_handle",
+        "expected_window_title",
+        "process_id",
+        "window_handle",
+        "window_title",
+    }
+    assert rebind["annotations"] == {
+        "read_only_hint": False,
+        "destructive_hint": True,
+        "idempotent_hint": True,
+        "open_world_hint": False,
+        "deferred_hint": False,
+    }
+    candidates = by_name["list_window_capture_candidates"]
+    assert candidates["source_file"] == "scripts/list_window_capture_candidates.py"
+    assert set(candidates["input_schema"]["required"]) == {"executable"}
+    assert candidates["input_schema"]["additionalProperties"] is False
+    assert candidates["annotations"] == {
+        "read_only_hint": True,
+        "destructive_hint": False,
+        "idempotent_hint": True,
+        "open_world_hint": False,
+        "deferred_hint": False,
+    }
 
 
 def test_native_window_capture_contract_is_windows_only_and_revalidates_identity() -> None:
@@ -225,3 +377,28 @@ def test_native_window_capture_contract_is_windows_only_and_revalidates_identity
     assert "OBS_WINDOW_IDENTITY_DRIFT" in source
     assert "OBS_UNSUPPORTED_PLATFORM" in source
     assert "RawInputSettings" not in source
+
+
+def test_native_window_rebind_is_transactional_and_owns_the_stored_identity() -> None:
+    source = (Path(__file__).parents[1] / "native/src/plugin-main.cpp").read_text(encoding="utf-8")
+
+    assert "case UiOperation::RebindWindowCaptureSource" in source
+    assert 'request == "RebindWindowCaptureSource"' in source
+    assert '"expectedProcessId"' in source
+    assert '"expectedWindowHandle"' in source
+    assert '"expectedWindowTitle"' in source
+    assert "stored_window_capture_identity_matches" in source
+    assert "obs_data_apply(settings, previous_settings)" in source
+    assert "obs_source_update(source, previous_settings)" in source
+
+
+def test_native_window_candidate_discovery_is_visible_filtered_and_bounded() -> None:
+    source = (Path(__file__).parents[1] / "native/src/plugin-main.cpp").read_text(encoding="utf-8")
+
+    assert "case UiOperation::ListWindowCaptureCandidates" in source
+    assert 'request == "ListWindowCaptureCandidates"' in source
+    assert "EnumWindows" in source
+    assert "IsWindowVisible" in source
+    assert "kMaxWindowCaptureCandidates" in source
+    assert '"candidates"' in source
+    assert '"truncated"' in source
