@@ -6,11 +6,15 @@ import runpy
 import sys
 from pathlib import Path
 
-import tomllib
 import yaml
 from tools import build_standalone
 
 from dcc_mcp_obs import _standalone_entry
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 CI
+    import tomli as tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -49,7 +53,7 @@ def test_standalone_installs_its_bundled_native_plugin(tmp_path: Path, monkeypat
         "product": "dcc-mcp-obs-standalone",
         "version": "1.1.0",
         "core_version": "0.20.22",
-        "platform": "windows",
+        "platform": _standalone_entry.install_cli._platform_name(),
         "files": [
             {
                 "path": plugin.name,
