@@ -2,6 +2,9 @@
 #include <obs-module.h>
 #include <util/platform.h>
 
+#include <QMetaObject>
+#include <QWidget>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -79,6 +82,7 @@ enum class UiOperation {
 	OperatorStatus,
 	ListScenes,
 	ListSources,
+	RequestGracefulShutdown,
 	RecordingStatus,
 	StartRecording,
 	StopRecording,
@@ -1083,6 +1087,7 @@ void execute_ui_operation(void *private_data)
 	std::shared_ptr<UiState> state = *holder;
 	obs_data_t *result = nullptr;
 	const bool is_mutation =
+		state->operation == UiOperation::RequestGracefulShutdown ||
 		state->operation == UiOperation::StartRecording || state->operation == UiOperation::StopRecording ||
 		state->operation == UiOperation::PauseRecording || state->operation == UiOperation::ResumeRecording ||
 		state->operation == UiOperation::StartStreaming || state->operation == UiOperation::StopStreaming ||
@@ -1763,6 +1768,25 @@ void execute_ui_operation(void *private_data)
 			}
 			break;
 		}
+		case UiOperation::RequestGracefulShutdown: {
+			result = obs_data_create();
+			const bool recording_active = obs_frontend_recording_active();
+			const bool streaming_active = obs_frontend_streaming_active();
+			const bool replay_buffer_active = obs_frontend_replay_buffer_active();
+			const bool virtual_camera_active = obs_frontend_virtualcam_active();
+			const void *main_window = obs_frontend_get_main_window();
+			if (main_window == nullptr)
+				set_error(result, "OBS_INSTANCE_NOT_READY");
+			else if (recording_active || streaming_active || replay_buffer_active || virtual_camera_active)
+				set_error(result, "OBS_OUTPUT_ACTIVE");
+			else if (!state->gate.claim_mutation(state->deadline))
+				set_error(result, "OBS_UI_TIMEOUT");
+			else {
+				obs_data_set_bool(result, "accepted", true);
+				obs_data_set_bool(result, "shutdownScheduled", true);
+			}
+			break;
+		}
 		case UiOperation::RecordingStatus:
 			result = recording_status();
 			break;
@@ -2199,6 +2223,8 @@ UiOperation operation_for(const std::string &request)
 		return UiOperation::TriggerStudioModeTransition;
 	if (request == "ListSources")
 		return UiOperation::ListSources;
+	if (request == "RequestGracefulShutdown")
+		return UiOperation::RequestGracefulShutdown;
 	if (request == "GetRecordingStatus")
 		return UiOperation::RecordingStatus;
 	if (request == "StartRecording")
@@ -2258,6 +2284,13 @@ UiOperation operation_for(const std::string &request)
 	if (request == "CaptureProgramFrame")
 		return UiOperation::CaptureProgramFrame;
 	return UiOperation::Invalid;
+}
+
+void request_frontend_exit(void *)
+{
+	auto *main_window = static_cast<QWidget *>(obs_frontend_get_main_window());
+	if (main_window != nullptr)
+		QMetaObject::invokeMethod(main_window, "close", Qt::QueuedConnection);
 }
 
 void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *private_data)
@@ -2512,6 +2545,8 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 		required_capability = "studio_preview";
 	else if (request_name == "TriggerStudioModeTransition")
 		required_capability = "studio_transition";
+	else if (request_name == "RequestGracefulShutdown")
+		required_capability = "application_lifecycle";
 	if (required_capability != nullptr) {
 		const char *capability = request_data != nullptr ? obs_data_get_string(request_data, "capability")
 								 : nullptr;
@@ -2571,6 +2606,8 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 			 scene_item_id, enabled, studio_enabled, has_duration, duration_ms, has_pos, has_scale,
 			 has_rotation, pos_x, pos_y, scale_x, scale_y, rotation, window_capture,
 			 expected_window_capture, deadline_at_ms, response_data);
+	if (request_name == "RequestGracefulShutdown" && obs_data_get_bool(response_data, "shutdownScheduled"))
+		obs_queue_task(OBS_TASK_UI, request_frontend_exit, nullptr, false);
 }
 
 void frontend_event(enum obs_frontend_event, void *)
@@ -2586,6 +2623,7 @@ void frontend_event(enum obs_frontend_event, void *)
 
 constexpr const char *kRequests[] = {
 	"GetPluginStatus",
+	"RequestGracefulShutdown",
 	"ListScenes",
 	"SetCurrentScene",
 	"GetCurrentScene",

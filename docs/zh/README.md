@@ -81,6 +81,10 @@ dcc-mcp-obs --host-pid <obs-pid>
 直播、回放缓冲、虚拟摄像头和输出域的类型化工具。场景图写操作必须经过原生
 插件的精确实例校验、截止时间和状态读回。
 
+关闭 OBS 时使用 `request_graceful_shutdown`，不要强制结束进程。录制、直播、
+回放缓冲或虚拟摄像头仍活动时，原生插件会拒绝退出；全部停止后仅返回“已接受并
+排队”的终态确认，再由调用方在连接外验证 OBS 进程和插件实例均已消失。
+
 OBS 控制始终原生插件/WebSocket 优先。仅当某个纯视觉操作没有类型化契约时，
 才允许通过 DCC-MCP `ui-control` 使用项目自有 DCC-CUA，并且必须绑定精确 PID/HWND、
 执行 fresh snapshot 和操作后读回。不得回退到通用 Computer Use。

@@ -1,6 +1,6 @@
 ---
 name: obs-control
-description: Inspect and control typed OBS profiles, scene collections, scenes, scene items, exact Windows window-capture sources, transitions, Studio Mode, recording, streaming, replay buffer, virtual camera, allowlisted hotkeys, and outputs for OBS Studio and Open Broadcaster Software.
+description: Inspect and control typed OBS lifecycle, profiles, scene collections, scenes, scene items, exact Windows window-capture sources, transitions, Studio Mode, recording, streaming, replay buffer, virtual camera, allowlisted hotkeys, and outputs for OBS Studio and Open Broadcaster Software.
 license: GPL-2.0-or-later
 compatibility: "Python 3.10+, OBS Studio 28+ with obs-websocket 5.x"
 metadata:
@@ -8,8 +8,8 @@ metadata:
     dcc: obs
     layer: domain
     version: "1.1.0"  # x-release-please-version
-    tags: [obs, profiles, scene-collections, scenes, scene-items, window-capture, transitions, studio-mode, recording, streaming, replay-buffer, virtual-camera, allowlisted-hotkeys, screenshots, outputs, sources]
-    search-hint: "OBS Open Broadcaster Software profiles scene collections scenes scene graph scene items transitions Studio Mode preview program hotkeys screenshots operator status recording streaming replay buffer virtual camera outputs record video pause resume 录屏 录制视频 直播 回放 缓冲 虚拟摄像头 配置文件 场景集合 场景图 场景项 转场 导播台 预览 节目 快捷键 截图 输出"
+    tags: [obs, lifecycle, graceful-shutdown, profiles, scene-collections, scenes, scene-items, window-capture, transitions, studio-mode, recording, streaming, replay-buffer, virtual-camera, allowlisted-hotkeys, screenshots, outputs, sources]
+    search-hint: "OBS Open Broadcaster Software lifecycle graceful shutdown exit close profiles scene collections scenes scene graph scene items transitions Studio Mode preview program hotkeys screenshots operator status recording streaming replay buffer virtual camera outputs record video pause resume 录屏 录制视频 直播 回放 缓冲 虚拟摄像头 配置文件 场景集合 场景图 场景项 转场 导播台 预览 节目 快捷键 截图 输出 优雅退出 关闭"
     tools: tools.yaml
 ---
 
@@ -48,7 +48,12 @@ screenshots, outputs, scene/source inspection, 录屏, 直播, 回放缓冲,
    title. The native plugin derives and revalidates the window class,
    executable basename, and process creation time before and after mutation;
    identity drift fails closed.
-10. Hotkey actions accept only identifiers returned by the allowlist contract.
+10. `request_graceful_shutdown` is terminal and requires explicit operator
+    intent. The native plugin refuses while recording, streaming, replay
+    buffer, or virtual camera output is active. Its response proves only that
+    shutdown was accepted and queued; verify process/instance disappearance
+    out of band and do not issue another OBS tool call on that connection.
+11. Hotkey actions accept only identifiers returned by the allowlist contract.
     `capture_program_frame` returns a bounded in-memory PNG through OBS's
     completed `GetSourceScreenshot` readback. The legacy fire-and-forget
     source/file screenshot path remains unexposed; never synthesize its success.

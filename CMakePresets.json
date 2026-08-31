@@ -5,7 +5,7 @@
     {
       "name": "base",
       "hidden": true,
-      "cacheVariables": {"ENABLE_FRONTEND_API": true, "ENABLE_QT": false}
+      "cacheVariables": {"ENABLE_FRONTEND_API": true}
     },
     {
       "name": "windows-x64",

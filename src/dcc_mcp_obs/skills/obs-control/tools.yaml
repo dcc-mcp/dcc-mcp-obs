@@ -31,6 +31,38 @@ tools:
     annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
     call_examples: [{arguments: {}, note: Bind this Agent run to one exact native OBS plugin instance.}]
     next-tools: {on-failure: [obs_control__get_status]}
+  - name: request_graceful_shutdown
+    description: Request a terminal graceful OBS exit only when recording, streaming, replay buffer, and virtual camera outputs are all inactive.
+    source_file: scripts/request_graceful_shutdown.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context:
+          type: object
+          additionalProperties: false
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, accepted, shutdownScheduled]
+          properties:
+            instanceId: {type: string, minLength: 1, maxLength: 128}
+            pluginVersion: {type: string, minLength: 1}
+            obsVersion: {type: string, minLength: 1}
+            hostPid: {type: integer, minimum: 1}
+            eventSequence: {type: integer, minimum: 0}
+            ok: {const: true}
+            accepted: {const: true}
+            shutdownScheduled: {const: true}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: false, open_world_hint: false, deferred_hint: true}
+    call_examples: [{arguments: {}, note: Exit the exact bound OBS instance after all outputs are confirmed inactive.}]
   - name: list_scenes
     description: List bounded scenes and identify the current scene.
     source_file: scripts/list_scenes.py

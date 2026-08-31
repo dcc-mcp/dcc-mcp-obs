@@ -143,6 +143,28 @@ def test_recording_start_requires_separate_verified_readback() -> None:
     ]
 
 
+def test_graceful_shutdown_is_a_typed_terminal_submission() -> None:
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {
+                **IDENTITY,
+                "accepted": True,
+                "shutdownScheduled": True,
+                "eventSequence": 8,
+            },
+        ]
+    )
+    bridge = ObsControlBridge(transport, expected_pid=4242)
+
+    result = bridge.request_graceful_shutdown()
+
+    assert result["accepted"] is True
+    assert result["shutdownScheduled"] is True
+    assert transport.requests[1][0] == "RequestGracefulShutdown"
+    assert transport.requests[1][1] == {"capability": "application_lifecycle"}
+
+
 def test_mutation_fails_closed_when_readback_does_not_prove_postcondition() -> None:
     transport = FakeTransport(
         [
