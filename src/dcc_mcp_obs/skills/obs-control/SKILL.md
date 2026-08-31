@@ -65,13 +65,18 @@ inspect the typed readback and continue only when `verified` is true. See
 surface and live-host validation boundary.
 
 For Windows game or application recording, use
-`create_window_capture_source` only after exact window discovery. Use
-`get_window_capture_source` immediately before recording to revalidate the
-binding. The optional `capture_method` is limited to `automatic`, `bitblt`,
-and `windows_graphics_capture`; use `set_window_capture_method` to change an
-existing exact source when automatic BitBlt produces a black or incorrect
-game frame. These tools never accept arbitrary OBS input settings. See
-[the window-capture reference](../../../docs/window-capture.md).
+`list_window_capture_candidates` with one exact executable basename and,
+when stable, one exact title. Then call `create_window_capture_source` only
+with a returned PID/HWND/title identity. Use `get_window_capture_source`
+immediately before recording to revalidate the binding. If an RL host
+restarts, discover its new visible window and call
+`rebind_window_capture_source` with both the stored old identity and the fresh
+new identity; the native plugin owns the transaction and rolls back a failed
+postcondition. The optional `capture_method` is limited to `automatic`,
+`bitblt`, and `windows_graphics_capture`; use `set_window_capture_method` to
+change an existing exact source when automatic BitBlt produces a black or
+incorrect game frame. These tools never accept arbitrary OBS input settings.
+See [the window-capture reference](../../../docs/window-capture.md).
 
 Call `capture_program_frame` before every long recording and inspect the
 returned PNG. Do not treat scene/source metadata or an active recording flag

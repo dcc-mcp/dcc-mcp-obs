@@ -20,6 +20,19 @@ OBS. Call it immediately before recording. A missing window, PID/HWND reuse,
 title drift, changed source settings, duplicate scene item, or changed process
 object fails closed with a stable public error code.
 
+`list_window_capture_candidates` provides a bounded, read-only recovery path
+for restart-heavy RL workloads. It requires an exact executable basename and
+optionally an exact title, returns at most 64 visible top-level windows, and
+never returns executable paths. A missing or ambiguous candidate is not
+silently selected.
+
+`rebind_window_capture_source` updates one existing source in place. The caller
+must provide both the stored old PID/HWND/title identity and a fresh identity
+returned by candidate discovery. The native plugin validates ownership from
+private source metadata even when the old process has exited, validates the
+new live window immediately before mutation, and restores the prior settings
+if exact readback fails.
+
 Metadata readback cannot prove that OBS is rendering useful pixels. Call
 `capture_program_frame` after binding validation and before every long
 recording. It returns the current program scene as a fixed 320x180 in-memory

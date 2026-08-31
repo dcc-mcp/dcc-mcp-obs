@@ -39,18 +39,18 @@
       "domain": "sources",
       "status": "partial",
       "authority": "native_plugin",
-      "delivered_operations": ["list_sources", "create_window_capture_source", "get_window_capture_source"],
+      "delivered_operations": ["list_sources", "list_window_capture_candidates", "create_window_capture_source", "get_window_capture_source", "rebind_window_capture_source"],
       "remaining_operations": ["get_source_identity", "create_source", "rename_source", "remove_source"],
-      "dangerous_operations": ["create_window_capture_source", "create_source", "rename_source", "remove_source"],
+      "dangerous_operations": ["create_window_capture_source", "rebind_window_capture_source", "create_source", "rename_source", "remove_source"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
     },
     {
       "domain": "inputs",
       "status": "partial",
       "authority": "native_plugin",
-      "delivered_operations": ["create_window_capture_source", "get_window_capture_source"],
+      "delivered_operations": ["list_window_capture_candidates", "create_window_capture_source", "get_window_capture_source", "rebind_window_capture_source"],
       "remaining_operations": ["list_input_kinds", "get_input_settings", "set_input_settings"],
-      "dangerous_operations": ["create_window_capture_source", "set_input_settings"],
+      "dangerous_operations": ["create_window_capture_source", "rebind_window_capture_source", "set_input_settings"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
     },
     {

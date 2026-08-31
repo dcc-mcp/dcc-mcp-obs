@@ -366,6 +366,39 @@ class ObsControlBridge:
             raise BridgeError("OBS_MUTATION_REJECTED")
         return self._readback_window_capture(payload, deadline=deadline)
 
+    def list_window_capture_candidates(
+        self, *, executable: str, window_title: str | None = None
+    ) -> dict[str, object]:
+        if (
+            type(executable) is not str
+            or not 1 <= len(executable) <= 256
+            or any(separator in executable for separator in ("/", "\\", ":"))
+            or (
+                window_title is not None
+                and (type(window_title) is not str or not 1 <= len(window_title) <= 256)
+            )
+        ):
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        payload: dict[str, object] = {"executable": executable}
+        if window_title is not None:
+            payload["windowTitle"] = window_title
+        result = self._checked(
+            "ListWindowCaptureCandidates", payload, deadline=self._operation_deadline()
+        )
+        candidates = result.get("candidates")
+        if (
+            result.get("executable", "").casefold() != executable.casefold()
+            or result.get("windowTitle") != window_title
+            or not isinstance(candidates, list)
+            or any(
+                candidate.get("executable", "").casefold() != executable.casefold()
+                or (window_title is not None and candidate.get("windowTitle") != window_title)
+                for candidate in candidates
+            )
+        ):
+            raise BridgeError("OBS_POSTCONDITION_FAILED")
+        return result
+
     def get_window_capture_source(
         self,
         *,
@@ -391,6 +424,60 @@ class ObsControlBridge:
             enabled=enabled,
         )
         return self._readback_window_capture(payload, deadline=self._operation_deadline())
+
+    def rebind_window_capture_source(
+        self,
+        *,
+        scene_name: str,
+        source_name: str,
+        expected_process_id: int,
+        expected_window_handle: int,
+        expected_window_title: str,
+        process_id: int,
+        window_handle: int,
+        window_title: str,
+        capture_cursor: bool = True,
+        client_area: bool = True,
+        capture_method: str = "automatic",
+        enabled: bool = True,
+    ) -> dict[str, object]:
+        expected = self._window_capture_payload(
+            scene_name=scene_name,
+            source_name=source_name,
+            process_id=expected_process_id,
+            window_handle=expected_window_handle,
+            window_title=expected_window_title,
+            capture_cursor=capture_cursor,
+            client_area=client_area,
+            capture_method=capture_method,
+            enabled=enabled,
+        )
+        payload = self._window_capture_payload(
+            scene_name=scene_name,
+            source_name=source_name,
+            process_id=process_id,
+            window_handle=window_handle,
+            window_title=window_title,
+            capture_cursor=capture_cursor,
+            client_area=client_area,
+            capture_method=capture_method,
+            enabled=enabled,
+        )
+        payload.update(
+            {
+                "expectedProcessId": expected["processId"],
+                "expectedWindowHandle": expected["windowHandle"],
+                "expectedWindowTitle": expected["windowTitle"],
+            }
+        )
+        deadline = self._operation_deadline()
+        accepted = self._checked("RebindWindowCaptureSource", payload, deadline=deadline)
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        readback_payload = {
+            key: value for key, value in payload.items() if not key.startswith("expected")
+        }
+        return self._readback_window_capture(readback_payload, deadline=deadline)
 
     def set_window_capture_method(
         self,
@@ -1193,6 +1280,7 @@ class ObsControlBridge:
     def _validate_read_only_response(request_type: str, response: Mapping[str, object]) -> None:
         if request_type in {
             "GetPluginStatus",
+            "ListWindowCaptureCandidates",
             "ListScenes",
             "GetCurrentScene",
             "ListSceneItems",
@@ -1239,6 +1327,33 @@ class ObsControlBridge:
                     or not scene["sceneName"]
                     or len(scene["sceneName"]) > 256
                     for scene in scenes
+                )
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type == "ListWindowCaptureCandidates":
+            allowed = _IDENTITY_KEYS | {
+                "executable",
+                "windowTitle",
+                "candidates",
+                "truncated",
+            }
+            candidates = response.get("candidates")
+            window_title = response.get("windowTitle")
+            if (
+                set(response) - allowed
+                or not isinstance(response.get("executable"), str)
+                or not 1 <= len(response["executable"]) <= 256
+                or (
+                    window_title is not None
+                    and (not isinstance(window_title, str) or not 1 <= len(window_title) <= 256)
+                )
+                or not isinstance(candidates, list)
+                or len(candidates) > 64
+                or type(response.get("truncated")) is not bool
+                or any(
+                    not ObsControlBridge._valid_window_capture_candidate(candidate)
+                    for candidate in candidates
                 )
             ):
                 raise BridgeError("OBS_RESPONSE_INVALID")
@@ -1621,6 +1736,7 @@ class ObsControlBridge:
             "RemoveScene",
             "CreateSceneItem",
             "CreateWindowCaptureSource",
+            "RebindWindowCaptureSource",
             "SetWindowCaptureMethod",
             "UpdateSceneItem",
             "SetSceneItemEnabled",
@@ -1651,6 +1767,7 @@ class ObsControlBridge:
             elif request_type in {
                 "CreateSceneItem",
                 "CreateWindowCaptureSource",
+                "RebindWindowCaptureSource",
                 "SetWindowCaptureMethod",
                 "UpdateSceneItem",
                 "SetSceneItemEnabled",
@@ -1670,7 +1787,11 @@ class ObsControlBridge:
                     "scaleY",
                     "rotation",
                 }
-                if request_type in {"CreateWindowCaptureSource", "SetWindowCaptureMethod"}:
+                if request_type in {
+                    "CreateWindowCaptureSource",
+                    "RebindWindowCaptureSource",
+                    "SetWindowCaptureMethod",
+                }:
                     allowed |= {
                         "processId",
                         "windowHandle",
@@ -1714,13 +1835,18 @@ class ObsControlBridge:
             if request_type in {
                 "CreateSceneItem",
                 "CreateWindowCaptureSource",
+                "RebindWindowCaptureSource",
                 "SetWindowCaptureMethod",
                 "UpdateSceneItem",
                 "SetSceneItemEnabled",
                 "SetSceneItemTransform",
                 "RemoveSceneItem",
             }:
-                if request_type in {"CreateWindowCaptureSource", "SetWindowCaptureMethod"}:
+                if request_type in {
+                    "CreateWindowCaptureSource",
+                    "RebindWindowCaptureSource",
+                    "SetWindowCaptureMethod",
+                }:
                     if not ObsControlBridge._valid_window_capture_source(response, mutation=True):
                         raise BridgeError("OBS_RESPONSE_INVALID")
                 elif request_type != "RemoveSceneItem":
@@ -1804,6 +1930,27 @@ class ObsControlBridge:
                     and math.isfinite(float(item[key]))
                 )
                 for key in optional
+            )
+        )
+
+    @staticmethod
+    def _valid_window_capture_candidate(candidate: object) -> bool:
+        if not isinstance(candidate, dict) or set(candidate) != {
+            "processId",
+            "windowHandle",
+            "windowTitle",
+            "windowClass",
+            "executable",
+        }:
+            return False
+        return (
+            type(candidate.get("processId")) is int
+            and 1 <= candidate["processId"] < 2**32
+            and type(candidate.get("windowHandle")) is int
+            and 1 <= candidate["windowHandle"] < 2**63
+            and all(
+                isinstance(candidate.get(key), str) and 1 <= len(candidate[key]) <= 256
+                for key in ("windowTitle", "windowClass", "executable")
             )
         )
 
