@@ -947,9 +947,8 @@ obs_data_t *recording_status()
 			set_bounded_string("outputPath", obs_data_get_string(settings, "path"), 4096);
 			obs_data_release(settings);
 		}
-		const auto total_bytes = std::min<uint64_t>(
-			obs_output_get_total_bytes(output),
-			static_cast<uint64_t>(std::numeric_limits<int64_t>::max()));
+		const auto total_bytes = std::min<uint64_t>(obs_output_get_total_bytes(output),
+							    static_cast<uint64_t>(std::numeric_limits<int64_t>::max()));
 		obs_data_set_int(result, "totalBytes", static_cast<long long>(total_bytes));
 		obs_data_set_int(result, "totalFrames", std::max(0, obs_output_get_total_frames(output)));
 		set_bounded_string("lastError", obs_output_get_last_error(output), 4096);
