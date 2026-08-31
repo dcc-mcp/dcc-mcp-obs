@@ -96,3 +96,44 @@ def test_graceful_shutdown_is_output_safe_capability_gated_and_deferred() -> Non
     cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
     assert "find_package(Qt6 REQUIRED COMPONENTS Widgets)" in cmake
     assert "Qt6::Widgets" in cmake
+
+
+def test_agent_input_overlay_is_a_bundled_semantic_obs_source_without_global_hooks() -> None:
+    renderer = (ROOT / "native" / "src" / "agent-input-overlay.cpp").read_text(encoding="utf-8")
+    header = (ROOT / "native" / "src" / "agent-input-overlay.hpp").read_text(encoding="utf-8")
+    plugin = (ROOT / "native" / "src" / "plugin-main.cpp").read_text(encoding="utf-8")
+    cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+
+    assert 'kAgentInputOverlaySourceId = "dcc_mcp_agent_input_overlay"' in header
+    assert "obs_register_source" in renderer
+    assert "OBS_SOURCE_VIDEO | OBS_SOURCE_CUSTOM_DRAW" in renderer
+    assert "QPainter" in renderer and "QImage" in renderer
+    assert "!obs_get_video_info(&video)" in renderer
+    assert 'set_error(result, "OBS_INSTANCE_NOT_READY")' in renderer
+    assert "GetAsyncKeyState" not in renderer
+    assert "SetWindowsHookEx" not in renderer
+    assert "libuiohook" not in renderer.casefold()
+    assert "register_agent_input_overlay_source();" in plugin
+    assert "native/src/agent-input-overlay.cpp" in cmake
+
+    for request in (
+        "CreateAgentInputOverlay",
+        "GetAgentInputOverlay",
+        "EmitAgentInputActivity",
+        "ClearAgentInputOverlay",
+    ):
+        assert f'"{request}"' in plugin
+    assert 'required_capability = "agent_input_overlay"' in plugin
+
+    for operation, function in (
+        ("CreateAgentInputOverlay", "create_agent_input_overlay"),
+        ("EmitAgentInputActivity", "emit_agent_input_activity"),
+        ("ClearAgentInputOverlay", "clear_agent_input_overlay"),
+    ):
+        branch = plugin.split(f"case UiOperation::{operation}:", maxsplit=1)[1].split(
+            "break;", maxsplit=1
+        )[0]
+        assert "claim_mutation(state->deadline)" in branch
+        assert branch.index("claim_mutation(state->deadline)") < branch.index(
+            f"dcc_mcp_obs::{function}"
+        )

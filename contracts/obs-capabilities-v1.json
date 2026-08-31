@@ -54,6 +54,15 @@
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
     },
     {
+      "domain": "agent_input_overlay",
+      "status": "delivered",
+      "authority": "native_plugin",
+      "delivered_operations": ["get_agent_input_overlay", "create_agent_input_overlay", "emit_agent_input_activity", "clear_agent_input_overlay"],
+      "remaining_operations": [],
+      "dangerous_operations": ["create_agent_input_overlay", "emit_agent_input_activity", "clear_agent_input_overlay"],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
+    },
+    {
       "domain": "properties",
       "status": "planned",
       "authority": "native_plugin",

@@ -165,6 +165,183 @@ def test_graceful_shutdown_is_a_typed_terminal_submission() -> None:
     assert transport.requests[1][1] == {"capability": "application_lifecycle"}
 
 
+def test_create_agent_input_overlay_requires_separate_scene_bound_readback() -> None:
+    inactive = {
+        **IDENTITY,
+        "sceneName": "RL - Game 1",
+        "sceneItemId": 42,
+        "sourceName": "DCC-MCP Agent Input",
+        "sourceKind": "dcc_mcp_agent_input_overlay",
+        "theme": "dcc_mcp_dark",
+        "anchor": "bottom_right",
+        "active": False,
+        "activitySequence": 0,
+        "eventKind": "none",
+        "keysCsv": "",
+        "mouseButton": "none",
+        "wheelDirection": "none",
+        "characterCount": 0,
+        "cueLabel": "",
+        "durationMs": 0,
+        "remainingMs": 0,
+    }
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {
+                **IDENTITY,
+                "currentSceneName": "RL - Game 1",
+                "scenes": [{"sceneName": "RL - Game 1"}],
+                "truncated": False,
+                "eventSequence": 8,
+            },
+            {**IDENTITY, "accepted": True, "eventSequence": 9},
+            {**inactive, "eventSequence": 10},
+        ]
+    )
+    bridge = ObsControlBridge(transport, expected_pid=4242)
+
+    result = bridge.create_agent_input_overlay(scene_name="RL - Game 1")
+
+    assert result["verified"] is True
+    assert result["anchor"] == "bottom_right"
+    assert [request for request, _data, _deadline in transport.requests] == [
+        "GetPluginStatus",
+        "ListScenes",
+        "CreateAgentInputOverlay",
+        "GetAgentInputOverlay",
+    ]
+    assert transport.requests[2][1] == {
+        "sceneName": "RL - Game 1",
+        "sourceName": "DCC-MCP Agent Input",
+        "anchor": "bottom_right",
+        "capability": "agent_input_overlay",
+    }
+
+
+def test_emit_agent_shortcut_uses_semantic_keys_and_exact_activity_readback() -> None:
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {
+                **IDENTITY,
+                "accepted": True,
+                "activitySequence": 7,
+                "eventSequence": 8,
+            },
+            {
+                **IDENTITY,
+                "sceneName": "RL - Game 1",
+                "sceneItemId": 42,
+                "sourceName": "DCC-MCP Agent Input",
+                "sourceKind": "dcc_mcp_agent_input_overlay",
+                "theme": "dcc_mcp_dark",
+                "anchor": "bottom_right",
+                "active": True,
+                "activitySequence": 7,
+                "eventKind": "shortcut",
+                "keysCsv": "ctrl,shift,r",
+                "mouseButton": "none",
+                "wheelDirection": "none",
+                "characterCount": 0,
+                "cueLabel": "CTRL + SHIFT + R",
+                "durationMs": 1600,
+                "remainingMs": 1598,
+                "eventSequence": 9,
+            },
+        ]
+    )
+    bridge = ObsControlBridge(transport, expected_pid=4242)
+
+    result = bridge.emit_agent_input_activity(
+        scene_name="RL - Game 1",
+        event_kind="shortcut",
+        keys=["ctrl", "shift", "r"],
+    )
+
+    assert result["verified"] is True
+    assert result["cueLabel"] == "CTRL + SHIFT + R"
+    assert transport.requests[1][1] == {
+        "sceneName": "RL - Game 1",
+        "sourceName": "DCC-MCP Agent Input",
+        "eventKind": "shortcut",
+        "keysCsv": "ctrl,shift,r",
+        "mouseButton": "none",
+        "wheelDirection": "none",
+        "characterCount": 0,
+        "durationMs": 1600,
+        "capability": "agent_input_overlay",
+    }
+
+
+@pytest.mark.parametrize(
+    ("arguments", "field", "wrong_value"),
+    [
+        ({"event_kind": "mouse_button", "mouse_button": "left"}, "mouseButton", "right"),
+        ({"event_kind": "mouse_wheel", "wheel_direction": "up"}, "wheelDirection", "down"),
+        ({"event_kind": "typing", "character_count": 12}, "characterCount", 11),
+    ],
+)
+def test_agent_input_activity_requires_exact_semantic_readback(
+    arguments: dict[str, object], field: str, wrong_value: object
+) -> None:
+    event_kind = str(arguments["event_kind"])
+    response = {
+        **IDENTITY,
+        "sceneName": "RL - Game 1",
+        "sceneItemId": 42,
+        "sourceName": "DCC-MCP Agent Input",
+        "sourceKind": "dcc_mcp_agent_input_overlay",
+        "theme": "dcc_mcp_dark",
+        "anchor": "bottom_right",
+        "active": True,
+        "activitySequence": 7,
+        "eventKind": event_kind,
+        "keysCsv": "",
+        "mouseButton": arguments.get("mouse_button", "none"),
+        "wheelDirection": arguments.get("wheel_direction", "none"),
+        "characterCount": arguments.get("character_count", 0),
+        "cueLabel": "bounded semantic cue",
+        "durationMs": 1600,
+        "remainingMs": 1598,
+        "eventSequence": 9,
+    }
+    response[field] = wrong_value
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {**IDENTITY, "accepted": True, "activitySequence": 7, "eventSequence": 8},
+            response,
+        ]
+    )
+    bridge = ObsControlBridge(transport, expected_pid=4242)
+
+    with pytest.raises(BridgeError, match="OBS_POSTCONDITION_FAILED"):
+        bridge.emit_agent_input_activity(scene_name="RL - Game 1", **arguments)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"event_kind": "shortcut", "keys": ["ctrl", "secret"]},
+        {"event_kind": "shortcut", "keys": []},
+        {"event_kind": "mouse_button", "mouse_button": "none"},
+        {"event_kind": "mouse_wheel", "wheel_direction": "none"},
+        {"event_kind": "typing", "character_count": 0},
+    ],
+)
+def test_agent_input_activity_rejects_nonsemantic_or_empty_events(
+    arguments: dict[str, object],
+) -> None:
+    transport = FakeTransport([{**IDENTITY, "ready": True}])
+    bridge = ObsControlBridge(transport, expected_pid=4242)
+
+    with pytest.raises(BridgeError, match="OBS_ARGUMENT_INVALID"):
+        bridge.emit_agent_input_activity(scene_name="RL - Game 1", **arguments)
+
+    assert [request for request, _data, _deadline in transport.requests] == ["GetPluginStatus"]
+
+
 def test_mutation_fails_closed_when_readback_does_not_prove_postcondition() -> None:
     transport = FakeTransport(
         [

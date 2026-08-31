@@ -28,6 +28,7 @@
 #endif
 
 #include "obs-websocket-api.h"
+#include "agent-input-overlay.hpp"
 #include "ui-task-gate.hpp"
 
 OBS_DECLARE_MODULE()
@@ -82,6 +83,10 @@ enum class UiOperation {
 	OperatorStatus,
 	ListScenes,
 	ListSources,
+	CreateAgentInputOverlay,
+	GetAgentInputOverlay,
+	EmitAgentInputActivity,
+	ClearAgentInputOverlay,
 	RequestGracefulShutdown,
 	RecordingStatus,
 	StartRecording,
@@ -158,6 +163,8 @@ struct UiState {
 	std::string source_name;
 	std::string source_kind;
 	std::string transition_name;
+	std::string overlay_anchor;
+	dcc_mcp_obs::AgentInputActivity agent_input_activity;
 	std::string window_executable_filter;
 	std::string window_title_filter;
 	WindowCaptureBinding window_capture;
@@ -374,6 +381,28 @@ bool allowlisted_hotkey(const std::string &name)
 	for (const char *entry : kAllowlistedHotkeys) {
 		if (name == entry)
 			return true;
+	}
+	return false;
+}
+
+bool valid_agent_input_key(const std::string &key)
+{
+	static constexpr const char *named_keys[] = {"ctrl",   "shift", "alt",   "meta",      "enter",
+						     "escape", "tab",   "space", "backspace", "delete",
+						     "up",     "down",  "left",  "right"};
+	for (const char *named : named_keys) {
+		if (key == named)
+			return true;
+	}
+	if (key.size() == 1)
+		return (key[0] >= 'a' && key[0] <= 'z') || (key[0] >= '0' && key[0] <= '9');
+	if (key.size() >= 2 && key[0] == 'f') {
+		try {
+			const int number = std::stoi(key.substr(1));
+			return number >= 1 && number <= 12 && key == "f" + std::to_string(number);
+		} catch (...) {
+			return false;
+		}
 	}
 	return false;
 }
@@ -1087,6 +1116,9 @@ void execute_ui_operation(void *private_data)
 	std::shared_ptr<UiState> state = *holder;
 	obs_data_t *result = nullptr;
 	const bool is_mutation =
+		state->operation == UiOperation::CreateAgentInputOverlay ||
+		state->operation == UiOperation::EmitAgentInputActivity ||
+		state->operation == UiOperation::ClearAgentInputOverlay ||
 		state->operation == UiOperation::RequestGracefulShutdown ||
 		state->operation == UiOperation::StartRecording || state->operation == UiOperation::StopRecording ||
 		state->operation == UiOperation::PauseRecording || state->operation == UiOperation::ResumeRecording ||
@@ -1768,6 +1800,35 @@ void execute_ui_operation(void *private_data)
 			}
 			break;
 		}
+		case UiOperation::CreateAgentInputOverlay:
+			if (!state->gate.claim_mutation(state->deadline)) {
+				result = obs_data_create();
+				set_error(result, "OBS_UI_TIMEOUT");
+			} else {
+				result = dcc_mcp_obs::create_agent_input_overlay(state->scene_name, state->source_name,
+										 state->overlay_anchor);
+			}
+			break;
+		case UiOperation::GetAgentInputOverlay:
+			result = dcc_mcp_obs::get_agent_input_overlay(state->scene_name, state->source_name);
+			break;
+		case UiOperation::EmitAgentInputActivity:
+			if (!state->gate.claim_mutation(state->deadline)) {
+				result = obs_data_create();
+				set_error(result, "OBS_UI_TIMEOUT");
+			} else {
+				result = dcc_mcp_obs::emit_agent_input_activity(state->scene_name, state->source_name,
+										state->agent_input_activity);
+			}
+			break;
+		case UiOperation::ClearAgentInputOverlay:
+			if (!state->gate.claim_mutation(state->deadline)) {
+				result = obs_data_create();
+				set_error(result, "OBS_UI_TIMEOUT");
+			} else {
+				result = dcc_mcp_obs::clear_agent_input_overlay(state->scene_name, state->source_name);
+			}
+			break;
 		case UiOperation::RequestGracefulShutdown: {
 			result = obs_data_create();
 			const bool recording_active = obs_frontend_recording_active();
@@ -2097,6 +2158,7 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, cons
 		      bool has_duration, int duration_ms, bool has_pos, bool has_scale, bool has_rotation, float pos_x,
 		      float pos_y, float scale_x, float scale_y, float rotation,
 		      const WindowCaptureBinding &window_capture, const WindowCaptureBinding &expected_window_capture,
+		      const std::string &overlay_anchor, const dcc_mcp_obs::AgentInputActivity &agent_input_activity,
 		      uint64_t deadline_at_ms, obs_data_t *response)
 {
 	auto state = std::make_shared<UiState>();
@@ -2109,6 +2171,8 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, cons
 	state->source_name = source_name;
 	state->source_kind = source_kind;
 	state->transition_name = transition_name;
+	state->overlay_anchor = overlay_anchor;
+	state->agent_input_activity = agent_input_activity;
 	state->window_executable_filter = window_executable_filter;
 	state->window_title_filter = window_title_filter;
 	state->window_capture = window_capture;
@@ -2223,6 +2287,14 @@ UiOperation operation_for(const std::string &request)
 		return UiOperation::TriggerStudioModeTransition;
 	if (request == "ListSources")
 		return UiOperation::ListSources;
+	if (request == "CreateAgentInputOverlay")
+		return UiOperation::CreateAgentInputOverlay;
+	if (request == "GetAgentInputOverlay")
+		return UiOperation::GetAgentInputOverlay;
+	if (request == "EmitAgentInputActivity")
+		return UiOperation::EmitAgentInputActivity;
+	if (request == "ClearAgentInputOverlay")
+		return UiOperation::ClearAgentInputOverlay;
 	if (request == "RequestGracefulShutdown")
 		return UiOperation::RequestGracefulShutdown;
 	if (request == "GetRecordingStatus")
@@ -2303,10 +2375,12 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 	std::string source_name;
 	std::string source_kind;
 	std::string transition_name;
+	std::string overlay_anchor;
 	std::string window_executable_filter;
 	std::string window_title_filter;
 	WindowCaptureBinding window_capture;
 	WindowCaptureBinding expected_window_capture;
+	dcc_mcp_obs::AgentInputActivity agent_input_activity;
 	int64_t scene_item_id = 0;
 	bool enabled = true, studio_enabled = false, has_duration = false;
 	int duration_ms = 0;
@@ -2412,7 +2486,9 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 		request_name == "GetWindowCaptureSource" || request_name == "RebindWindowCaptureSource" ||
 		request_name == "SetWindowCaptureMethod" || request_name == "SetSceneItemEnabled" ||
 		request_name == "SetSceneItemTransform" || request_name == "RemoveSceneItem" ||
-		request_name == "TriggerTransition" || request_name == "SetCurrentPreviewScene";
+		request_name == "TriggerTransition" || request_name == "SetCurrentPreviewScene" ||
+		request_name == "CreateAgentInputOverlay" || request_name == "GetAgentInputOverlay" ||
+		request_name == "EmitAgentInputActivity" || request_name == "ClearAgentInputOverlay";
 	if (scene_request && request_data != nullptr) {
 		const char *value = obs_data_get_string(request_data, "sceneName");
 		if (value != nullptr)
@@ -2521,6 +2597,93 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 			}
 		}
 	}
+	const bool overlay_request =
+		request_name == "CreateAgentInputOverlay" || request_name == "GetAgentInputOverlay" ||
+		request_name == "EmitAgentInputActivity" || request_name == "ClearAgentInputOverlay";
+	if (overlay_request &&
+	    (scene_name.empty() || source_name.empty() || scene_name.size() > 256 || source_name.size() > 256)) {
+		set_error(response_data, "OBS_ARGUMENT_INVALID");
+		return;
+	}
+	if (request_name == "CreateAgentInputOverlay") {
+		const char *value = request_data != nullptr ? obs_data_get_string(request_data, "anchor") : nullptr;
+		if (value != nullptr)
+			overlay_anchor = value;
+		if (overlay_anchor != "bottom_left" && overlay_anchor != "bottom_center" &&
+		    overlay_anchor != "bottom_right") {
+			set_error(response_data, "OBS_ARGUMENT_INVALID");
+			return;
+		}
+	}
+	if (request_name == "EmitAgentInputActivity") {
+		const char *event_kind = request_data != nullptr ? obs_data_get_string(request_data, "eventKind")
+								 : nullptr;
+		const char *mouse_button = request_data != nullptr ? obs_data_get_string(request_data, "mouseButton")
+								   : nullptr;
+		const char *wheel_direction =
+			request_data != nullptr ? obs_data_get_string(request_data, "wheelDirection") : nullptr;
+		agent_input_activity.event_kind = event_kind != nullptr ? event_kind : "";
+		agent_input_activity.mouse_button = mouse_button != nullptr ? mouse_button : "";
+		agent_input_activity.wheel_direction = wheel_direction != nullptr ? wheel_direction : "";
+		agent_input_activity.character_count =
+			request_data != nullptr ? static_cast<int>(obs_data_get_int(request_data, "characterCount"))
+						: 0;
+		agent_input_activity.duration_ms =
+			request_data != nullptr ? static_cast<int>(obs_data_get_int(request_data, "durationMs")) : 0;
+		const char *keys_csv = request_data != nullptr ? obs_data_get_string(request_data, "keysCsv") : nullptr;
+		std::string remaining_keys = keys_csv != nullptr ? keys_csv : "";
+		bool keys_valid = remaining_keys.size() <= 32;
+		while (!remaining_keys.empty() && agent_input_activity.keys.size() < 5) {
+			const size_t separator = remaining_keys.find(',');
+			const std::string key = remaining_keys.substr(0, separator);
+			if (!valid_agent_input_key(key)) {
+				keys_valid = false;
+				agent_input_activity.keys.clear();
+				break;
+			}
+			agent_input_activity.keys.push_back(key);
+			if (separator == std::string::npos)
+				remaining_keys.clear();
+			else
+				remaining_keys.erase(0, separator + 1);
+		}
+		if (agent_input_activity.keys.size() > 4) {
+			keys_valid = false;
+			agent_input_activity.keys.clear();
+		}
+		const bool valid_kind = agent_input_activity.event_kind == "shortcut" ||
+					agent_input_activity.event_kind == "mouse_button" ||
+					agent_input_activity.event_kind == "mouse_wheel" ||
+					agent_input_activity.event_kind == "typing";
+		const bool valid_mouse =
+			agent_input_activity.mouse_button == "none" || agent_input_activity.mouse_button == "left" ||
+			agent_input_activity.mouse_button == "right" || agent_input_activity.mouse_button == "middle" ||
+			agent_input_activity.mouse_button == "back" || agent_input_activity.mouse_button == "forward";
+		const bool valid_wheel = agent_input_activity.wheel_direction == "none" ||
+					 agent_input_activity.wheel_direction == "up" ||
+					 agent_input_activity.wheel_direction == "down" ||
+					 agent_input_activity.wheel_direction == "left" ||
+					 agent_input_activity.wheel_direction == "right";
+		const bool semantic_valid =
+			(agent_input_activity.event_kind == "shortcut" && !agent_input_activity.keys.empty() &&
+			 agent_input_activity.mouse_button == "none" &&
+			 agent_input_activity.wheel_direction == "none" && agent_input_activity.character_count == 0) ||
+			(agent_input_activity.event_kind == "mouse_button" && agent_input_activity.keys.empty() &&
+			 agent_input_activity.mouse_button != "none" &&
+			 agent_input_activity.wheel_direction == "none" && agent_input_activity.character_count == 0) ||
+			(agent_input_activity.event_kind == "mouse_wheel" && agent_input_activity.keys.empty() &&
+			 agent_input_activity.mouse_button == "none" &&
+			 agent_input_activity.wheel_direction != "none" && agent_input_activity.character_count == 0) ||
+			(agent_input_activity.event_kind == "typing" && agent_input_activity.keys.empty() &&
+			 agent_input_activity.mouse_button == "none" &&
+			 agent_input_activity.wheel_direction == "none" && agent_input_activity.character_count >= 1 &&
+			 agent_input_activity.character_count <= 10000);
+		if (!valid_kind || !valid_mouse || !valid_wheel || !keys_valid || !semantic_valid ||
+		    agent_input_activity.duration_ms < 250 || agent_input_activity.duration_ms > 5000) {
+			set_error(response_data, "OBS_ARGUMENT_INVALID");
+			return;
+		}
+	}
 	const char *required_capability = nullptr;
 	if (request_name == "SetCurrentScene" || request_name == "CreateScene" || request_name == "RenameScene" ||
 	    request_name == "RemoveScene" || request_name == "CreateSceneItem" ||
@@ -2547,6 +2710,9 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 		required_capability = "studio_transition";
 	else if (request_name == "RequestGracefulShutdown")
 		required_capability = "application_lifecycle";
+	else if (request_name == "CreateAgentInputOverlay" || request_name == "EmitAgentInputActivity" ||
+		 request_name == "ClearAgentInputOverlay")
+		required_capability = "agent_input_overlay";
 	if (required_capability != nullptr) {
 		const char *capability = request_data != nullptr ? obs_data_get_string(request_data, "capability")
 								 : nullptr;
@@ -2605,7 +2771,7 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 			 source_name, source_kind, transition_name, window_executable_filter, window_title_filter,
 			 scene_item_id, enabled, studio_enabled, has_duration, duration_ms, has_pos, has_scale,
 			 has_rotation, pos_x, pos_y, scale_x, scale_y, rotation, window_capture,
-			 expected_window_capture, deadline_at_ms, response_data);
+			 expected_window_capture, overlay_anchor, agent_input_activity, deadline_at_ms, response_data);
 	if (request_name == "RequestGracefulShutdown" && obs_data_get_bool(response_data, "shutdownScheduled"))
 		obs_queue_task(OBS_TASK_UI, request_frontend_exit, nullptr, false);
 }
@@ -2624,6 +2790,10 @@ void frontend_event(enum obs_frontend_event, void *)
 constexpr const char *kRequests[] = {
 	"GetPluginStatus",
 	"RequestGracefulShutdown",
+	"CreateAgentInputOverlay",
+	"GetAgentInputOverlay",
+	"EmitAgentInputActivity",
+	"ClearAgentInputOverlay",
 	"ListScenes",
 	"SetCurrentScene",
 	"GetCurrentScene",
@@ -2695,6 +2865,7 @@ const char *obs_module_description(void)
 bool obs_module_load(void)
 {
 	g_instance_id = make_instance_id();
+	dcc_mcp_obs::register_agent_input_overlay_source();
 	obs_frontend_add_event_callback(frontend_event, nullptr);
 	blog(LOG_INFO, "dcc-mcp-obs native plugin loaded");
 	return true;

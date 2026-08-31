@@ -77,6 +77,55 @@ def test_graceful_shutdown_skill_is_terminal_bounded_and_destructive() -> None:
     assert "next-tools" not in tool
 
 
+def test_agent_input_overlay_tools_expose_only_semantic_privacy_safe_activity() -> None:
+    tools = yaml.safe_load(
+        (ROOT / "src/dcc_mcp_obs/skills/obs-control/tools.yaml").read_text(encoding="utf-8")
+    )["tools"]
+    by_name = {tool["name"]: tool for tool in tools}
+    assert {
+        "create_agent_input_overlay",
+        "get_agent_input_overlay",
+        "emit_agent_input_activity",
+        "clear_agent_input_overlay",
+    } <= set(by_name)
+
+    emit = by_name["emit_agent_input_activity"]
+    properties = emit["input_schema"]["properties"]
+    assert set(properties) == {
+        "scene_name",
+        "source_name",
+        "event_kind",
+        "keys",
+        "mouse_button",
+        "wheel_direction",
+        "character_count",
+        "duration_ms",
+    }
+    assert "text" not in properties and "label" not in properties
+    assert properties["event_kind"]["enum"] == [
+        "shortcut",
+        "mouse_button",
+        "mouse_wheel",
+        "typing",
+    ]
+    assert properties["keys"]["maxItems"] == 4
+    assert properties["character_count"]["maximum"] == 10000
+    assert emit["annotations"]["open_world_hint"] is False
+    assert emit["annotations"]["destructive_hint"] is True
+
+    for name in (
+        "create_agent_input_overlay",
+        "emit_agent_input_activity",
+        "clear_agent_input_overlay",
+    ):
+        assert by_name[name]["output_schema"]["properties"]["postcondition"] == {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["verified"],
+            "properties": {"verified": {"const": True}},
+        }
+
+
 def test_obs_skill_has_bilingual_discovery_aliases_and_no_raw_escape_hatch() -> None:
     skill = (ROOT / "src" / "dcc_mcp_obs" / "skills" / "obs-control" / "SKILL.md").read_text(
         encoding="utf-8"
@@ -244,6 +293,30 @@ def test_skill_outputs_publish_strict_typed_envelopes_with_context_parity() -> N
         "outputActive",
         "outputPaused",
     }
+    overlay_context_keys = {
+        "instanceId",
+        "pluginVersion",
+        "obsVersion",
+        "hostPid",
+        "eventSequence",
+        "ok",
+        "sceneName",
+        "sceneItemId",
+        "sourceName",
+        "sourceKind",
+        "theme",
+        "anchor",
+        "active",
+        "activitySequence",
+        "eventKind",
+        "keys",
+        "mouseButton",
+        "wheelDirection",
+        "characterCount",
+        "cueLabel",
+        "durationMs",
+        "remainingMs",
+    }
     mutation_names = {
         "start_recording",
         "stop_recording",
@@ -406,6 +479,17 @@ def test_skill_outputs_publish_strict_typed_envelopes_with_context_parity() -> N
                 "sceneCollectionName",
                 "configVersion",
             },
+            "get_agent_input_overlay": overlay_context_keys,
+            "create_agent_input_overlay": overlay_context_keys,
+            "emit_agent_input_activity": overlay_context_keys,
+            "clear_agent_input_overlay": overlay_context_keys,
+        }
+    )
+    mutation_names.update(
+        {
+            "create_agent_input_overlay",
+            "emit_agent_input_activity",
+            "clear_agent_input_overlay",
         }
     )
 
@@ -580,6 +664,85 @@ def test_every_skill_output_schema_accepts_the_real_core_success_envelope() -> N
                 "profileName": "Main",
                 "sceneCollectionName": "Main",
             },
+            "get_agent_input_overlay": {
+                **identity,
+                "sceneName": "RL - Game 1",
+                "sceneItemId": 8,
+                "sourceName": "DCC-MCP Agent Input",
+                "sourceKind": "dcc_mcp_agent_input_overlay",
+                "theme": "dcc_mcp_dark",
+                "anchor": "bottom_right",
+                "active": False,
+                "activitySequence": 0,
+                "eventKind": "none",
+                "keys": [],
+                "mouseButton": "none",
+                "wheelDirection": "none",
+                "characterCount": 0,
+                "cueLabel": "",
+                "durationMs": 0,
+                "remainingMs": 0,
+            },
+            "create_agent_input_overlay": {
+                **identity,
+                "sceneName": "RL - Game 1",
+                "sceneItemId": 8,
+                "sourceName": "DCC-MCP Agent Input",
+                "sourceKind": "dcc_mcp_agent_input_overlay",
+                "theme": "dcc_mcp_dark",
+                "anchor": "bottom_right",
+                "active": False,
+                "activitySequence": 0,
+                "eventKind": "none",
+                "keys": [],
+                "mouseButton": "none",
+                "wheelDirection": "none",
+                "characterCount": 0,
+                "cueLabel": "",
+                "durationMs": 0,
+                "remainingMs": 0,
+                "verified": True,
+            },
+            "emit_agent_input_activity": {
+                **identity,
+                "sceneName": "RL - Game 1",
+                "sceneItemId": 8,
+                "sourceName": "DCC-MCP Agent Input",
+                "sourceKind": "dcc_mcp_agent_input_overlay",
+                "theme": "dcc_mcp_dark",
+                "anchor": "bottom_right",
+                "active": True,
+                "activitySequence": 1,
+                "eventKind": "shortcut",
+                "keys": ["ctrl", "shift", "r"],
+                "mouseButton": "none",
+                "wheelDirection": "none",
+                "characterCount": 0,
+                "cueLabel": "CTRL + SHIFT + R",
+                "durationMs": 1600,
+                "remainingMs": 1500,
+                "verified": True,
+            },
+            "clear_agent_input_overlay": {
+                **identity,
+                "sceneName": "RL - Game 1",
+                "sceneItemId": 8,
+                "sourceName": "DCC-MCP Agent Input",
+                "sourceKind": "dcc_mcp_agent_input_overlay",
+                "theme": "dcc_mcp_dark",
+                "anchor": "bottom_right",
+                "active": False,
+                "activitySequence": 2,
+                "eventKind": "none",
+                "keys": [],
+                "mouseButton": "none",
+                "wheelDirection": "none",
+                "characterCount": 0,
+                "cueLabel": "",
+                "durationMs": 0,
+                "remainingMs": 0,
+                "verified": True,
+            },
         }
     )
 
@@ -611,3 +774,7 @@ def test_public_discovery_docs_describe_delivered_scene_graph_tools() -> None:
     assert "类型化工具" in chinese
     assert "场景切换仍属于路线图" not in chinese
     assert "Typed scene switching" in llms
+    assert "Built-in Agent input overlay" in readme
+    assert "shared `DCC-MCP Agent Input` source" in readme
+    assert "Agent 键盘/鼠标活动提示" in chinese
+    assert "never captures global input or arbitrary text" in llms
