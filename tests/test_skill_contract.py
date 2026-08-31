@@ -180,7 +180,21 @@ def test_skill_outputs_publish_strict_typed_envelopes_with_context_parity() -> N
             "ok",
             "outputActive",
             "outputPaused",
+            "outputName",
+            "outputKind",
+            "outputPath",
+            "totalBytes",
+            "totalFrames",
+            "lastError",
         },
+    }
+    recording_diagnostic_keys = {
+        "outputName",
+        "outputKind",
+        "outputPath",
+        "totalBytes",
+        "totalFrames",
+        "lastError",
     }
     mutation_context_keys = {
         "instanceId",
@@ -245,7 +259,7 @@ def test_skill_outputs_publish_strict_typed_envelopes_with_context_parity() -> N
         }
     )
     for name in {"start_recording", "stop_recording", "pause_recording", "resume_recording"}:
-        expected_context_keys[name] = mutation_context_keys
+        expected_context_keys[name] = mutation_context_keys | recording_diagnostic_keys
 
     expected_context_keys.update(
         {

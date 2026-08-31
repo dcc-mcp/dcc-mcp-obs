@@ -64,6 +64,64 @@ IDENTITY = {
 }
 
 
+def test_recording_status_accepts_bounded_output_diagnostics() -> None:
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {
+                **IDENTITY,
+                "outputActive": True,
+                "outputPaused": False,
+                "outputName": "simple_file_output",
+                "outputKind": "mp4_output",
+                "outputPath": "C:/Videos/session.mp4",
+                "totalBytes": 4_224_797_993,
+                "totalFrames": 161_602,
+                "lastError": "",
+                "eventSequence": 9,
+            },
+        ]
+    )
+    bridge = ObsControlBridge(transport, expected_pid=4242)
+
+    result = bridge.recording_status()
+
+    assert result["outputPath"] == "C:/Videos/session.mp4"
+    assert result["totalBytes"] == 4_224_797_993
+    assert result["totalFrames"] == 161_602
+    assert result["lastError"] == ""
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("outputPath", "x" * 4097),
+        ("lastError", "x" * 4097),
+        ("totalBytes", -1),
+        ("totalFrames", True),
+    ],
+)
+def test_recording_status_rejects_invalid_output_diagnostics(field: str, value: object) -> None:
+    response = {
+        **IDENTITY,
+        "outputActive": True,
+        "outputPaused": False,
+        "outputName": "simple_file_output",
+        "outputKind": "mp4_output",
+        "outputPath": "C:/Videos/session.mp4",
+        "totalBytes": 1024,
+        "totalFrames": 30,
+        "lastError": "",
+        "eventSequence": 9,
+    }
+    response[field] = value
+    transport = FakeTransport([{**IDENTITY, "ready": True}, response])
+    bridge = ObsControlBridge(transport, expected_pid=4242)
+
+    with pytest.raises(BridgeError, match="OBS_RESPONSE_INVALID"):
+        bridge.recording_status()
+
+
 def test_recording_start_requires_separate_verified_readback() -> None:
     transport = FakeTransport(
         [

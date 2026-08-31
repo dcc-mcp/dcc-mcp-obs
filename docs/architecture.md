@@ -19,6 +19,11 @@ requested state. This separation prevents command delivery from being
 misreported as an observed postcondition while allowing OBS frontend events to
 settle inside the enclosing Core job.
 
+`GetRecordingStatus` also reports bounded recording-output diagnostics from
+the authoritative libobs output: output name and kind, file path, total bytes
+and frames, and the last output error. This keeps failure diagnosis on the typed
+plugin route instead of requiring UI automation or unstructured log scraping.
+
 The full product surface is partitioned into capability domains in
 `contracts/obs-capabilities-v1.json`. Follow-up slices add reviewed request and
 response schemas; they do not add a generic vendor-request bridge.
