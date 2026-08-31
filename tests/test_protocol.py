@@ -85,6 +85,26 @@ def test_authenticates_and_uses_only_call_vendor_request() -> None:
     assert "PRIVATE_OBS_PASSWORD" not in json.dumps(socket.sent)
 
 
+def test_program_frame_is_allowlisted_and_sent_as_typed_vendor_request() -> None:
+    socket = ScriptedSocket([_hello(), {"op": 2, "d": {"negotiatedRpcVersion": 1}}, _response()])
+    transport = ObsWebSocketTransport(
+        ObsEndpointConfig(password="secret"), connector=lambda _url, _timeout: socket
+    )
+
+    transport.vendor_request(
+        "CaptureProgramFrame",
+        {"imageFormat": "png", "imageWidth": 320, "imageHeight": 180},
+    )
+
+    request = socket.sent[1]["d"]["requestData"]
+    assert "CaptureProgramFrame" in VENDOR_REQUESTS
+    assert request["vendorName"] == "dcc-mcp-obs"
+    assert request["requestType"] == "CaptureProgramFrame"
+    assert request["requestData"]["imageFormat"] == "png"
+    assert request["requestData"]["imageWidth"] == 320
+    assert request["requestData"]["imageHeight"] == 180
+
+
 def test_vendor_request_carries_bounded_deadline_metadata_to_native() -> None:
     clock = ManualClock()
     socket = ScriptedSocket([_hello(), {"op": 2, "d": {"negotiatedRpcVersion": 1}}, _response()])
@@ -294,6 +314,7 @@ def test_transport_allowlist_is_exactly_the_typed_public_requests() -> None:
         "TriggerAllowlistedHotkey",
         "CaptureScreenshot",
         "CaptureSourceScreenshot",
+        "CaptureProgramFrame",
     } == VENDOR_REQUESTS
 
 
