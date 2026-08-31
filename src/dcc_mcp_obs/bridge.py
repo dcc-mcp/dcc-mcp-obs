@@ -1601,11 +1601,33 @@ class ObsControlBridge:
                 raise BridgeError("OBS_RESPONSE_INVALID")
             return
         if request_type == "GetRecordingStatus":
-            allowed = _IDENTITY_KEYS | {"outputActive", "outputPaused"}
+            diagnostic_strings = {
+                "outputName": 256,
+                "outputKind": 256,
+                "outputPath": 4096,
+                "lastError": 4096,
+            }
+            diagnostic_integers = {"totalBytes", "totalFrames"}
+            allowed = (
+                _IDENTITY_KEYS
+                | {"outputActive", "outputPaused"}
+                | set(diagnostic_strings)
+                | diagnostic_integers
+            )
             if (
                 set(response) - allowed
                 or type(response.get("outputActive")) is not bool
                 or type(response.get("outputPaused")) is not bool
+                or any(
+                    key in response
+                    and (not isinstance(response[key], str) or len(response[key]) > max_length)
+                    for key, max_length in diagnostic_strings.items()
+                )
+                or any(
+                    key in response
+                    and (type(response[key]) is not int or not 0 <= response[key] <= 2**63 - 1)
+                    for key in diagnostic_integers
+                )
             ):
                 raise BridgeError("OBS_RESPONSE_INVALID")
             return

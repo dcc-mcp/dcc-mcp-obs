@@ -159,7 +159,7 @@ tools:
     call_examples: [{arguments: {scene_name: Main}, note: Read the bounded source list for one exact scene.}]
     next-tools: {on-failure: [obs_control__list_scenes, obs_control__get_status]}
   - name: get_recording_status
-    description: Get recording active and paused state.
+    description: Get recording state plus bounded output identity, path, byte/frame counters, and last error.
     source_file: scripts/get_recording_status.py
     input_schema: {type: object, properties: {}, additionalProperties: false}
     output_schema: &recording_status_output
@@ -184,6 +184,12 @@ tools:
             ok: {const: true}
             outputActive: {type: boolean}
             outputPaused: {type: boolean}
+            outputName: {type: string, maxLength: 256}
+            outputKind: {type: string, maxLength: 256}
+            outputPath: {type: string, maxLength: 4096}
+            totalBytes: {type: integer, minimum: 0}
+            totalFrames: {type: integer, minimum: 0}
+            lastError: {type: string, maxLength: 4096}
     execution: sync
     affinity: any
     enforce_thread_affinity: true
@@ -223,6 +229,12 @@ tools:
             ok: {const: true}
             outputActive: {type: boolean}
             outputPaused: {type: boolean}
+            outputName: {type: string, maxLength: 256}
+            outputKind: {type: string, maxLength: 256}
+            outputPath: {type: string, maxLength: 4096}
+            totalBytes: {type: integer, minimum: 0}
+            totalFrames: {type: integer, minimum: 0}
+            lastError: {type: string, maxLength: 4096}
     execution: sync
     affinity: any
     enforce_thread_affinity: true

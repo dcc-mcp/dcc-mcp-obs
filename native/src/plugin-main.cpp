@@ -924,6 +924,36 @@ obs_data_t *recording_status()
 	obs_data_t *result = obs_data_create();
 	obs_data_set_bool(result, "outputActive", obs_frontend_recording_active());
 	obs_data_set_bool(result, "outputPaused", obs_frontend_recording_paused());
+	obs_data_set_string(result, "outputName", "");
+	obs_data_set_string(result, "outputKind", "");
+	obs_data_set_string(result, "outputPath", "");
+	obs_data_set_int(result, "totalBytes", 0);
+	obs_data_set_int(result, "totalFrames", 0);
+	obs_data_set_string(result, "lastError", "");
+
+	auto *output = obs_frontend_get_recording_output();
+	if (output != nullptr) {
+		auto set_bounded_string = [result](const char *key, const char *value, size_t max_length) {
+			std::string bounded = value != nullptr ? value : "";
+			if (bounded.size() > max_length)
+				bounded.resize(max_length);
+			obs_data_set_string(result, key, bounded.c_str());
+		};
+
+		set_bounded_string("outputName", obs_output_get_name(output), 256);
+		set_bounded_string("outputKind", obs_output_get_id(output), 256);
+		auto *settings = obs_output_get_settings(output);
+		if (settings != nullptr) {
+			set_bounded_string("outputPath", obs_data_get_string(settings, "path"), 4096);
+			obs_data_release(settings);
+		}
+		const auto total_bytes = std::min<uint64_t>(obs_output_get_total_bytes(output),
+							    static_cast<uint64_t>(std::numeric_limits<int64_t>::max()));
+		obs_data_set_int(result, "totalBytes", static_cast<long long>(total_bytes));
+		obs_data_set_int(result, "totalFrames", std::max(0, obs_output_get_total_frames(output)));
+		set_bounded_string("lastError", obs_output_get_last_error(output), 4096);
+		obs_output_release(output);
+	}
 	return result;
 }
 
