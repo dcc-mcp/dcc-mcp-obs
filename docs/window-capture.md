@@ -20,6 +20,12 @@ OBS. Call it immediately before recording. A missing window, PID/HWND reuse,
 title drift, changed source settings, duplicate scene item, or changed process
 object fails closed with a stable public error code.
 
+Metadata readback cannot prove that OBS is rendering useful pixels. Call
+`capture_program_frame` after binding validation and before every long
+recording. It returns the current program scene as a fixed 320x180 in-memory
+PNG with byte length and SHA-256; it accepts no source name or filesystem path.
+Inspect that frame and fail closed on black or incorrect content.
+
 `set_window_capture_method` changes only the capture method on an existing
 exactly bound source. The plugin verifies the scene item, private binding
 metadata, live process object, HWND, title, class, executable, cursor setting,

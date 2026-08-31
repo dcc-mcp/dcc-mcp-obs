@@ -72,6 +72,44 @@ tools:
     annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
     call_examples: [{arguments: {}, note: Discover scenes before reading sources for one scene.}]
     next-tools: {on-success: [obs_control__list_sources], on-failure: [obs_control__get_status]}
+  - name: capture_program_frame
+    description: Capture a bounded in-memory PNG preview of the current OBS program scene for visual validation.
+    source_file: scripts/capture_program_frame.py
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context:
+          type: object
+          additionalProperties: false
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sourceName, imageFormat, imageData, imageWidth, imageHeight, byteLength, sha256]
+          properties:
+            instanceId: {type: string, minLength: 1, maxLength: 128}
+            pluginVersion: {type: string, minLength: 1}
+            obsVersion: {type: string, minLength: 1}
+            hostPid: {type: integer, minimum: 1}
+            eventSequence: {type: integer, minimum: 0}
+            ok: {const: true}
+            sourceName: {type: string, minLength: 1, maxLength: 256}
+            imageFormat: {const: png}
+            imageData: {type: string, minLength: 32, maxLength: 400000, pattern: '^data:image/png;base64,'}
+            imageWidth: {const: 320}
+            imageHeight: {const: 180}
+            byteLength: {type: integer, minimum: 33, maximum: 400000}
+            sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {}, note: Inspect this frame before starting a long recording and after any capture-method change.}]
+    next-tools: {on-success: [obs_control__get_recording_status], on-failure: [obs_control__get_status]}
   - name: list_sources
     description: List bounded sources for the current or named scene.
     source_file: scripts/list_sources.py

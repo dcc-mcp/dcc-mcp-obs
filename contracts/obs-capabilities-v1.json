@@ -181,11 +181,11 @@
     },
     {
       "domain": "screenshots",
-      "status": "planned",
+      "status": "partial",
       "authority": "native_plugin",
-      "delivered_operations": [],
+      "delivered_operations": ["capture_program_frame"],
       "remaining_operations": ["capture_source_screenshot"],
-      "dangerous_operations": ["capture_source_screenshot"],
+      "dangerous_operations": [],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/3"
     }
   ]
