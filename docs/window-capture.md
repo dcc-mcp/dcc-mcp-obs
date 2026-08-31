@@ -23,8 +23,16 @@ object fails closed with a stable public error code.
 `list_window_capture_candidates` provides a bounded, read-only recovery path
 for restart-heavy RL workloads. It requires an exact executable basename and
 optionally an exact title, returns at most 64 visible top-level windows, and
-never returns executable paths. A missing or ambiguous candidate is not
-silently selected.
+never returns executable paths. Each candidate includes visibility,
+minimized state, client dimensions, and a derived `captureReady` value. A
+missing or ambiguous candidate is not silently selected.
+
+`restore_window_capture_candidate` accepts only one exact executable basename,
+PID, HWND, and title returned by discovery. On Windows it revalidates the live
+process object and window identity, submits `SW_RESTORE` only when the window
+is minimized, and polls candidate discovery until the same physical window is
+non-minimized with a positive client area. It never accepts a path, wildcard,
+or arbitrary window command.
 
 `rebind_window_capture_source` updates one existing source in place. The caller
 must provide both the stored old PID/HWND/title identity and a fresh identity

@@ -399,6 +399,55 @@ class ObsControlBridge:
             raise BridgeError("OBS_POSTCONDITION_FAILED")
         return result
 
+    def restore_window_capture_candidate(
+        self,
+        *,
+        executable: str,
+        process_id: int,
+        window_handle: int,
+        window_title: str,
+    ) -> dict[str, object]:
+        if (
+            type(executable) is not str
+            or not 1 <= len(executable) <= 256
+            or any(separator in executable for separator in ("/", "\\", ":"))
+            or type(process_id) is not int
+            or not 1 <= process_id < 2**32
+            or type(window_handle) is not int
+            or not 1 <= window_handle < 2**63
+            or type(window_title) is not str
+            or not 1 <= len(window_title) <= 256
+        ):
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        payload: dict[str, object] = {
+            "executable": executable,
+            "processId": process_id,
+            "windowHandle": window_handle,
+            "windowTitle": window_title,
+            "capability": "window_capture",
+        }
+        deadline = self._operation_deadline()
+        accepted = self._checked("RestoreWindowCaptureCandidate", payload, deadline=deadline)
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        query = {"executable": executable, "windowTitle": window_title}
+        for attempt in range(self._postcondition_attempts):
+            readback = self._checked("ListWindowCaptureCandidates", query, deadline=deadline)
+            matches = [
+                candidate
+                for candidate in readback["candidates"]
+                if candidate.get("processId") == process_id
+                and candidate.get("windowHandle") == window_handle
+                and candidate.get("windowTitle") == window_title
+                and candidate.get("executable", "").casefold() == executable.casefold()
+            ]
+            if len(matches) == 1 and matches[0].get("captureReady") is True:
+                identity = {key: readback[key] for key in _IDENTITY_KEYS}
+                return {**identity, **matches[0], "verified": True}
+            if attempt + 1 < self._postcondition_attempts:
+                self._poll(deadline)
+        raise BridgeError("OBS_POSTCONDITION_FAILED")
+
     def get_window_capture_source(
         self,
         *,
@@ -1736,6 +1785,7 @@ class ObsControlBridge:
             "RemoveScene",
             "CreateSceneItem",
             "CreateWindowCaptureSource",
+            "RestoreWindowCaptureCandidate",
             "RebindWindowCaptureSource",
             "SetWindowCaptureMethod",
             "UpdateSceneItem",
@@ -1803,6 +1853,20 @@ class ObsControlBridge:
                         "captureMethod",
                         "bindingVerified",
                     }
+            elif request_type == "RestoreWindowCaptureCandidate":
+                allowed |= {
+                    "processId",
+                    "windowHandle",
+                    "windowTitle",
+                    "windowClass",
+                    "executable",
+                    "visible",
+                    "minimized",
+                    "clientWidth",
+                    "clientHeight",
+                    "captureReady",
+                    "capability",
+                }
             elif request_type in {"TriggerStudioModeTransition", "TriggerTransition"}:
                 allowed.add("capability")
                 if request_type == "TriggerTransition":
@@ -1867,6 +1931,28 @@ class ObsControlBridge:
                     type(response.get("sceneItemId")) is not int
                     or response["sceneItemId"] <= 0
                     or not isinstance(response.get("sceneName"), str)
+                ):
+                    raise BridgeError("OBS_RESPONSE_INVALID")
+            if request_type == "RestoreWindowCaptureCandidate":
+                candidate = {
+                    key: response[key]
+                    for key in (
+                        "processId",
+                        "windowHandle",
+                        "windowTitle",
+                        "windowClass",
+                        "executable",
+                        "visible",
+                        "minimized",
+                        "clientWidth",
+                        "clientHeight",
+                        "captureReady",
+                    )
+                    if key in response
+                }
+                if (
+                    not ObsControlBridge._valid_window_capture_candidate(candidate)
+                    or response.get("capability") != "window_capture"
                 ):
                     raise BridgeError("OBS_RESPONSE_INVALID")
             if request_type == "TriggerAllowlistedHotkey" and (
@@ -1941,6 +2027,11 @@ class ObsControlBridge:
             "windowTitle",
             "windowClass",
             "executable",
+            "visible",
+            "minimized",
+            "clientWidth",
+            "clientHeight",
+            "captureReady",
         }:
             return False
         return (
@@ -1951,6 +2042,20 @@ class ObsControlBridge:
             and all(
                 isinstance(candidate.get(key), str) and 1 <= len(candidate[key]) <= 256
                 for key in ("windowTitle", "windowClass", "executable")
+            )
+            and type(candidate.get("visible")) is bool
+            and type(candidate.get("minimized")) is bool
+            and type(candidate.get("clientWidth")) is int
+            and 0 <= candidate["clientWidth"] < 2**31
+            and type(candidate.get("clientHeight")) is int
+            and 0 <= candidate["clientHeight"] < 2**31
+            and type(candidate.get("captureReady")) is bool
+            and candidate["captureReady"]
+            is (
+                candidate["visible"]
+                and not candidate["minimized"]
+                and candidate["clientWidth"] > 0
+                and candidate["clientHeight"] > 0
             )
         )
 

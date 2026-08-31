@@ -69,6 +69,10 @@ For Windows game or application recording, use
 when stable, one exact title. Then call `create_window_capture_source` only
 with a returned PID/HWND/title identity. Use `get_window_capture_source`
 immediately before recording to revalidate the binding. If an RL host
+candidate reports `captureReady=false` because it is minimized, call
+`restore_window_capture_candidate` with that exact executable/PID/HWND/title
+and continue only after its verified readback reports a positive client area.
+If an RL host
 restarts, discover its new visible window and call
 `rebind_window_capture_source` with both the stored old identity and the fresh
 new identity; the native plugin owns the transaction and rolls back a failed
