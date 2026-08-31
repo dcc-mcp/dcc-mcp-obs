@@ -1004,19 +1004,76 @@ tools:
               items:
                 type: object
                 additionalProperties: false
-                required: [processId, windowHandle, windowTitle, windowClass, executable]
+                required: [processId, windowHandle, windowTitle, windowClass, executable, visible, minimized, clientWidth, clientHeight, captureReady]
                 properties:
                   processId: {type: integer, minimum: 1, maximum: 4294967295}
                   windowHandle: {type: integer, minimum: 1, maximum: 9223372036854775807}
                   windowTitle: {type: string, minLength: 1, maxLength: 256}
                   windowClass: {type: string, minLength: 1, maxLength: 256}
                   executable: {type: string, minLength: 1, maxLength: 256}
+                  visible: {type: boolean}
+                  minimized: {type: boolean}
+                  clientWidth: {type: integer, minimum: 0, maximum: 2147483647}
+                  clientHeight: {type: integer, minimum: 0, maximum: 2147483647}
+                  captureReady: {type: boolean}
             truncated: {type: boolean}
     execution: sync
     affinity: any
     timeout_hint_secs: 10
     call_examples: [{arguments: {executable: b1-Win64-Shipping.exe, window_title: 'b1  '}, note: Discover a fresh exact candidate after a restarted RL host window disappears.}]
     annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+  - name: restore_window_capture_candidate
+    description: Restore one exact minimized Windows capture candidate and verify a positive client area before capture.
+    source_file: scripts/restore_window_capture_candidate.py
+    input_schema:
+      type: object
+      properties:
+        executable: {type: string, minLength: 1, maxLength: 256, pattern: '^[^/\\:]+$'}
+        process_id: {type: integer, minimum: 1, maximum: 4294967295}
+        window_handle: {type: integer, minimum: 1, maximum: 9223372036854775807}
+        window_title: {type: string, minLength: 1, maxLength: 256}
+      required: [executable, process_id, window_handle, window_title]
+      additionalProperties: false
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context, postcondition]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        postcondition:
+          type: object
+          additionalProperties: false
+          required: [verified]
+          properties: {verified: {const: true}}
+        context:
+          type: object
+          additionalProperties: false
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, processId, windowHandle, windowTitle, windowClass, executable, visible, minimized, clientWidth, clientHeight, captureReady]
+          properties:
+            instanceId: {type: string, minLength: 1, maxLength: 128}
+            pluginVersion: {type: string, minLength: 1}
+            obsVersion: {type: string, minLength: 1}
+            hostPid: {type: integer, minimum: 1}
+            eventSequence: {type: integer, minimum: 0}
+            ok: {const: true}
+            processId: {type: integer, minimum: 1, maximum: 4294967295}
+            windowHandle: {type: integer, minimum: 1, maximum: 9223372036854775807}
+            windowTitle: {type: string, minLength: 1, maxLength: 256}
+            windowClass: {type: string, minLength: 1, maxLength: 256}
+            executable: {type: string, minLength: 1, maxLength: 256}
+            visible: {const: true}
+            minimized: {const: false}
+            clientWidth: {type: integer, minimum: 1, maximum: 2147483647}
+            clientHeight: {type: integer, minimum: 1, maximum: 2147483647}
+            captureReady: {const: true}
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 30
+    call_examples: [{arguments: {executable: VampireSurvivors.exe, process_id: 89468, window_handle: 2635780, window_title: Vampire Survivors}, note: Restore only the exact candidate returned by discovery when captureReady is false because it is minimized.}]
+    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
   - name: create_window_capture_source
     description: Create a Windows window-capture source from an exact PID, HWND, and title, then verify native readback.
     source_file: scripts/create_window_capture_source.py

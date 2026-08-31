@@ -13,6 +13,21 @@ class FakeWindowCaptureHost:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
         self.window_title = "The Bazaar"
+        self.window_minimized = True
+
+    def candidate(self) -> dict[str, object]:
+        return {
+            "processId": 120000,
+            "windowHandle": 220000000,
+            "windowTitle": "b1  ",
+            "windowClass": "UnrealWindow",
+            "executable": "b1-Win64-Shipping.exe",
+            "visible": True,
+            "minimized": self.window_minimized,
+            "clientWidth": 0 if self.window_minimized else 1066,
+            "clientHeight": 0 if self.window_minimized else 600,
+            "captureReady": not self.window_minimized,
+        }
 
     def vendor_request(
         self, request_type: str, data: dict[str, object], *, deadline: float | None = None
@@ -33,16 +48,16 @@ class FakeWindowCaptureHost:
                 **identity,
                 "executable": data["executable"],
                 "windowTitle": data.get("windowTitle"),
-                "candidates": [
-                    {
-                        "processId": 120000,
-                        "windowHandle": 220000000,
-                        "windowTitle": "b1  ",
-                        "windowClass": "UnrealWindow",
-                        "executable": "b1-Win64-Shipping.exe",
-                    }
-                ],
+                "candidates": [self.candidate()],
                 "truncated": False,
+            }
+        if request_type == "RestoreWindowCaptureCandidate":
+            self.window_minimized = False
+            return {
+                **identity,
+                **self.candidate(),
+                "accepted": True,
+                "capability": "window_capture",
             }
         capture = {
             "sceneName": data["sceneName"],
@@ -189,6 +204,11 @@ def test_window_capture_candidates_are_bounded_by_exact_executable_and_title() -
                 "windowTitle": "b1  ",
                 "windowClass": "UnrealWindow",
                 "executable": "b1-Win64-Shipping.exe",
+                "visible": True,
+                "minimized": True,
+                "clientWidth": 0,
+                "clientHeight": 0,
+                "captureReady": False,
             }
         ],
         "truncated": False,
@@ -200,6 +220,84 @@ def test_window_capture_candidates_are_bounded_by_exact_executable_and_title() -
             {"executable": "b1-Win64-Shipping.exe", "windowTitle": "b1  "},
         ),
     ]
+
+
+def test_minimized_window_capture_candidate_can_be_restored_by_exact_identity() -> None:
+    host = FakeWindowCaptureHost()
+    result = make_bridge(host).restore_window_capture_candidate(
+        executable="b1-Win64-Shipping.exe",
+        process_id=120000,
+        window_handle=220000000,
+        window_title="b1  ",
+    )
+
+    assert result["verified"] is True
+    assert result["captureReady"] is True
+    assert result["minimized"] is False
+    assert result["clientWidth"] == 1066
+    assert result["clientHeight"] == 600
+    assert host.calls == [
+        ("GetPluginStatus", {}),
+        (
+            "RestoreWindowCaptureCandidate",
+            {
+                "executable": "b1-Win64-Shipping.exe",
+                "processId": 120000,
+                "windowHandle": 220000000,
+                "windowTitle": "b1  ",
+                "capability": "window_capture",
+            },
+        ),
+        (
+            "ListWindowCaptureCandidates",
+            {"executable": "b1-Win64-Shipping.exe", "windowTitle": "b1  "},
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("executable", "C:/private/game.exe"),
+        ("executable", ""),
+        ("process_id", True),
+        ("process_id", 0),
+        ("window_handle", True),
+        ("window_handle", 0),
+        ("window_title", ""),
+    ],
+)
+def test_window_capture_candidate_restore_rejects_inexact_identity(
+    field: str, value: object
+) -> None:
+    kwargs: dict[str, object] = {
+        "executable": "b1-Win64-Shipping.exe",
+        "process_id": 120000,
+        "window_handle": 220000000,
+        "window_title": "b1  ",
+    }
+    kwargs[field] = value
+
+    with pytest.raises(BridgeError, match="OBS_ARGUMENT_INVALID"):
+        make_bridge(FakeWindowCaptureHost()).restore_window_capture_candidate(**kwargs)  # type: ignore[arg-type]
+
+
+def test_window_capture_candidate_state_fails_closed_on_inconsistent_readback() -> None:
+    host = FakeWindowCaptureHost()
+    original = host.vendor_request
+
+    def inconsistent(request_type, data, *, deadline=None):
+        response = original(request_type, data, deadline=deadline)
+        if request_type == "ListWindowCaptureCandidates":
+            response["candidates"][0]["captureReady"] = True
+        return response
+
+    host.vendor_request = inconsistent  # type: ignore[method-assign]
+    with pytest.raises(BridgeError, match="OBS_RESPONSE_INVALID"):
+        make_bridge(host).list_window_capture_candidates(
+            executable="b1-Win64-Shipping.exe",
+            window_title="b1  ",
+        )
 
 
 def test_window_capture_rebind_rejects_untyped_native_response_fields() -> None:
@@ -298,9 +396,11 @@ def test_window_capture_vendor_surface_and_skill_are_bounded() -> None:
     assert "CreateWindowCaptureSource" in VENDOR_REQUESTS
     assert "GetWindowCaptureSource" in VENDOR_REQUESTS
     assert "ListWindowCaptureCandidates" in VENDOR_REQUESTS
+    assert "RestoreWindowCaptureCandidate" in VENDOR_REQUESTS
     assert "RebindWindowCaptureSource" in VENDOR_REQUESTS
     assert "SetWindowCaptureMethod" in VENDOR_REQUESTS
     assert "CreateWindowCaptureSource" in MUTATING_VENDOR_REQUESTS
+    assert "RestoreWindowCaptureCandidate" in MUTATING_VENDOR_REQUESTS
     assert "RebindWindowCaptureSource" in MUTATING_VENDOR_REQUESTS
     assert "SetWindowCaptureMethod" in MUTATING_VENDOR_REQUESTS
     assert "GetWindowCaptureSource" not in MUTATING_VENDOR_REQUESTS
@@ -362,6 +462,22 @@ def test_window_capture_vendor_surface_and_skill_are_bounded() -> None:
         "open_world_hint": False,
         "deferred_hint": False,
     }
+    restore = by_name["restore_window_capture_candidate"]
+    assert restore["source_file"] == "scripts/restore_window_capture_candidate.py"
+    assert set(restore["input_schema"]["required"]) == {
+        "executable",
+        "process_id",
+        "window_handle",
+        "window_title",
+    }
+    assert restore["input_schema"]["additionalProperties"] is False
+    assert restore["annotations"] == {
+        "read_only_hint": False,
+        "destructive_hint": True,
+        "idempotent_hint": True,
+        "open_world_hint": False,
+        "deferred_hint": False,
+    }
 
 
 def test_native_window_capture_contract_is_windows_only_and_revalidates_identity() -> None:
@@ -403,3 +519,19 @@ def test_native_window_candidate_discovery_is_visible_filtered_and_bounded() -> 
     assert "kMaxWindowCaptureCandidates" in source
     assert '"candidates"' in source
     assert '"truncated"' in source
+    assert "IsIconic" in source
+    assert "GetClientRect" in source
+    assert '"captureReady"' in source
+
+
+def test_native_window_candidate_restore_is_exact_and_ui_gated() -> None:
+    source = (Path(__file__).parents[1] / "native/src/plugin-main.cpp").read_text(encoding="utf-8")
+
+    assert "case UiOperation::RestoreWindowCaptureCandidate" in source
+    assert "state->operation == UiOperation::RestoreWindowCaptureCandidate" in source
+    assert 'request == "RestoreWindowCaptureCandidate"' in source
+    assert "validate_exact_window" in source
+    assert "exact_window_is_still_live" in source
+    assert "ShowWindowAsync" in source
+    assert "SW_RESTORE" in source
+    assert "_stricmp(actual.executable.c_str(), state->window_executable_filter.c_str())" in source

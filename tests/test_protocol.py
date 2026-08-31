@@ -272,6 +272,7 @@ def test_transport_allowlist_is_exactly_the_typed_public_requests() -> None:
         "CreateWindowCaptureSource",
         "GetWindowCaptureSource",
         "ListWindowCaptureCandidates",
+        "RestoreWindowCaptureCandidate",
         "RebindWindowCaptureSource",
         "SetWindowCaptureMethod",
         "UpdateSceneItem",
