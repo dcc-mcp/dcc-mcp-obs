@@ -106,7 +106,8 @@ def test_agent_input_overlay_is_a_bundled_semantic_obs_source_without_global_hoo
 
     assert 'kAgentInputOverlaySourceId = "dcc_mcp_agent_input_overlay"' in header
     assert "obs_register_source" in renderer
-    assert "OBS_SOURCE_VIDEO | OBS_SOURCE_CUSTOM_DRAW" in renderer
+    assert "info.output_flags = OBS_SOURCE_VIDEO;" in renderer
+    assert "OBS_SOURCE_CUSTOM_DRAW" not in renderer
     assert "QPainter" in renderer and "QImage" in renderer
     assert "!obs_get_video_info(&video)" in renderer
     assert 'set_error(result, "OBS_INSTANCE_NOT_READY")' in renderer

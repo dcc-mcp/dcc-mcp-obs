@@ -196,7 +196,7 @@ obs_source_info overlay_source_info()
 	obs_source_info info{};
 	info.id = kAgentInputOverlaySourceId;
 	info.type = OBS_SOURCE_TYPE_INPUT;
-	info.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_CUSTOM_DRAW;
+	info.output_flags = OBS_SOURCE_VIDEO;
 	info.get_name = source_name;
 	info.create = source_create;
 	info.destroy = source_destroy;
