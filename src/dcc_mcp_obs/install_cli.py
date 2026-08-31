@@ -383,6 +383,36 @@ def _legacy_windows_user_plugin_dir() -> Path | None:
     return Path(app_data) / "obs-studio" / "plugins" / "dcc-mcp-obs"
 
 
+def _windows_plugin_discovery_root(target: Path) -> Path | None:
+    if sys.platform != "win32":
+        return None
+    canonical_target = Path(os.path.abspath(default_plugin_dir().expanduser()))
+    if target != canonical_target:
+        return None
+    return canonical_target.parent
+
+
+def _require_no_duplicate_windows_plugin(target: Path) -> None:
+    plugin_root = _windows_plugin_discovery_root(target)
+    if plugin_root is None:
+        return
+    try:
+        with os.scandir(plugin_root) as entries:
+            siblings = [Path(entry.path) for entry in entries]
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise InstallError(
+            "OBS_DUPLICATE_PLUGIN_CHECK_FAILED", "preflight", EXIT_PREFLIGHT
+        ) from exc
+    for sibling_path in siblings:
+        if sibling_path == target:
+            continue
+        duplicate = sibling_path / "bin" / "64bit" / "dcc-mcp-obs.dll"
+        if os.path.lexists(duplicate):
+            raise InstallError("OBS_DUPLICATE_PLUGIN_INSTALL", "preflight", EXIT_PREFLIGHT)
+
+
 def _verified_legacy_windows_user_plugin(target: Path) -> Path | None:
     canonical_target = Path(os.path.abspath(default_plugin_dir().expanduser()))
     legacy_target = _legacy_windows_user_plugin_dir()
@@ -419,6 +449,8 @@ def run(argv: Sequence[str]) -> tuple[int, dict[str, Any]]:
     steps: list[dict[str, str]] = []
     try:
         _require_safe_target_path(target)
+        if args.command in {"install", "upgrade", "status", "verify"}:
+            _require_no_duplicate_windows_plugin(target)
         if args.command in {"install", "upgrade"}:
             if args.plugin_archive is None or args.sha256 is None:
                 raise InstallError("OBS_BUNDLE_REQUIRED", "preflight", EXIT_PREFLIGHT)

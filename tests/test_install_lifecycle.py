@@ -142,6 +142,39 @@ def test_windows_default_install_rejects_unmanaged_legacy_user_plugin_before_mut
     assert not canonical_target.exists()
 
 
+def test_windows_default_install_rejects_duplicate_plugin_sibling_before_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plugin_root = tmp_path / "program-data" / "obs-studio" / "plugins"
+    canonical_target = plugin_root / "dcc-mcp-obs"
+    duplicate_dll = plugin_root / "dcc-mcp-obs.drift-backup" / "bin" / "64bit" / "dcc-mcp-obs.dll"
+    duplicate_dll.parent.mkdir(parents=True)
+    duplicate_dll.write_bytes(b"drifted-plugin-binary")
+    monkeypatch.setattr(install_cli, "default_plugin_dir", lambda: canonical_target)
+    monkeypatch.setattr(install_cli, "_windows_plugin_discovery_root", lambda _target: plugin_root)
+    monkeypatch.setattr(install_cli, "_legacy_windows_user_plugin_dir", lambda: None)
+    archive, digest, _payload = _bundle(
+        tmp_path,
+        target="bin/64bit/dcc-mcp-obs.dll",
+        name="current-plugin.zip",
+    )
+
+    code, report = run(
+        [
+            "install",
+            "--plugin-archive",
+            str(archive),
+            "--sha256",
+            digest,
+        ]
+    )
+
+    assert code == 10
+    assert report["verify"]["failure_reason"] == "OBS_DUPLICATE_PLUGIN_INSTALL"
+    assert duplicate_dll.read_bytes() == b"drifted-plugin-binary"
+    assert not canonical_target.exists()
+
+
 def test_full_install_status_verify_uninstall_lifecycle(tmp_path: Path) -> None:
     archive, digest, payload = _bundle(tmp_path)
     target = tmp_path / "installed"
