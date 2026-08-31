@@ -78,6 +78,7 @@ VENDOR_REQUESTS = frozenset(
         "TriggerAllowlistedHotkey",
         "CaptureScreenshot",
         "CaptureSourceScreenshot",
+        "CaptureProgramFrame",
     }
 )
 MUTATING_VENDOR_REQUESTS = frozenset(
