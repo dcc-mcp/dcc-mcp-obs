@@ -3,12 +3,17 @@
 #include <util/platform.h>
 
 #include <QMetaObject>
+#include <QMainWindow>
+#include <QDesktopServices>
+#include <QMessageBox>
+#include <QUrl>
 #include <QWidget>
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <cstdint>
 #include <cstring>
 #include <cmath>
@@ -18,6 +23,7 @@
 #include <random>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #ifdef _WIN32
@@ -29,6 +35,7 @@
 
 #include "obs-websocket-api.h"
 #include "agent-input-overlay.hpp"
+#include "dcc-mcp-menu.hpp"
 #include "ui-task-gate.hpp"
 
 OBS_DECLARE_MODULE()
@@ -76,6 +83,124 @@ constexpr const char *kAllowlistedHotkeys[] = {
 obs_websocket_vendor g_vendor = nullptr;
 std::atomic<uint64_t> g_event_sequence{0};
 std::string g_instance_id;
+std::atomic<bool> g_plugin_loaded{false};
+std::unique_ptr<dcc_mcp_obs::DccMcpMenu> g_dcc_mcp_menu;
+
+QMainWindow *obs_main_window()
+{
+	return static_cast<QMainWindow *>(obs_frontend_get_main_window());
+}
+
+void show_dcc_mcp_server_status()
+{
+	dcc_mcp_obs::DccMcpMenuStatus status;
+	status.plugin_version = kPluginVersion;
+	status.obs_version = obs_get_version_string();
+	status.native_bridge_ready = g_vendor != nullptr;
+	status.recording_active = obs_frontend_recording_active();
+	status.streaming_active = obs_frontend_streaming_active();
+	status.replay_buffer_active = obs_frontend_replay_buffer_active();
+	status.virtual_camera_active = obs_frontend_virtualcam_active();
+	if (auto *scene = obs_frontend_get_current_scene()) {
+		const char *name = obs_source_get_name(scene);
+		if (name != nullptr)
+			status.scene_name = name;
+		obs_source_release(scene);
+	}
+	QMessageBox::information(obs_main_window(), QStringLiteral("DCC-MCP OBS — Server Status"),
+				 QString::fromStdString(dcc_mcp_obs::format_dcc_mcp_menu_status(status)));
+}
+
+void add_agent_input_overlay_from_menu()
+{
+	auto *scene = obs_frontend_get_current_scene();
+	if (scene == nullptr) {
+		QMessageBox::warning(obs_main_window(), QStringLiteral("DCC-MCP OBS"),
+				     QStringLiteral("No current OBS scene is available."));
+		return;
+	}
+	const char *name = obs_source_get_name(scene);
+	const std::string scene_name = name != nullptr ? name : "";
+	obs_source_release(scene);
+	if (scene_name.empty()) {
+		QMessageBox::warning(obs_main_window(), QStringLiteral("DCC-MCP OBS"),
+				     QStringLiteral("The current OBS scene has no stable name."));
+		return;
+	}
+	auto *result = dcc_mcp_obs::create_agent_input_overlay(
+		scene_name, dcc_mcp_obs::kDefaultAgentInputOverlaySourceName, "bottom_right");
+	const bool accepted = result != nullptr && obs_data_get_bool(result, "accepted");
+	const QString error = result != nullptr ? QString::fromUtf8(obs_data_get_string(result, "errorCode"))
+						: QStringLiteral("OBS_REQUEST_FAILED");
+	if (result != nullptr)
+		obs_data_release(result);
+	if (!accepted) {
+		QMessageBox::warning(obs_main_window(), QStringLiteral("DCC-MCP OBS"),
+				     QStringLiteral("Could not add the Agent Input Overlay: %1")
+					     .arg(error.isEmpty() ? QStringLiteral("OBS_REQUEST_FAILED") : error));
+		return;
+	}
+	QMessageBox::information(obs_main_window(), QStringLiteral("DCC-MCP OBS"),
+				 QStringLiteral("Agent Input Overlay is attached to scene “%1”.")
+					 .arg(QString::fromStdString(scene_name)));
+}
+
+int gateway_admin_port()
+{
+	const char *raw = std::getenv("DCC_MCP_GATEWAY_PORT");
+	if (raw == nullptr || *raw == '\0')
+		return 9765;
+	char *end = nullptr;
+	const long parsed = std::strtol(raw, &end, 10);
+	return end != raw && *end == '\0' && parsed > 0 && parsed <= 65535 ? static_cast<int>(parsed) : 9765;
+}
+
+void open_dcc_mcp_gateway_admin()
+{
+	const QUrl url(QStringLiteral("http://127.0.0.1:%1/admin?panel=instances").arg(gateway_admin_port()));
+	if (!QDesktopServices::openUrl(url))
+		QMessageBox::warning(obs_main_window(), QStringLiteral("DCC-MCP OBS"),
+				     QStringLiteral("The Gateway Admin URL could not be opened."));
+}
+
+void show_dcc_mcp_about()
+{
+	QMessageBox::information(
+		obs_main_window(), QStringLiteral("About DCC-MCP OBS"),
+		QStringLiteral(
+			"DCC-MCP OBS %1\n\nNative typed OBS control, Agent input presentation, and exact lifecycle verification.")
+			.arg(QString::fromUtf8(kPluginVersion)));
+}
+
+void install_dcc_mcp_menu(void *)
+{
+	if (!g_plugin_loaded.load())
+		return;
+	auto *main_window = obs_main_window();
+	if (main_window == nullptr) {
+		blog(LOG_WARNING, "dcc-mcp-obs could not find the OBS main window for menu registration");
+		return;
+	}
+	if (g_dcc_mcp_menu == nullptr) {
+		dcc_mcp_obs::DccMcpMenuCallbacks callbacks{
+			show_dcc_mcp_server_status,
+			add_agent_input_overlay_from_menu,
+			open_dcc_mcp_gateway_admin,
+			show_dcc_mcp_about,
+		};
+		g_dcc_mcp_menu = std::make_unique<dcc_mcp_obs::DccMcpMenu>(main_window, std::move(callbacks));
+	}
+	if (!g_dcc_mcp_menu->install())
+		blog(LOG_WARNING, "dcc-mcp-obs could not register the DCC MCP menu");
+}
+
+void remove_dcc_mcp_menu(void *)
+{
+	if (g_dcc_mcp_menu == nullptr)
+		return;
+	g_dcc_mcp_menu->remove();
+	g_dcc_mcp_menu.reset();
+}
 
 enum class UiOperation {
 	Invalid,
@@ -2864,6 +2989,7 @@ const char *obs_module_description(void)
 
 bool obs_module_load(void)
 {
+	g_plugin_loaded.store(true);
 	g_instance_id = make_instance_id();
 	dcc_mcp_obs::register_agent_input_overlay_source();
 	obs_frontend_add_event_callback(frontend_event, nullptr);
@@ -2873,6 +2999,7 @@ bool obs_module_load(void)
 
 void obs_module_post_load(void)
 {
+	obs_queue_task(OBS_TASK_UI, install_dcc_mcp_menu, nullptr, true);
 	g_vendor = obs_websocket_register_vendor(kVendorName);
 	if (g_vendor == nullptr) {
 		blog(LOG_ERROR, "dcc-mcp-obs requires obs-websocket API v3");
@@ -2884,6 +3011,8 @@ void obs_module_post_load(void)
 
 void obs_module_unload(void)
 {
+	g_plugin_loaded.store(false);
+	obs_queue_task(OBS_TASK_UI, remove_dcc_mcp_menu, nullptr, true);
 	obs_frontend_remove_event_callback(frontend_event, nullptr);
 	if (g_vendor != nullptr) {
 		for (const char *request : kRequests)

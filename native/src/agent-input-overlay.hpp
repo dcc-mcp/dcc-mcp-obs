@@ -9,6 +9,7 @@
 namespace dcc_mcp_obs {
 
 inline constexpr const char *kAgentInputOverlaySourceId = "dcc_mcp_agent_input_overlay";
+inline constexpr const char *kDefaultAgentInputOverlaySourceName = "DCC-MCP Agent Input";
 
 struct AgentInputActivity {
 	std::string event_kind;

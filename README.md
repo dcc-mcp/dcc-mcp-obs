@@ -21,6 +21,8 @@ script or raw WebSocket tool.
 - Exact Windows PID/HWND window-capture source creation and readback
   preview/program operations with verified readback
 - A built-in privacy-safe Agent keyboard/mouse activity overlay source
+- A native top-level `DCC MCP` menu for status, overlay setup, Gateway Admin,
+  and plugin information
 - Recording status
 - Start, stop, pause, and resume recording
 - A separate typed status readback after every mutation
@@ -105,6 +107,13 @@ mouse button, wheel direction, or typing count. It never captures global input
 or accepts arbitrary text. This keeps code visible through a normal scene
 source while the overlay explains the action immediately before the Agent runs
 it. See the [Agent input overlay contract](docs/agent-input-overlay.md).
+
+The native plugin adds a top-level `DCC MCP` menu to OBS. `Server Status...`
+shows the exact plugin and OBS versions, bridge readiness, active outputs, and
+current scene. `Add Agent Input Overlay` attaches the shared built-in source to
+the current scene. `Open Gateway Admin` opens only the loopback Gateway URL
+(`127.0.0.1`, port 9765 by default or a valid `DCC_MCP_GATEWAY_PORT`). The menu
+is registered idempotently on OBS's UI thread and removed during plugin unload.
 
 Use `request_graceful_shutdown` instead of terminating the OBS process. The
 native plugin refuses the request while recording, streaming, replay buffer,

@@ -17,6 +17,7 @@ OBS WebSocket 只承担鉴权传输，不提供不受限制的 raw request 或�
 - 按精确 PID、HWND 和标题创建并回读 Windows 窗口捕获 source
 - 类型化场景切换、场景项 CRUD、转场和 Studio Mode 预览/节目操作
 - 插件内置、隐私安全的 Agent 键盘/鼠标活动提示 source
+- OBS 顶层原生 `DCC MCP` 菜单，提供状态、叠加层、Gateway Admin 和插件信息
 - 录制状态
 - 开始、停止、暂停、继续录制
 - 每次写操作后独立的类型化状态读回
@@ -88,6 +89,12 @@ dcc-mcp-obs --host-pid <obs-pid>
 `emit_agent_input_activity`。提示只接受白名单快捷键、鼠标按键、滚轮方向或打字
 字符数；不会监听全局输入，也不接收任意文本。代码仍由正常的窗口/屏幕 source
 展示，Agent 在运行代码前显示对应的语义提示。详见[内置 Agent 输入提示](../agent-input-overlay.md)。
+
+原生插件会在 OBS 顶层菜单栏注册 `DCC MCP`。`Server Status...` 展示精确的
+插件/OBS 版本、原生桥接就绪状态、活动输出和当前场景；`Add Agent Input Overlay`
+把共享的内置提示 source 挂到当前场景；`Open Gateway Admin` 只打开 loopback
+Gateway 地址（默认 `127.0.0.1:9765`，也可使用合法的 `DCC_MCP_GATEWAY_PORT`）。
+菜单在 OBS UI 线程幂等注册，并在插件卸载时清理。
 
 关闭 OBS 时使用 `request_graceful_shutdown`，不要强制结束进程。录制、直播、
 回放缓冲或虚拟摄像头仍活动时，原生插件会拒绝退出；全部停止后仅返回“已接受并
