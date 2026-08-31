@@ -6,6 +6,7 @@ Native OBS Studio control product: https://github.com/dcc-mcp/dcc-mcp-obs
   inspection, pause/resume, 录屏, and 录制视频 requests.
 - Typed scene switching, scene-item CRUD, transitions, and Studio Mode preview/program operations are available through the native contract.
 - The built-in DCC-MCP Agent Input source can be shared across demo scenes and displays only Agent-emitted shortcut, mouse, wheel, or typing-count cues; it never captures global input or arbitrary text.
+- The native plugin adds an idempotent top-level DCC MCP menu for exact status, attaching the Agent Input source, opening the loopback Gateway Admin, and plugin information.
 - Search and load the skill before calling tools.
 - Native plugin/WebSocket tools are authoritative; no raw request or script tool exists.
 - Every state mutation requires typed readback and exact instance identity.

@@ -18,6 +18,9 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::libobs OBS::obs-frontend-api Qt6::Widgets)
 target_compile_features(${CMAKE_PROJECT_NAME} PRIVATE cxx_std_17)
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE native/vendor)
-target_sources(${CMAKE_PROJECT_NAME} PRIVATE native/src/agent-input-overlay.cpp native/src/plugin-main.cpp)
+target_sources(
+  ${CMAKE_PROJECT_NAME}
+  PRIVATE native/src/agent-input-overlay.cpp native/src/dcc-mcp-menu.cpp native/src/plugin-main.cpp
+)
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})
