@@ -2,9 +2,10 @@
 
 ## 安全模型
 
-Python 包与原生插件是两个独立 Release artifact。只安装与 Python 版本来自同一个
-GitHub Release 的原生包，并把公布的 SHA-256 传给安装器。bundle manifest 会绑定
-产品、版本、平台、每个目标路径和每个文件哈希。
+推荐的 standalone 包同时包含 sidecar 私有 Python 运行时和精确匹配的原生插件
+Release artifact。manifest 会绑定产品、版本、平台、每个文件路径、大小和 SHA-256；
+发布器还会验证内嵌原生插件与单独发布的原生 artifact 字节完全一致。用户无需安装
+系统 Python，也无需单独安装 `dcc-mcp-core`。
 
 安装器拒绝路径穿越、链接、多链接 receipt、平台不匹配、成员漂移和 Windows
 非可移植别名。receipt 会记录精确的受管理文件路径；verify 忽略无关条目，但任何
@@ -13,6 +14,15 @@ GitHub Release 的原生包，并把公布的 SHA-256 传给安装器。bundle m
 恢复此前由 receipt 管理的安装。
 
 ## 命令
+
+standalone Release 包：
+
+```console
+dcc-mcp-obs install-bundled
+dcc-mcp-obs upgrade-bundled
+```
+
+可选的 PyPI/源码安装：
 
 ```console
 dcc-mcp-obs-install install --plugin-archive <bundle> --sha256 <digest>
@@ -28,6 +38,10 @@ dcc-mcp-obs-install uninstall
 文件安装结果为 `requires_restart`，仅文件层的 status/verify 结果为 `partial`；
 在 sidecar 观察到精确的真实 OBS 插件会话前，两者都保持
 `verify.directly_usable=false` 和 `LIVE_OBS_VERIFICATION_REQUIRED`。
+
+`install-bundled` 与 `upgrade-bundled` 会读取同目录、由 Release 绑定的
+`dcc-mcp-obs-plugin.zip`，再把 manifest 中的 digest 传给同一份 Install SOP
+实现，不会形成第二套安装逻辑。
 
 默认插件目录遵循 OBS 的平台布局。Windows 使用
 `%PROGRAMDATA%\obs-studio\plugins\dcc-mcp-obs`；macOS 与 Linux 仍使用当前用户的

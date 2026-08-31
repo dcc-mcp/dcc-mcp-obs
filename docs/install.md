@@ -2,10 +2,12 @@
 
 ## Security model
 
-The Python package and native plugin are separate release artifacts. Install
-only a native bundle from the same GitHub Release as the Python version, and
-pass its published SHA-256 to the installer. The bundle contains a manifest
-that binds product, version, platform, every target path, and every file hash.
+The recommended standalone archive contains the sidecar's private Python
+runtime and the exact native plugin release artifact. Its manifest binds the
+product, version, platform, every file path, size, and SHA-256. The release
+publisher also verifies that the nested native plugin is byte-identical to the
+separately published native artifact. No system Python or separately installed
+`dcc-mcp-core` is required.
 
 The installer rejects path traversal, links, multi-link receipts, mismatched
 platforms, member drift, and non-portable Windows aliases. The receipt records
@@ -16,6 +18,15 @@ managed directory only when it is empty. Files are staged beside the target,
 and a failed publication restores the prior managed installation.
 
 ## Commands
+
+Standalone release bundle:
+
+```console
+dcc-mcp-obs install-bundled
+dcc-mcp-obs upgrade-bundled
+```
+
+Optional PyPI/source installation:
 
 ```console
 dcc-mcp-obs-install install --plugin-archive <bundle> --sha256 <digest>
@@ -33,6 +44,10 @@ File installation returns `requires_restart`; file-only status/verify returns
 `partial`. Both keep `verify.directly_usable=false` with
 `LIVE_OBS_VERIFICATION_REQUIRED` until an exact live OBS plugin session is
 observed through the sidecar.
+
+`install-bundled` and `upgrade-bundled` resolve the adjacent, release-bound
+`dcc-mcp-obs-plugin.zip` and pass its manifest digest into the same Install SOP
+implementation. They do not introduce a second installation mechanism.
 
 The default plugin directory follows the OBS platform layout. On Windows it is
 `%PROGRAMDATA%\obs-studio\plugins\dcc-mcp-obs`; on macOS and Linux it remains

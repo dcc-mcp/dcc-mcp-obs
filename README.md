@@ -5,8 +5,9 @@ Native, typed OBS Studio control for the DCC-MCP ecosystem.
 This product is an OBS plugin plus a DCC-MCP sidecar. The C++ plugin runs
 inside the exact OBS process, owns host lifecycle and UI-thread dispatch, and
 registers bounded vendor requests through the official OBS WebSocket 5.x API.
-The Python sidecar exposes those contracts through MCP, the Gateway, an
-Install SOP v1 CLI, and a bundled Agent skill.
+The out-of-process sidecar exposes those contracts through MCP, the Gateway,
+an Install SOP v1 CLI, and a bundled Agent skill. Release standalone bundles
+carry a private Python runtime; they do not require a system Python install.
 
 OBS WebSocket is the authenticated transport. It is not used as an
 unrestricted request escape hatch, and this product exposes no arbitrary
@@ -45,14 +46,25 @@ as shipped tools until their typed contracts land.
 ## Requirements
 
 - OBS Studio 28 or newer with OBS WebSocket 5.x enabled
-- Python 3.10 or newer
-- `dcc-mcp-core>=0.20.14,<1.0.0`
-- The matching native plugin package for Windows, macOS, or Linux
+- A matching Windows, macOS, or Linux standalone release bundle
+
+Python 3.10+ and `dcc-mcp-core>=0.20.14,<1.0.0` are required only for the
+optional PyPI/source installation path. pip resolves Core automatically.
 
 ## Install
 
-Install the Python control plane, then install a release-native plugin bundle
-whose SHA-256 digest you obtained from the same release:
+Download and extract the matching `*-standalone` archive from the GitHub
+Release. It contains the sidecar, its private runtime, and the exact native
+plugin bundle. Close OBS, then run:
+
+```console
+dcc-mcp-obs.exe install-bundled
+dcc-mcp-obs.exe --host-pid <obs-pid>
+```
+
+On macOS and Linux, use `./dcc-mcp-obs` instead of the `.exe` name. For
+developers and users who intentionally prefer the Python package, the existing
+installation path remains supported:
 
 ```console
 python -m pip install dcc-mcp-obs
@@ -62,7 +74,7 @@ dcc-mcp-obs-install install \
 dcc-mcp-obs-install verify
 ```
 
-The installer emits one Install SOP v1 JSON object. `--dry-run` performs bundle
+Both installer paths emit one Install SOP v1 JSON object. `--dry-run` performs bundle
 and ownership preflight without changing the OBS plugin directory. See
 [installation details](docs/install.md).
 
@@ -83,7 +95,8 @@ The first release accepts only `ws://127.0.0.1:<port>` and defaults to port
 4455. A password is never returned in tool results, receipts, public errors, or
 logs. Use `DCC_MCP_OBS_WEBSOCKET_URL` only to select another loopback port.
 
-Run the sidecar against one exact OBS process:
+Run the sidecar against one exact OBS process. Use the standalone executable
+shown above, or this command for a PyPI installation:
 
 ```console
 dcc-mcp-obs --host-pid <obs-pid>

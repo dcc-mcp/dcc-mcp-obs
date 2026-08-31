@@ -98,6 +98,47 @@ jobs:
           "$RUNNER_TEMP/obs-wheel-smoke/bin/python" \
             "$GITHUB_WORKSPACE/tests/verify_installed_skill_contract.py"
 
+  standalone:
+    name: Standalone / ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            platform: windows
+            executable: dist/standalone/dcc-mcp-obs.exe
+          - os: macos-15
+            platform: macos
+            executable: dist/standalone/dcc-mcp-obs
+          - os: ubuntu-24.04
+            platform: linux
+            executable: dist/standalone/dcc-mcp-obs
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        with:
+          python-version: "3.12"
+      - name: Build self-contained sidecar
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check pyoxidizer==0.24.0
+          rustc --version
+          python tools/build_standalone.py --platform '${{ matrix.platform }}'
+      - name: Smoke standalone entrypoints
+        shell: bash
+        run: |
+          '${{ matrix.executable }}' --version
+          '${{ matrix.executable }}' install --help
+          test "$('${{ matrix.executable }}' tools/standalone_skill_smoke.py \
+            --message standalone)" = '{"message":"standalone"}'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: standalone-${{ matrix.platform }}
+          path: dist/dcc-mcp-obs-*-standalone.*
+          if-no-files-found: error
+          retention-days: 7
+
   native:
     name: Native plugin / ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
