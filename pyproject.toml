@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dcc-mcp-obs"
-version = "1.1.0" # x-release-please-version
+version = "1.2.0" # x-release-please-version
 description = "Native OBS Studio control for the DCC-MCP ecosystem"
 readme = "README.md"
 license = { text = "GPL-2.0-or-later" }

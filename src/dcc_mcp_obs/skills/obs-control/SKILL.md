@@ -7,7 +7,7 @@ metadata:
   dcc-mcp:
     dcc: obs
     layer: domain
-    version: "1.1.0"  # x-release-please-version
+    version: "1.2.0"  # x-release-please-version
     tags: [obs, lifecycle, graceful-shutdown, profiles, scene-collections, scenes, scene-items, sources, inputs, properties, filters, audio, media, window-capture, agent-input-overlay, keyboard-activity, mouse-activity, transitions, studio-mode, recording, streaming, replay-buffer, virtual-camera, allowlisted-hotkeys, screenshots, outputs]
     search-hint: "OBS Open Broadcaster Software lifecycle graceful shutdown exit close profiles scene collections scenes scene graph scene items sources inputs properties filters audio media transitions Studio Mode preview program hotkeys screenshots operator status recording streaming replay buffer virtual camera outputs record video pause resume Agent input overlay keyboard mouse activity keystroke display typing count 录屏 录制视频 直播 回放 缓冲 虚拟摄像头 配置文件 场景集合 场景图 场景项 source 输入 属性 滤镜 音频 媒体 转场 导播台 预览 节目 快捷键 按键展示 键盘 鼠标 输入提示 打字计数 截图 输出 优雅退出 关闭"
     tools: tools.yaml
