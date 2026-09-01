@@ -38,7 +38,7 @@
   },
   "name": "dcc-mcp-obs",
   "displayName": "DCC-MCP OBS",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "Long Hao",
   "website": "https://github.com/dcc-mcp/dcc-mcp-obs",
   "email": "hal.long@outlook.com"
