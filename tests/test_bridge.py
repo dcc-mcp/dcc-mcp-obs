@@ -174,6 +174,9 @@ def test_create_agent_input_overlay_requires_separate_scene_bound_readback() -> 
         "sourceKind": "dcc_mcp_agent_input_overlay",
         "theme": "dcc_mcp_dark",
         "anchor": "bottom_right",
+        "opacity": 78,
+        "margin": 48,
+        "agentId": "agent",
         "active": False,
         "activitySequence": 0,
         "eventKind": "none",
@@ -219,6 +222,82 @@ def test_create_agent_input_overlay_requires_separate_scene_bound_readback() -> 
     }
 
 
+def test_set_agent_input_overlay_layout_verifies_safe_anchor_opacity_and_margin() -> None:
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {**IDENTITY, "accepted": True, "eventSequence": 8},
+            {
+                **IDENTITY,
+                "sceneName": "RL - Game 1",
+                "sceneItemId": 42,
+                "sourceName": "DCC-MCP Agent Input - trainer-1",
+                "sourceKind": "dcc_mcp_agent_input_overlay",
+                "theme": "dcc_mcp_dark",
+                "anchor": "top_left",
+                "opacity": 55,
+                "margin": 32,
+                "agentId": "trainer-1",
+                "active": False,
+                "activitySequence": 0,
+                "eventKind": "none",
+                "keysCsv": "",
+                "mouseButton": "none",
+                "wheelDirection": "none",
+                "characterCount": 0,
+                "cueLabel": "",
+                "durationMs": 0,
+                "remainingMs": 0,
+                "eventSequence": 9,
+            },
+        ]
+    )
+    bridge = ObsControlBridge(transport, expected_pid=4242)
+
+    result = bridge.set_agent_input_overlay_layout(
+        scene_name="RL - Game 1",
+        source_name="DCC-MCP Agent Input - trainer-1",
+        anchor="top_left",
+        opacity=55,
+        margin=32,
+    )
+
+    assert result["verified"] is True
+    assert result["anchor"] == "top_left"
+    assert result["opacity"] == 55
+    assert result["margin"] == 32
+    assert transport.requests[1][0] == "SetAgentInputOverlayLayout"
+    assert transport.requests[1][1] == {
+        "sceneName": "RL - Game 1",
+        "sourceName": "DCC-MCP Agent Input - trainer-1",
+        "anchor": "top_left",
+        "opacity": 55,
+        "margin": 32,
+        "capability": "agent_input_overlay",
+    }
+
+
+@pytest.mark.parametrize(
+    "layout",
+    [
+        {"anchor": "center", "opacity": 55, "margin": 32},
+        {"anchor": "top_left", "opacity": 19, "margin": 32},
+        {"anchor": "top_left", "opacity": 101, "margin": 32},
+        {"anchor": "top_left", "opacity": 55, "margin": 7},
+        {"anchor": "top_left", "opacity": 55, "margin": 161},
+    ],
+)
+def test_agent_input_overlay_layout_rejects_unsafe_values(layout: dict[str, object]) -> None:
+    bridge = ObsControlBridge(FakeTransport([{**IDENTITY, "ready": True}]), expected_pid=4242)
+
+    with pytest.raises(BridgeError, match="OBS_ARGUMENT_INVALID"):
+        bridge.set_agent_input_overlay_layout(
+            scene_name="RL - Game 1",
+            source_name="DCC-MCP Agent Input - trainer-1",
+            **layout,
+        )
+
+
 def test_emit_agent_shortcut_uses_semantic_keys_and_exact_activity_readback() -> None:
     transport = FakeTransport(
         [
@@ -237,6 +316,9 @@ def test_emit_agent_shortcut_uses_semantic_keys_and_exact_activity_readback() ->
                 "sourceKind": "dcc_mcp_agent_input_overlay",
                 "theme": "dcc_mcp_dark",
                 "anchor": "bottom_right",
+                "opacity": 78,
+                "margin": 48,
+                "agentId": "trainer-1",
                 "active": True,
                 "activitySequence": 7,
                 "eventKind": "shortcut",
@@ -257,6 +339,7 @@ def test_emit_agent_shortcut_uses_semantic_keys_and_exact_activity_readback() ->
         scene_name="RL - Game 1",
         event_kind="shortcut",
         keys=["ctrl", "shift", "r"],
+        agent_id="trainer-1",
     )
 
     assert result["verified"] is True
@@ -270,6 +353,7 @@ def test_emit_agent_shortcut_uses_semantic_keys_and_exact_activity_readback() ->
         "wheelDirection": "none",
         "characterCount": 0,
         "durationMs": 1600,
+        "agentId": "trainer-1",
         "capability": "agent_input_overlay",
     }
 
@@ -294,6 +378,9 @@ def test_agent_input_activity_requires_exact_semantic_readback(
         "sourceKind": "dcc_mcp_agent_input_overlay",
         "theme": "dcc_mcp_dark",
         "anchor": "bottom_right",
+        "opacity": 78,
+        "margin": 48,
+        "agentId": "agent",
         "active": True,
         "activitySequence": 7,
         "eventKind": event_kind,

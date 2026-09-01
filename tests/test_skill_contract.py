@@ -85,6 +85,7 @@ def test_agent_input_overlay_tools_expose_only_semantic_privacy_safe_activity() 
     assert {
         "create_agent_input_overlay",
         "get_agent_input_overlay",
+        "set_agent_input_overlay_layout",
         "emit_agent_input_activity",
         "clear_agent_input_overlay",
     } <= set(by_name)
@@ -100,6 +101,7 @@ def test_agent_input_overlay_tools_expose_only_semantic_privacy_safe_activity() 
         "wheel_direction",
         "character_count",
         "duration_ms",
+        "agent_id",
     }
     assert "text" not in properties and "label" not in properties
     assert properties["event_kind"]["enum"] == [
@@ -110,11 +112,13 @@ def test_agent_input_overlay_tools_expose_only_semantic_privacy_safe_activity() 
     ]
     assert properties["keys"]["maxItems"] == 4
     assert properties["character_count"]["maximum"] == 10000
+    assert properties["agent_id"]["maxLength"] == 64
     assert emit["annotations"]["open_world_hint"] is False
     assert emit["annotations"]["destructive_hint"] is True
 
     for name in (
         "create_agent_input_overlay",
+        "set_agent_input_overlay_layout",
         "emit_agent_input_activity",
         "clear_agent_input_overlay",
     ):
@@ -156,7 +160,7 @@ def test_obs_skill_has_bilingual_discovery_aliases_and_no_raw_escape_hatch() -> 
     for unsupported in ("scene switching", "场景切换"):
         assert unsupported.casefold() not in discovery.casefold()
 
-    assert [tool["name"] for tool in tools["tools"]][:33] == [
+    assert [tool["name"] for tool in tools["tools"]][:36] == [
         "get_status",
         "request_graceful_shutdown",
         "list_scenes",
@@ -167,6 +171,9 @@ def test_obs_skill_has_bilingual_discovery_aliases_and_no_raw_escape_hatch() -> 
         "stop_recording",
         "pause_recording",
         "resume_recording",
+        "get_scene_recording_session",
+        "start_scene_recordings",
+        "stop_scene_recordings",
         "get_streaming_status",
         "start_streaming",
         "stop_streaming",
@@ -306,6 +313,9 @@ def test_skill_outputs_publish_strict_typed_envelopes_with_context_parity() -> N
         "sourceKind",
         "theme",
         "anchor",
+        "opacity",
+        "margin",
+        "agentId",
         "active",
         "activitySequence",
         "eventKind",
@@ -481,6 +491,7 @@ def test_skill_outputs_publish_strict_typed_envelopes_with_context_parity() -> N
             },
             "get_agent_input_overlay": overlay_context_keys,
             "create_agent_input_overlay": overlay_context_keys,
+            "set_agent_input_overlay_layout": overlay_context_keys,
             "emit_agent_input_activity": overlay_context_keys,
             "clear_agent_input_overlay": overlay_context_keys,
         }
@@ -488,6 +499,7 @@ def test_skill_outputs_publish_strict_typed_envelopes_with_context_parity() -> N
     mutation_names.update(
         {
             "create_agent_input_overlay",
+            "set_agent_input_overlay_layout",
             "emit_agent_input_activity",
             "clear_agent_input_overlay",
         }
@@ -672,6 +684,9 @@ def test_every_skill_output_schema_accepts_the_real_core_success_envelope() -> N
                 "sourceKind": "dcc_mcp_agent_input_overlay",
                 "theme": "dcc_mcp_dark",
                 "anchor": "bottom_right",
+                "opacity": 78,
+                "margin": 48,
+                "agentId": "agent",
                 "active": False,
                 "activitySequence": 0,
                 "eventKind": "none",
@@ -691,6 +706,32 @@ def test_every_skill_output_schema_accepts_the_real_core_success_envelope() -> N
                 "sourceKind": "dcc_mcp_agent_input_overlay",
                 "theme": "dcc_mcp_dark",
                 "anchor": "bottom_right",
+                "opacity": 78,
+                "margin": 48,
+                "agentId": "agent",
+                "active": False,
+                "activitySequence": 0,
+                "eventKind": "none",
+                "keys": [],
+                "mouseButton": "none",
+                "wheelDirection": "none",
+                "characterCount": 0,
+                "cueLabel": "",
+                "durationMs": 0,
+                "remainingMs": 0,
+                "verified": True,
+            },
+            "set_agent_input_overlay_layout": {
+                **identity,
+                "sceneName": "RL - Game 1",
+                "sceneItemId": 8,
+                "sourceName": "DCC-MCP Agent Input",
+                "sourceKind": "dcc_mcp_agent_input_overlay",
+                "theme": "dcc_mcp_dark",
+                "anchor": "top_left",
+                "opacity": 55,
+                "margin": 32,
+                "agentId": "agent",
                 "active": False,
                 "activitySequence": 0,
                 "eventKind": "none",
@@ -711,6 +752,9 @@ def test_every_skill_output_schema_accepts_the_real_core_success_envelope() -> N
                 "sourceKind": "dcc_mcp_agent_input_overlay",
                 "theme": "dcc_mcp_dark",
                 "anchor": "bottom_right",
+                "opacity": 78,
+                "margin": 48,
+                "agentId": "agent",
                 "active": True,
                 "activitySequence": 1,
                 "eventKind": "shortcut",
@@ -731,6 +775,9 @@ def test_every_skill_output_schema_accepts_the_real_core_success_envelope() -> N
                 "sourceKind": "dcc_mcp_agent_input_overlay",
                 "theme": "dcc_mcp_dark",
                 "anchor": "bottom_right",
+                "opacity": 78,
+                "margin": 48,
+                "agentId": "agent",
                 "active": False,
                 "activitySequence": 2,
                 "eventKind": "none",
@@ -775,6 +822,6 @@ def test_public_discovery_docs_describe_delivered_scene_graph_tools() -> None:
     assert "场景切换仍属于路线图" not in chinese
     assert "Typed scene switching" in llms
     assert "Built-in Agent input overlay" in readme
-    assert "shared `DCC-MCP Agent Input` source" in readme
+    assert "distinct source name" in readme
     assert "Agent 键盘/鼠标活动提示" in chinese
     assert "never captures global input or arbitrary text" in llms

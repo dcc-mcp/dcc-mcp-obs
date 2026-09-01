@@ -113,13 +113,22 @@ and load the skill before calling the typed tools. Scene-graph mutations are
 available only through the native typed contract and require verified
 postconditions.
 
-For recorded Agent demonstrations, `create_agent_input_overlay` attaches the
-plugin's shared `DCC-MCP Agent Input` source to each selected scene. The Agent
-then uses `emit_agent_input_activity` to display only an allowlisted shortcut,
-mouse button, wheel direction, or typing count. It never captures global input
-or accepts arbitrary text. This keeps code visible through a normal scene
-source while the overlay explains the action immediately before the Agent runs
-it. See the [Agent input overlay contract](docs/agent-input-overlay.md).
+For recorded Agent demonstrations, `create_agent_input_overlay` attaches a
+built-in input source to each selected scene. Use a distinct source name per
+simultaneously operating Agent, then `set_agent_input_overlay_layout` can choose
+one of eight edge anchors plus bounded opacity and margin after inspecting the
+game frame. `emit_agent_input_activity` displays the Agent identity and only an
+allowlisted shortcut, mouse button, wheel direction, or typing count. It never
+captures global input or accepts arbitrary text. See the
+[Agent input overlay contract](docs/agent-input-overlay.md).
+
+`start_scene_recordings` atomically starts one video-only MP4 per exact game
+scene. Each output uses the single enabled `window_capture` source's native
+width and height, includes that scene's Agent input overlay, and is named
+`<game> <yyyy-MM-dd HH-mm-ss>.mp4` in the current OBS profile recording
+directory. Supply only game scenes; editor and VS Code scenes are not part of
+the recording plan. The typed session readback exposes exact dimensions,
+paths, activity, byte/frame counters, and errors for every output.
 
 The native plugin adds a top-level `DCC MCP` menu to OBS. `Server Status...`
 shows the exact plugin and OBS versions, bridge readiness, active outputs, and
