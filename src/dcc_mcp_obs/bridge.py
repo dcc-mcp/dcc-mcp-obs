@@ -75,12 +75,26 @@ PUBLIC_DOWNSTREAM_ERRORS = frozenset(
         "OBS_UNSUPPORTED_PLATFORM",
         "OBS_WINDOW_IDENTITY_DRIFT",
         "OBS_WINDOW_NOT_FOUND",
+        "OBS_SCHEMA_UNSUPPORTED",
+        "OBS_SOURCE_KIND_UNSUPPORTED",
+        "OBS_FILTER_KIND_UNSUPPORTED",
+        "OBS_PROPERTY_NOT_FOUND",
+        "OBS_MEDIA_NOT_CONTROLLABLE",
     }
 )
 _IDENTITY_KEYS = frozenset(
     {"instanceId", "pluginVersion", "obsVersion", "hostPid", "eventSequence", "ok"}
 )
 WINDOW_CAPTURE_METHODS = frozenset({"automatic", "bitblt", "windows_graphics_capture"})
+TYPED_SETTINGS_SCHEMA_VERSION = "1.0"
+REVIEWED_INPUT_KINDS = frozenset({"color_source_v3"})
+REVIEWED_FILTER_KINDS = frozenset({"gain_filter"})
+SOURCE_MONITOR_TYPES = frozenset({"none", "monitor_only", "monitor_and_output"})
+MEDIA_STATES = frozenset(
+    {"none", "playing", "opening", "buffering", "paused", "stopped", "ended", "error"}
+)
+SOURCE_VOLUME_READBACK_TOLERANCE = 1e-6
+MEDIA_SEEK_READBACK_TOLERANCE_MS = 250
 AGENT_INPUT_OVERLAY_SOURCE_KIND = "dcc_mcp_agent_input_overlay"
 AGENT_INPUT_OVERLAY_THEME = "dcc_mcp_dark"
 AGENT_INPUT_OVERLAY_ANCHORS = frozenset(
@@ -1610,6 +1624,510 @@ class ObsControlBridge:
     def stop_output(self, *, output_name: str) -> dict[str, object]:
         return self._output_mutation("StopOutput", output_name, False)
 
+    def get_source_identity(self, *, source_name: str) -> dict[str, object]:
+        source_name = self._require_name(source_name)
+        return self._checked(
+            "GetSourceIdentity", {"sourceName": source_name}, deadline=self._operation_deadline()
+        )
+
+    def create_source(
+        self,
+        *,
+        scene_name: str,
+        source_name: str,
+        source_kind: str,
+        schema_version: str,
+        settings: Mapping[str, object],
+        enabled: bool = True,
+    ) -> dict[str, object]:
+        scene_name = self._require_name(scene_name)
+        source_name = self._require_name(source_name)
+        normalized = self._normalize_input_settings(source_kind, schema_version, settings)
+        if type(enabled) is not bool:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        payload = {
+            "sceneName": scene_name,
+            "sourceName": source_name,
+            "sourceKind": source_kind,
+            "schemaVersion": schema_version,
+            "settings": normalized,
+            "enabled": enabled,
+            "capability": "sources",
+        }
+        return self._mutate_and_reconcile(
+            "CreateSource",
+            payload,
+            "GetInputSettings",
+            {
+                "sourceName": source_name,
+                "sourceKind": source_kind,
+                "schemaVersion": schema_version,
+            },
+            lambda result: result.get("settings") == normalized,
+        )
+
+    def rename_source(self, *, source_name: str, new_source_name: str) -> dict[str, object]:
+        source_name = self._require_name(source_name)
+        new_source_name = self._require_name(new_source_name)
+        if source_name == new_source_name:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        return self._mutate_and_reconcile(
+            "RenameSource",
+            {
+                "sourceName": source_name,
+                "newSourceName": new_source_name,
+                "capability": "sources",
+            },
+            "GetSourceIdentity",
+            {"sourceName": new_source_name},
+            lambda result: result.get("sourceName") == new_source_name,
+        )
+
+    def remove_source(self, *, source_name: str) -> dict[str, object]:
+        source_name = self._require_name(source_name)
+        result = self._checked(
+            "RemoveSource",
+            {"sourceName": source_name, "capability": "sources"},
+            deadline=self._operation_deadline(),
+        )
+        if result.get("accepted") is not True or result.get("removed") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        return {**result, "verified": True}
+
+    def list_input_kinds(self) -> dict[str, object]:
+        return self._checked("ListInputKinds", deadline=self._operation_deadline())
+
+    def get_input_settings(
+        self, *, source_name: str, source_kind: str, schema_version: str = "1.0"
+    ) -> dict[str, object]:
+        source_name = self._require_name(source_name)
+        self._normalize_input_settings(source_kind, schema_version, {"width": 1})
+        return self._checked(
+            "GetInputSettings",
+            {
+                "sourceName": source_name,
+                "sourceKind": source_kind,
+                "schemaVersion": schema_version,
+            },
+            deadline=self._operation_deadline(),
+        )
+
+    def set_input_settings(
+        self,
+        *,
+        source_name: str,
+        source_kind: str,
+        schema_version: str,
+        settings: Mapping[str, object],
+    ) -> dict[str, object]:
+        source_name = self._require_name(source_name)
+        normalized = self._normalize_input_settings(source_kind, schema_version, settings)
+        payload = {
+            "sourceName": source_name,
+            "sourceKind": source_kind,
+            "schemaVersion": schema_version,
+            "settings": normalized,
+            "capability": "inputs",
+        }
+        return self._mutate_and_reconcile(
+            "SetInputSettings",
+            payload,
+            "GetInputSettings",
+            {key: value for key, value in payload.items() if key not in {"settings", "capability"}},
+            lambda result: all(
+                result.get("settings", {}).get(key) == value for key, value in normalized.items()
+            ),
+        )
+
+    def describe_properties(
+        self, *, source_kind: str, schema_version: str = "1.0"
+    ) -> dict[str, object]:
+        self._normalize_input_settings(source_kind, schema_version, {"width": 1})
+        return self._checked(
+            "DescribeProperties",
+            {"sourceKind": source_kind, "schemaVersion": schema_version},
+            deadline=self._operation_deadline(),
+        )
+
+    def validate_property_value(
+        self,
+        *,
+        source_kind: str,
+        schema_version: str,
+        property_name: str,
+        value: object,
+    ) -> dict[str, object]:
+        normalized = self._normalize_input_settings(
+            source_kind, schema_version, {property_name: value}
+        )
+        return self._checked(
+            "ValidatePropertyValue",
+            {
+                "sourceKind": source_kind,
+                "schemaVersion": schema_version,
+                "propertyName": property_name,
+                "value": normalized[property_name],
+            },
+            deadline=self._operation_deadline(),
+        )
+
+    def set_property_value(
+        self,
+        *,
+        source_name: str,
+        source_kind: str,
+        schema_version: str,
+        property_name: str,
+        value: object,
+    ) -> dict[str, object]:
+        source_name = self._require_name(source_name)
+        normalized = self._normalize_input_settings(
+            source_kind, schema_version, {property_name: value}
+        )
+        payload = {
+            "sourceName": source_name,
+            "sourceKind": source_kind,
+            "schemaVersion": schema_version,
+            "propertyName": property_name,
+            "value": normalized[property_name],
+            "capability": "properties",
+        }
+        return self._mutate_and_reconcile(
+            "SetPropertyValue",
+            payload,
+            "GetInputSettings",
+            {
+                "sourceName": source_name,
+                "sourceKind": source_kind,
+                "schemaVersion": schema_version,
+            },
+            lambda result: (
+                result.get("settings", {}).get(property_name) == normalized[property_name]
+            ),
+        )
+
+    def list_filters(self, *, source_name: str) -> dict[str, object]:
+        return self._checked(
+            "ListFilters",
+            {"sourceName": self._require_name(source_name)},
+            deadline=self._operation_deadline(),
+        )
+
+    def get_filter(
+        self,
+        *,
+        source_name: str,
+        filter_name: str,
+        filter_kind: str,
+        schema_version: str = "1.0",
+    ) -> dict[str, object]:
+        source_name = self._require_name(source_name)
+        filter_name = self._require_name(filter_name)
+        self._normalize_filter_settings(filter_kind, schema_version, {"db": 0.0})
+        return self._checked(
+            "GetFilter",
+            {
+                "sourceName": source_name,
+                "filterName": filter_name,
+                "filterKind": filter_kind,
+                "schemaVersion": schema_version,
+            },
+            deadline=self._operation_deadline(),
+        )
+
+    def create_filter(
+        self,
+        *,
+        source_name: str,
+        filter_name: str,
+        filter_kind: str,
+        schema_version: str,
+        settings: Mapping[str, object],
+        enabled: bool = True,
+    ) -> dict[str, object]:
+        source_name = self._require_name(source_name)
+        filter_name = self._require_name(filter_name)
+        normalized = self._normalize_filter_settings(filter_kind, schema_version, settings)
+        if type(enabled) is not bool:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        payload = {
+            "sourceName": source_name,
+            "filterName": filter_name,
+            "filterKind": filter_kind,
+            "schemaVersion": schema_version,
+            "settings": normalized,
+            "enabled": enabled,
+            "capability": "filters",
+        }
+        return self._mutate_and_reconcile(
+            "CreateFilter",
+            payload,
+            "GetFilter",
+            {
+                key: value
+                for key, value in payload.items()
+                if key not in {"settings", "enabled", "capability"}
+            },
+            lambda result: (
+                result.get("settings") == normalized and result.get("enabled") is enabled
+            ),
+        )
+
+    def set_filter_enabled(
+        self, *, source_name: str, filter_name: str, enabled: bool
+    ) -> dict[str, object]:
+        source_name = self._require_name(source_name)
+        filter_name = self._require_name(filter_name)
+        if type(enabled) is not bool:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        return self._mutate_and_reconcile(
+            "SetFilterEnabled",
+            {
+                "sourceName": source_name,
+                "filterName": filter_name,
+                "enabled": enabled,
+                "capability": "filters",
+            },
+            "GetFilter",
+            {"sourceName": source_name, "filterName": filter_name},
+            lambda result: result.get("enabled") is enabled,
+        )
+
+    def set_filter_settings(
+        self,
+        *,
+        source_name: str,
+        filter_name: str,
+        filter_kind: str,
+        schema_version: str,
+        settings: Mapping[str, object],
+    ) -> dict[str, object]:
+        source_name = self._require_name(source_name)
+        filter_name = self._require_name(filter_name)
+        normalized = self._normalize_filter_settings(filter_kind, schema_version, settings)
+        payload = {
+            "sourceName": source_name,
+            "filterName": filter_name,
+            "filterKind": filter_kind,
+            "schemaVersion": schema_version,
+            "settings": normalized,
+            "capability": "filters",
+        }
+        return self._mutate_and_reconcile(
+            "SetFilterSettings",
+            payload,
+            "GetFilter",
+            {key: value for key, value in payload.items() if key not in {"settings", "capability"}},
+            lambda result: result.get("settings") == normalized,
+        )
+
+    def remove_filter(self, *, source_name: str, filter_name: str) -> dict[str, object]:
+        result = self._checked(
+            "RemoveFilter",
+            {
+                "sourceName": self._require_name(source_name),
+                "filterName": self._require_name(filter_name),
+                "capability": "filters",
+            },
+            deadline=self._operation_deadline(),
+        )
+        if result.get("accepted") is not True or result.get("removed") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        return {**result, "verified": True}
+
+    def get_source_volume(self, *, source_name: str) -> dict[str, object]:
+        return self._source_status("GetSourceVolume", source_name)
+
+    def set_source_volume(self, *, source_name: str, volume: float) -> dict[str, object]:
+        if type(volume) not in (int, float) or not math.isfinite(volume) or not 0 <= volume <= 20:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        value = float(volume)
+        return self._source_mutation(
+            "SetSourceVolume", "GetSourceVolume", source_name, {"volume": value}, "volume", value
+        )
+
+    def get_source_mute(self, *, source_name: str) -> dict[str, object]:
+        return self._source_status("GetSourceMute", source_name)
+
+    def set_source_mute(self, *, source_name: str, muted: bool) -> dict[str, object]:
+        if type(muted) is not bool:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        return self._source_mutation(
+            "SetSourceMute", "GetSourceMute", source_name, {"muted": muted}, "muted", muted
+        )
+
+    def get_source_monitor_type(self, *, source_name: str) -> dict[str, object]:
+        return self._source_status("GetSourceMonitorType", source_name)
+
+    def set_source_monitor_type(self, *, source_name: str, monitor_type: str) -> dict[str, object]:
+        if monitor_type not in SOURCE_MONITOR_TYPES:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        return self._source_mutation(
+            "SetSourceMonitorType",
+            "GetSourceMonitorType",
+            source_name,
+            {"monitorType": monitor_type},
+            "monitorType",
+            monitor_type,
+        )
+
+    def get_media_status(self, *, source_name: str) -> dict[str, object]:
+        return self._source_status("GetMediaStatus", source_name)
+
+    def play_media(self, *, source_name: str) -> dict[str, object]:
+        return self._media_mutation("PlayMedia", source_name, "playing")
+
+    def pause_media(self, *, source_name: str) -> dict[str, object]:
+        return self._media_mutation("PauseMedia", source_name, "paused")
+
+    def restart_media(self, *, source_name: str) -> dict[str, object]:
+        return self._media_mutation("RestartMedia", source_name, "playing")
+
+    def stop_media(self, *, source_name: str) -> dict[str, object]:
+        return self._media_mutation("StopMedia", source_name, "stopped")
+
+    def seek_media(self, *, source_name: str, media_cursor_ms: int) -> dict[str, object]:
+        if type(media_cursor_ms) is not int or not 0 <= media_cursor_ms <= 86_400_000:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        return self._media_mutation(
+            "SeekMedia", source_name, None, {"mediaCursorMs": media_cursor_ms}, media_cursor_ms
+        )
+
+    def _source_status(self, request_type: str, source_name: str) -> dict[str, object]:
+        return self._checked(
+            request_type,
+            {"sourceName": self._require_name(source_name)},
+            deadline=self._operation_deadline(),
+        )
+
+    def _source_mutation(
+        self,
+        request_type: str,
+        readback_type: str,
+        source_name: str,
+        values: Mapping[str, object],
+        field: str,
+        expected: object,
+    ) -> dict[str, object]:
+        source_name = self._require_name(source_name)
+
+        def matches(result: Mapping[str, object]) -> bool:
+            actual = result.get(field)
+            if (
+                field == "volume"
+                and type(actual) in (int, float)
+                and type(expected) in (int, float)
+            ):
+                return math.isclose(
+                    float(actual),
+                    float(expected),
+                    rel_tol=0.0,
+                    abs_tol=SOURCE_VOLUME_READBACK_TOLERANCE,
+                )
+            return actual == expected
+
+        return self._mutate_and_reconcile(
+            request_type,
+            {"sourceName": source_name, **values, "capability": "audio"},
+            readback_type,
+            {"sourceName": source_name},
+            matches,
+        )
+
+    def _media_mutation(
+        self,
+        request_type: str,
+        source_name: str,
+        expected_state: str | None,
+        values: Mapping[str, object] | None = None,
+        expected_cursor: int | None = None,
+    ) -> dict[str, object]:
+        source_name = self._require_name(source_name)
+        return self._mutate_and_reconcile(
+            request_type,
+            {"sourceName": source_name, **(values or {}), "capability": "media"},
+            "GetMediaStatus",
+            {"sourceName": source_name},
+            lambda result: (
+                (expected_state is None or result.get("mediaState") == expected_state)
+                and (
+                    expected_cursor is None
+                    or (
+                        type(result.get("mediaCursorMs")) is int
+                        and abs(result["mediaCursorMs"] - expected_cursor)
+                        <= MEDIA_SEEK_READBACK_TOLERANCE_MS
+                    )
+                )
+            ),
+        )
+
+    def _mutate_and_reconcile(
+        self,
+        request_type: str,
+        payload: Mapping[str, object],
+        readback_type: str,
+        readback_payload: Mapping[str, object],
+        matches: Callable[[Mapping[str, object]], bool],
+    ) -> dict[str, object]:
+        deadline = self._operation_deadline()
+        accepted = self._checked(request_type, payload, deadline=deadline)
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        for attempt in range(self._postcondition_attempts):
+            readback = self._checked(readback_type, readback_payload, deadline=deadline)
+            if matches(readback):
+                return {**readback, "verified": True}
+            if attempt + 1 < self._postcondition_attempts:
+                self._poll(deadline)
+        raise BridgeError("OBS_POSTCONDITION_FAILED")
+
+    @staticmethod
+    def _require_schema_version(schema_version: object) -> str:
+        if schema_version != TYPED_SETTINGS_SCHEMA_VERSION:
+            raise BridgeError("OBS_SCHEMA_UNSUPPORTED")
+        return TYPED_SETTINGS_SCHEMA_VERSION
+
+    @classmethod
+    def _normalize_input_settings(
+        cls, source_kind: object, schema_version: object, settings: object
+    ) -> dict[str, int]:
+        cls._require_schema_version(schema_version)
+        if source_kind not in REVIEWED_INPUT_KINDS:
+            raise BridgeError("OBS_SOURCE_KIND_UNSUPPORTED")
+        if (
+            not isinstance(settings, Mapping)
+            or not settings
+            or not set(settings)
+            <= {
+                "width",
+                "height",
+                "color",
+            }
+        ):
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        normalized: dict[str, int] = {}
+        for key, value in settings.items():
+            maximum = 8192 if key in {"width", "height"} else 2**32 - 1
+            minimum = 1 if key in {"width", "height"} else 0
+            if type(value) is not int or not minimum <= value <= maximum:
+                raise BridgeError("OBS_ARGUMENT_INVALID")
+            normalized[key] = value
+        return normalized
+
+    @classmethod
+    def _normalize_filter_settings(
+        cls, filter_kind: object, schema_version: object, settings: object
+    ) -> dict[str, float]:
+        cls._require_schema_version(schema_version)
+        if filter_kind not in REVIEWED_FILTER_KINDS:
+            raise BridgeError("OBS_FILTER_KIND_UNSUPPORTED")
+        if not isinstance(settings, Mapping) or set(settings) != {"db"}:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        value = settings["db"]
+        if type(value) not in (int, float) or not math.isfinite(value) or not -30 <= value <= 30:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        return {"db": float(value)}
+
     def _domain_mutation(
         self, request_type: str, status_request: str, field: str, expected: bool
     ) -> dict[str, object]:
@@ -1737,6 +2255,17 @@ class ObsControlBridge:
             "ListSceneCollections",
             "GetCurrentSceneCollection",
             "ListSources",
+            "GetSourceIdentity",
+            "ListInputKinds",
+            "GetInputSettings",
+            "DescribeProperties",
+            "ValidatePropertyValue",
+            "ListFilters",
+            "GetFilter",
+            "GetSourceVolume",
+            "GetSourceMute",
+            "GetSourceMonitorType",
+            "GetMediaStatus",
             "GetRecordingStatus",
             "GetStreamingStatus",
             "GetReplayBufferStatus",
@@ -2122,6 +2651,202 @@ class ObsControlBridge:
             ):
                 raise BridgeError("OBS_RESPONSE_INVALID")
             return
+        if request_type == "GetSourceIdentity":
+            allowed = _IDENTITY_KEYS | {
+                "sourceName",
+                "sourceKind",
+                "sourceType",
+                "outputFlags",
+                "active",
+                "showing",
+                "width",
+                "height",
+            }
+            if (
+                set(response) != allowed
+                or any(
+                    not isinstance(response.get(key), str) or not 1 <= len(response[key]) <= 256
+                    for key in ("sourceName", "sourceKind")
+                )
+                or response.get("sourceType")
+                not in {
+                    "input",
+                    "filter",
+                    "scene",
+                    "transition",
+                    "unknown",
+                }
+                or type(response.get("outputFlags")) is not int
+                or not 0 <= response["outputFlags"] <= 2**32 - 1
+                or type(response.get("active")) is not bool
+                or type(response.get("showing")) is not bool
+                or type(response.get("width")) is not int
+                or not 0 <= response["width"] <= 16384
+                or type(response.get("height")) is not int
+                or not 0 <= response["height"] <= 16384
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type == "ListInputKinds":
+            kinds = response.get("inputKinds")
+            if (
+                set(response) != _IDENTITY_KEYS | {"schemaVersion", "inputKinds"}
+                or response.get("schemaVersion") != TYPED_SETTINGS_SCHEMA_VERSION
+                or not isinstance(kinds, list)
+                or not 1 <= len(kinds) <= 16
+                or any(
+                    not isinstance(item, Mapping)
+                    or set(item) != {"sourceKind", "displayName"}
+                    or item.get("sourceKind") not in REVIEWED_INPUT_KINDS
+                    or not isinstance(item.get("displayName"), str)
+                    or not 1 <= len(item["displayName"]) <= 128
+                    for item in kinds
+                )
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type == "GetInputSettings":
+            settings = response.get("settings")
+            if (
+                set(response)
+                != _IDENTITY_KEYS | {"sourceName", "sourceKind", "schemaVersion", "settings"}
+                or not isinstance(response.get("sourceName"), str)
+                or not 1 <= len(response["sourceName"]) <= 256
+                or response.get("sourceKind") not in REVIEWED_INPUT_KINDS
+                or response.get("schemaVersion") != TYPED_SETTINGS_SCHEMA_VERSION
+                or not isinstance(settings, Mapping)
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            ObsControlBridge._normalize_input_settings(
+                response["sourceKind"], response["schemaVersion"], settings
+            )
+            return
+        if request_type == "DescribeProperties":
+            properties = response.get("properties")
+            if (
+                set(response) != _IDENTITY_KEYS | {"sourceKind", "schemaVersion", "properties"}
+                or response.get("sourceKind") not in REVIEWED_INPUT_KINDS
+                or response.get("schemaVersion") != TYPED_SETTINGS_SCHEMA_VERSION
+                or not isinstance(properties, list)
+                or {item.get("propertyName") for item in properties} != {"width", "height", "color"}
+                or any(
+                    not isinstance(item, Mapping)
+                    or set(item) != {"propertyName", "valueType", "minimum", "maximum"}
+                    or item.get("valueType") != "integer"
+                    or type(item.get("minimum")) is not int
+                    or type(item.get("maximum")) is not int
+                    or item["minimum"] > item["maximum"]
+                    for item in properties
+                )
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type == "ValidatePropertyValue":
+            if (
+                set(response)
+                != _IDENTITY_KEYS
+                | {"sourceKind", "schemaVersion", "propertyName", "value", "valid"}
+                or response.get("sourceKind") not in REVIEWED_INPUT_KINDS
+                or response.get("schemaVersion") != TYPED_SETTINGS_SCHEMA_VERSION
+                or response.get("propertyName") not in {"width", "height", "color"}
+                or type(response.get("value")) is not int
+                or response.get("valid") is not True
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            ObsControlBridge._normalize_input_settings(
+                response["sourceKind"],
+                response["schemaVersion"],
+                {response["propertyName"]: response["value"]},
+            )
+            return
+        if request_type == "ListFilters":
+            filters = response.get("filters")
+            if (
+                set(response) != _IDENTITY_KEYS | {"sourceName", "filters", "truncated"}
+                or not isinstance(response.get("sourceName"), str)
+                or not 1 <= len(response["sourceName"]) <= 256
+                or not isinstance(filters, list)
+                or len(filters) > 64
+                or type(response.get("truncated")) is not bool
+                or any(
+                    not isinstance(item, Mapping)
+                    or set(item) != {"filterName", "filterKind", "enabled"}
+                    or not isinstance(item.get("filterName"), str)
+                    or not 1 <= len(item["filterName"]) <= 256
+                    or not isinstance(item.get("filterKind"), str)
+                    or not 1 <= len(item["filterKind"]) <= 256
+                    or type(item.get("enabled")) is not bool
+                    for item in filters
+                )
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type == "GetFilter":
+            settings = response.get("settings")
+            if (
+                set(response)
+                != _IDENTITY_KEYS
+                | {
+                    "sourceName",
+                    "filterName",
+                    "filterKind",
+                    "enabled",
+                    "schemaVersion",
+                    "settings",
+                }
+                or any(
+                    not isinstance(response.get(key), str) or not 1 <= len(response[key]) <= 256
+                    for key in ("sourceName", "filterName")
+                )
+                or response.get("filterKind") not in REVIEWED_FILTER_KINDS
+                or response.get("schemaVersion") != TYPED_SETTINGS_SCHEMA_VERSION
+                or type(response.get("enabled")) is not bool
+                or not isinstance(settings, Mapping)
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            ObsControlBridge._normalize_filter_settings(
+                response["filterKind"], response["schemaVersion"], settings
+            )
+            return
+        if request_type == "GetSourceVolume":
+            if (
+                set(response) != _IDENTITY_KEYS | {"sourceName", "volume"}
+                or not isinstance(response.get("sourceName"), str)
+                or type(response.get("volume")) not in (int, float)
+                or not math.isfinite(response["volume"])
+                or not 0 <= response["volume"] <= 20
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type == "GetSourceMute":
+            if (
+                set(response) != _IDENTITY_KEYS | {"sourceName", "muted"}
+                or not isinstance(response.get("sourceName"), str)
+                or type(response.get("muted")) is not bool
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type == "GetSourceMonitorType":
+            if (
+                set(response) != _IDENTITY_KEYS | {"sourceName", "monitorType"}
+                or not isinstance(response.get("sourceName"), str)
+                or response.get("monitorType") not in SOURCE_MONITOR_TYPES
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type == "GetMediaStatus":
+            if (
+                set(response)
+                != _IDENTITY_KEYS | {"sourceName", "mediaState", "mediaDurationMs", "mediaCursorMs"}
+                or not isinstance(response.get("sourceName"), str)
+                or response.get("mediaState") not in MEDIA_STATES
+                or type(response.get("mediaDurationMs")) is not int
+                or not 0 <= response["mediaDurationMs"] <= 2**63 - 1
+                or type(response.get("mediaCursorMs")) is not int
+                or not 0 <= response["mediaCursorMs"] <= 2**63 - 1
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
         if request_type == "GetRecordingStatus":
             diagnostic_strings = {
                 "outputName": 256,
@@ -2348,6 +3073,23 @@ class ObsControlBridge:
             "ClearAgentInputOverlay",
             "StartSceneRecordings",
             "StopSceneRecordings",
+            "CreateSource",
+            "RenameSource",
+            "RemoveSource",
+            "SetInputSettings",
+            "SetPropertyValue",
+            "CreateFilter",
+            "SetFilterEnabled",
+            "SetFilterSettings",
+            "RemoveFilter",
+            "SetSourceVolume",
+            "SetSourceMute",
+            "SetSourceMonitorType",
+            "PlayMedia",
+            "PauseMedia",
+            "RestartMedia",
+            "StopMedia",
+            "SeekMedia",
         }:
             allowed = set(_IDENTITY_KEYS) | {"accepted"}
             if request_type == "SetCurrentProfile":
@@ -2430,6 +3172,10 @@ class ObsControlBridge:
                 allowed |= {"activitySequence"}
             elif request_type in {"StartSceneRecordings", "StopSceneRecordings"}:
                 allowed |= {"sessionId"}
+            elif request_type in {"RemoveSource", "RemoveFilter"}:
+                allowed |= {"removed"}
+            elif request_type == "RenameSource":
+                allowed |= {"newSourceName"}
             if (
                 set(response) - allowed
                 or response.get("ok") is not True
@@ -2533,6 +3279,16 @@ class ObsControlBridge:
             if request_type in {"StartSceneRecordings", "StopSceneRecordings"} and (
                 not isinstance(response.get("sessionId"), str)
                 or not 1 <= len(response["sessionId"]) <= 128
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            if (
+                request_type in {"RemoveSource", "RemoveFilter"}
+                and response.get("removed") is not True
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            if request_type == "RenameSource" and (
+                not isinstance(response.get("newSourceName"), str)
+                or not 1 <= len(response["newSourceName"]) <= 256
             ):
                 raise BridgeError("OBS_RESPONSE_INVALID")
             return

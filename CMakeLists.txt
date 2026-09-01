@@ -26,6 +26,7 @@ target_sources(
     native/src/plugin-main.cpp
     native/src/scene-recording-session.cpp
     native/src/sidecar-launcher.cpp
+    native/src/typed-source-control.cpp
 )
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})

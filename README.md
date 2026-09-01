@@ -26,22 +26,27 @@ script or raw WebSocket tool.
   and plugin information
 - Recording status
 - Start, stop, pause, and resume recording
+- Typed streaming, replay-buffer, virtual-camera, and named-output controls
+- Reviewed source/input/property/filter contracts plus exact audio and media controls
 - A separate typed status readback after every mutation
 - Stable redacted errors, bounded UI dispatch, and exact-instance drift rejection
 
 The machine-readable [capability matrix](contracts/obs-capabilities-v1.json)
-tracks the remaining product domains. They are intentionally not represented
-as shipped tools until their typed contracts land.
+tracks delivered and remaining product domains. Operations are represented as
+shipped tools only after their typed contracts land.
 
-## Full-control roadmap
+## Delivered control surfaces
 
-- Streaming, replay buffer, virtual camera, and typed output controls (issue #2)
-- [Profiles, scene collections, bounded hotkeys, screenshots, and operator status](https://github.com/dcc-mcp/dcc-mcp-obs/issues/3)
-- [Disposable real-OBS acceptance](https://github.com/dcc-mcp/dcc-mcp-obs/issues/4)
-- [Inputs, properties, filters, audio, and media](https://github.com/dcc-mcp/dcc-mcp-obs/issues/5)
+- [Streaming, replay buffer, virtual camera, and typed output controls](https://github.com/dcc-mcp/dcc-mcp-obs/issues/2)
+- [Inputs, properties, filters, audio, and media](docs/typed-source-controls.md)
 - [Typed scene graph controls](docs/scene-graph.md)
 - [Exact Windows window capture](docs/window-capture.md)
 - [Built-in Agent input overlay](docs/agent-input-overlay.md)
+
+## Full-control roadmap
+
+- [Profiles, scene collections, bounded hotkeys, screenshots, and operator status](https://github.com/dcc-mcp/dcc-mcp-obs/issues/3)
+- [Disposable real-OBS acceptance](https://github.com/dcc-mcp/dcc-mcp-obs/issues/4)
 
 ## Requirements
 
@@ -108,10 +113,16 @@ The bundled `obs-control` skill includes English and Chinese discovery aliases
 for OBS, Open Broadcaster Software, recording, streaming, replay buffer,
 virtual camera, outputs, scene/source inspection, pause, resume, 录屏, 直播,
 回放缓冲, 虚拟摄像头, 场景图, 场景切换, 按键展示, 键盘, 鼠标, 转场, and
-Studio Mode. Agents search
+Studio Mode, properties, filters, audio, and media. Agents search
 and load the skill before calling the typed tools. Scene-graph mutations are
 available only through the native typed contract and require verified
 postconditions.
+
+Generic input settings are never forwarded. The public reviewed settings
+contract is version `1.0`: `color_source_v3` exposes only bounded `width`,
+`height`, and `color`, while `gain_filter` exposes only bounded `db`. Source,
+filter, audio, and media mutations use exact names and bounded reconciliation.
+See [typed source controls](docs/typed-source-controls.md).
 
 For recorded Agent demonstrations, `create_agent_input_overlay` attaches a
 built-in input source to each selected scene. Use a distinct source name per

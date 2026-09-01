@@ -39,6 +39,7 @@
 #include "dcc-mcp-menu.hpp"
 #include "scene-recording-session.hpp"
 #include "sidecar-launcher.hpp"
+#include "typed-source-control.hpp"
 #include "ui-task-gate.hpp"
 
 OBS_DECLARE_MODULE()
@@ -316,6 +317,7 @@ enum class UiOperation {
 	GetCurrentPreviewScene,
 	SetCurrentPreviewScene,
 	TriggerStudioModeTransition,
+	TypedSourceControl,
 };
 
 struct WindowCaptureBinding {
@@ -340,6 +342,7 @@ struct UiState {
 	int overlay_opacity = 78;
 	int overlay_margin = 48;
 	dcc_mcp_obs::AgentInputActivity agent_input_activity;
+	dcc_mcp_obs::TypedSourceRequest typed_source_request;
 	std::vector<dcc_mcp_obs::SceneRecordingSpec> scene_recording_specs;
 	std::string scene_recording_session_id;
 	std::string window_executable_filter;
@@ -1325,7 +1328,9 @@ void execute_ui_operation(void *private_data)
 		state->operation == UiOperation::SetCurrentTransition ||
 		state->operation == UiOperation::TriggerTransition || state->operation == UiOperation::SetStudioMode ||
 		state->operation == UiOperation::SetCurrentPreviewScene ||
-		state->operation == UiOperation::TriggerStudioModeTransition;
+		state->operation == UiOperation::TriggerStudioModeTransition ||
+		(state->operation == UiOperation::TypedSourceControl &&
+		 dcc_mcp_obs::is_typed_source_mutation(state->typed_source_request.request_name));
 	if (!is_mutation && !state->gate.try_start()) {
 		result = obs_data_create();
 		set_error(result, "OBS_UI_TIMEOUT");
@@ -2356,6 +2361,14 @@ void execute_ui_operation(void *private_data)
 		case UiOperation::CaptureProgramFrame:
 			result = capture_program_frame();
 			break;
+		case UiOperation::TypedSourceControl:
+			if (is_mutation && !state->gate.claim_mutation(state->deadline)) {
+				result = obs_data_create();
+				set_error(result, "OBS_UI_TIMEOUT");
+			} else {
+				result = dcc_mcp_obs::execute_typed_source_request(state->typed_source_request);
+			}
+			break;
 		case UiOperation::Invalid:
 			result = obs_data_create();
 			set_error(result, "OBS_REQUEST_INVALID");
@@ -2386,7 +2399,9 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, cons
 		      const std::string &overlay_anchor, int overlay_opacity, int overlay_margin,
 		      const dcc_mcp_obs::AgentInputActivity &agent_input_activity,
 		      const std::vector<dcc_mcp_obs::SceneRecordingSpec> &scene_recording_specs,
-		      const std::string &scene_recording_session_id, uint64_t deadline_at_ms, obs_data_t *response)
+		      const std::string &scene_recording_session_id,
+		      const dcc_mcp_obs::TypedSourceRequest &typed_source_request, uint64_t deadline_at_ms,
+		      obs_data_t *response)
 {
 	auto state = std::make_shared<UiState>();
 	state->operation = operation;
@@ -2404,6 +2419,7 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, cons
 	state->agent_input_activity = agent_input_activity;
 	state->scene_recording_specs = scene_recording_specs;
 	state->scene_recording_session_id = scene_recording_session_id;
+	state->typed_source_request = typed_source_request;
 	state->window_executable_filter = window_executable_filter;
 	state->window_title_filter = window_title_filter;
 	state->window_capture = window_capture;
@@ -2458,6 +2474,8 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, cons
 
 UiOperation operation_for(const std::string &request)
 {
+	if (dcc_mcp_obs::is_typed_source_request(request))
+		return UiOperation::TypedSourceControl;
 	if (request == "GetPluginStatus")
 		return UiOperation::Status;
 	if (request == "GetOperatorStatus")
@@ -2622,6 +2640,7 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 	WindowCaptureBinding window_capture;
 	WindowCaptureBinding expected_window_capture;
 	dcc_mcp_obs::AgentInputActivity agent_input_activity;
+	dcc_mcp_obs::TypedSourceRequest typed_source_request;
 	std::vector<dcc_mcp_obs::SceneRecordingSpec> scene_recording_specs;
 	std::string scene_recording_session_id;
 	int64_t scene_item_id = 0;
@@ -2663,6 +2682,14 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 		}
 	}
 	const std::string request_name(request);
+	if (dcc_mcp_obs::is_typed_source_request(request_name)) {
+		const char *error_code = nullptr;
+		if (!dcc_mcp_obs::parse_typed_source_request(request_name, request_data, typed_source_request,
+							     error_code)) {
+			set_error(response_data, error_code != nullptr ? error_code : "OBS_ARGUMENT_INVALID");
+			return;
+		}
+	}
 	if (request_name == "StartSceneRecordings") {
 		obs_data_array_t *recordings = request_data != nullptr ? obs_data_get_array(request_data, "recordings")
 								       : nullptr;
@@ -3094,7 +3121,8 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 			 scene_item_id, enabled, studio_enabled, has_duration, duration_ms, has_pos, has_scale,
 			 has_rotation, pos_x, pos_y, scale_x, scale_y, rotation, window_capture,
 			 expected_window_capture, overlay_anchor, overlay_opacity, overlay_margin, agent_input_activity,
-			 scene_recording_specs, scene_recording_session_id, deadline_at_ms, response_data);
+			 scene_recording_specs, scene_recording_session_id, typed_source_request, deadline_at_ms,
+			 response_data);
 	if (request_name == "RequestGracefulShutdown" && obs_data_get_bool(response_data, "shutdownScheduled"))
 		obs_queue_task(OBS_TASK_UI, request_frontend_exit, nullptr, false);
 }
@@ -3180,6 +3208,34 @@ constexpr const char *kRequests[] = {
 	"CaptureSourceScreenshot",
 	"CaptureScreenshot",
 	"CaptureProgramFrame",
+	"GetSourceIdentity",
+	"CreateSource",
+	"RenameSource",
+	"RemoveSource",
+	"ListInputKinds",
+	"GetInputSettings",
+	"SetInputSettings",
+	"DescribeProperties",
+	"ValidatePropertyValue",
+	"SetPropertyValue",
+	"ListFilters",
+	"GetFilter",
+	"CreateFilter",
+	"SetFilterEnabled",
+	"SetFilterSettings",
+	"RemoveFilter",
+	"GetSourceVolume",
+	"SetSourceVolume",
+	"GetSourceMute",
+	"SetSourceMute",
+	"GetSourceMonitorType",
+	"SetSourceMonitorType",
+	"GetMediaStatus",
+	"PlayMedia",
+	"PauseMedia",
+	"RestartMedia",
+	"StopMedia",
+	"SeekMedia",
 };
 
 } // namespace
