@@ -126,8 +126,10 @@ OBS 控制始终原生插件/WebSocket 优先。仅当某个纯视觉操作没�
 ## 开发与验证边界
 
 本地测试命令与三平台构建方式见英文 README。单元测试、fake protocol、原生编译、
-安装包 smoke 和 CI 都不等于真实 OBS 宿主验收。首个交付不声称 real-OBS PASS；
-可丢弃真实宿主验收仍是独立发布门禁。
+安装包 smoke 和普通 CI 不等于真实 OBS 宿主验收。独立的一次性真实 OBS 门禁会在
+Windows、macOS 和 Linux 上启动实际 OBS，验证精确绑定、场景图与录制状态读回，
+并且只发布不含 PID、密码、端口和本地路径的隐私安全证据。详见
+[验收契约](../real-obs-acceptance.md)。
 
 ## 许可证
 

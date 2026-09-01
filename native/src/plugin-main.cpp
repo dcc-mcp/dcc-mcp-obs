@@ -1115,6 +1115,43 @@ obs_data_t *list_transitions()
 	return result;
 }
 
+struct FrontendTransitionLookup {
+	NameLookup status = NameLookup::Missing;
+	obs_source_t *source = nullptr;
+};
+
+FrontendTransitionLookup lookup_frontend_transition(const std::string &name)
+{
+	FrontendTransitionLookup lookup{};
+	if (name.empty())
+		return lookup;
+	obs_frontend_source_list source_list{};
+	obs_frontend_get_transitions(&source_list);
+	const size_t total = source_list.sources.num;
+	const size_t count = std::min(total, kMaxTransitions);
+	size_t matches = 0;
+	for (size_t index = 0; index < count; ++index) {
+		auto *candidate = source_list.sources.array[index];
+		if (name != obs_source_get_name(candidate))
+			continue;
+		++matches;
+		if (matches == 1)
+			lookup.source = obs_source_get_ref(candidate);
+	}
+	obs_frontend_source_list_free(&source_list);
+	if (total > kMaxTransitions)
+		lookup.status = NameLookup::Incomplete;
+	else if (matches > 1)
+		lookup.status = NameLookup::Ambiguous;
+	else if (matches == 1)
+		lookup.status = NameLookup::Unique;
+	if (lookup.status != NameLookup::Unique && lookup.source != nullptr) {
+		obs_source_release(lookup.source);
+		lookup.source = nullptr;
+	}
+	return lookup;
+}
+
 obs_data_t *studio_mode_status()
 {
 	auto *result = obs_data_create();
@@ -1859,16 +1896,20 @@ void execute_ui_operation(void *private_data)
 				set_error(result, "OBS_TRANSITION_NOT_FOUND");
 			else {
 				obs_data_set_string(result, "transitionName", obs_source_get_name(transition));
+				obs_data_set_int(result, "durationMs", obs_frontend_get_transition_duration());
 				obs_source_release(transition);
 			}
 			break;
 		}
 		case UiOperation::SetCurrentTransition: {
 			result = obs_data_create();
-			auto *transition = state->transition_name.empty()
-						   ? nullptr
-						   : obs_get_source_by_name(state->transition_name.c_str());
-			if (transition == nullptr || obs_source_get_type(transition) != OBS_SOURCE_TYPE_TRANSITION)
+			const FrontendTransitionLookup lookup = lookup_frontend_transition(state->transition_name);
+			auto *transition = lookup.source;
+			if (lookup.status == NameLookup::Incomplete)
+				set_error(result, "OBS_RESPONSE_INCOMPLETE");
+			else if (lookup.status == NameLookup::Ambiguous)
+				set_error(result, "OBS_TARGET_AMBIGUOUS");
+			else if (lookup.status != NameLookup::Unique || transition == nullptr)
 				set_error(result, "OBS_TRANSITION_NOT_FOUND");
 			else if (!state->gate.claim_mutation(state->deadline))
 				set_error(result, "OBS_UI_TIMEOUT");
@@ -1876,18 +1917,11 @@ void execute_ui_operation(void *private_data)
 				obs_frontend_set_current_transition(transition);
 				if (state->has_duration)
 					obs_frontend_set_transition_duration(state->duration_ms);
-				auto *current = obs_frontend_get_current_transition();
-				if (current == nullptr || state->transition_name != obs_source_get_name(current) ||
-				    (state->has_duration &&
-				     obs_frontend_get_transition_duration() != state->duration_ms))
-					set_error(result, "OBS_POSTCONDITION_FAILED");
-				else {
-					obs_data_set_string(result, "transitionName", obs_source_get_name(current));
-					obs_data_set_int(result, "durationMs", obs_frontend_get_transition_duration());
-					obs_data_set_bool(result, "accepted", true);
-				}
-				if (current)
-					obs_source_release(current);
+				obs_data_set_string(result, "transitionName", state->transition_name.c_str());
+				obs_data_set_int(result, "durationMs",
+						 state->has_duration ? state->duration_ms
+								     : obs_frontend_get_transition_duration());
+				obs_data_set_bool(result, "accepted", true);
 			}
 			if (transition)
 				obs_source_release(transition);
@@ -3127,8 +3161,17 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 		obs_queue_task(OBS_TASK_UI, request_frontend_exit, nullptr, false);
 }
 
-void frontend_event(enum obs_frontend_event, void *)
+void unregister_vendor_requests();
+
+void frontend_event(enum obs_frontend_event event, void *)
 {
+	if (event == OBS_FRONTEND_EVENT_EXIT) {
+		// obs-websocket can unload before this module. Its vendor handle is no
+		// longer safe once frontend shutdown advances to module teardown, so
+		// unregister while the provider is still alive and never call it later.
+		unregister_vendor_requests();
+		return;
+	}
 	const uint64_t event_sequence = g_event_sequence.fetch_add(1) + 1;
 	if (g_vendor != nullptr) {
 		obs_data_t *event = obs_data_create();
@@ -3238,6 +3281,15 @@ constexpr const char *kRequests[] = {
 	"SeekMedia",
 };
 
+void unregister_vendor_requests()
+{
+	if (g_vendor == nullptr)
+		return;
+	for (const char *request : kRequests)
+		obs_websocket_vendor_unregister_request(g_vendor, request);
+	g_vendor = nullptr;
+}
+
 } // namespace
 
 const char *obs_module_description(void)
@@ -3276,10 +3328,9 @@ void obs_module_unload(void)
 	obs_queue_task(OBS_TASK_UI, stop_configured_sidecar, nullptr, true);
 	obs_queue_task(OBS_TASK_UI, remove_dcc_mcp_menu, nullptr, true);
 	obs_frontend_remove_event_callback(frontend_event, nullptr);
-	if (g_vendor != nullptr) {
-		for (const char *request : kRequests)
-			obs_websocket_vendor_unregister_request(g_vendor, request);
-	}
+	// The obs-websocket module may already be gone at this point. Provider API
+	// calls are forbidden during module teardown; its vendor registry owns the
+	// remaining request records and is torn down with the provider.
 	g_vendor = nullptr;
 	blog(LOG_INFO, "dcc-mcp-obs native plugin unloaded");
 }

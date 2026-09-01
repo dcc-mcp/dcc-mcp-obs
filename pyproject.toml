@@ -40,6 +40,8 @@ dev = [
 
 [project.scripts]
 dcc-mcp-obs = "dcc_mcp_obs.server:main"
+dcc-mcp-obs-accept = "dcc_mcp_obs.real_obs_acceptance:main"
+dcc-mcp-obs-accept-host = "dcc_mcp_obs.disposable_obs:main"
 dcc-mcp-obs-install = "dcc_mcp_obs.install_cli:main"
 
 [project.entry-points."dcc_mcp.adapters"]

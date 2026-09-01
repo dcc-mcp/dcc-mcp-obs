@@ -1,0 +1,51 @@
+{
+  "artifacts": {
+    "nativePluginSha256": "2368e3397ed1ecde8912dc4fa460b4abe78fb873918ca17b18ed83649ea713aa",
+    "pythonWheelSha256": "8f0c1827af4e6c703a4a2179260d86e347188703e1eff190234be4bdca55e425"
+  },
+  "binding": {
+    "adapterSession": {
+      "fingerprint": "5856bca02f0425ccd1d1b46aefab8ff0a266002e11e8f9fe6846c6a7d53301ff",
+      "verified": true
+    },
+    "hostProcess": {
+      "fingerprint": "11fd2d237de4ca461b69c620e61c4c37e7c8b889f4f7a9f4402fa8bd685b3781",
+      "verified": true
+    },
+    "pluginInstance": {
+      "fingerprint": "eea86e57bbb85261d7129339c079151e24008f1530b2168176b7b3ff07fd15c4",
+      "verified": true
+    }
+  },
+  "checks": {
+    "authenticatedReadiness": true,
+    "installedPythonWheel": true,
+    "loadedNativeArtifact": true,
+    "recordingOutputFinalized": true,
+    "recordingPause": true,
+    "recordingResume": true,
+    "recordingStart": true,
+    "recordingStop": true,
+    "sceneCreateAndReadback": true,
+    "sceneItemCrudAndReadback": true,
+    "sourceCreateAndReadback": true,
+    "studioModePreviewProgram": true,
+    "transitionReadback": true
+  },
+  "platform": {
+    "architecture": "amd64",
+    "name": "windows"
+  },
+  "product": "dcc-mcp-obs",
+  "recording": {
+    "sha256": "4ecaa5b47122d85723867563a67634d11a215bf238ef9b9a18c828303b7c06be",
+    "sizeBytes": 5839
+  },
+  "result": "passed",
+  "schemaVersion": 1,
+  "versions": {
+    "nativePlugin": "1.1.0",
+    "obs": "32.2.1",
+    "pythonAdapter": "1.1.0"
+  }
+}
