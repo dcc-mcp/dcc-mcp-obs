@@ -1,0 +1,123 @@
+name: Disposable real OBS acceptance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-obs-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real-obs:
+    name: Real OBS / ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            platform: windows
+            target: x64
+          - os: macos-15
+            platform: macos
+            target: universal
+          - os: ubuntu-24.04
+            platform: linux
+            target: x86_64
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install OBS Studio on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install obs-studio --yes --no-progress --limit-output
+
+      - name: Install OBS Studio and virtual display on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends obs-studio xvfb
+
+      - name: Install OBS Studio on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: brew install --cask obs
+
+      - name: Build native plugin
+        uses: ./.github/actions/build-plugin
+        with:
+          target: ${{ matrix.target }}
+          config: RelWithDebInfo
+
+      - name: Build packaged native plugin and Python wheel
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check build
+          python tools/create_plugin_bundle.py \
+            --root release/RelWithDebInfo \
+            --platform '${{ matrix.platform }}' \
+            --output "$RUNNER_TEMP/native-plugin.zip"
+          mkdir -p "$RUNNER_TEMP/python-dist" "$RUNNER_TEMP/real-obs"
+          python -m build --wheel --outdir "$RUNNER_TEMP/python-dist"
+          wheel="$(find "$RUNNER_TEMP/python-dist" -maxdepth 1 -type f -name '*.whl' -print -quit)"
+          test -n "$wheel"
+          python -m pip install --disable-pip-version-check --force-reinstall "$wheel"
+
+      - name: Exercise disposable real OBS on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          dcc-mcp-obs-accept-host `
+            --obs-executable 'C:\Program Files\obs-studio\bin\64bit\obs64.exe' `
+            --native-plugin-archive "$env:RUNNER_TEMP\native-plugin.zip" `
+            --python-wheel (Get-ChildItem "$env:RUNNER_TEMP\python-dist\*.whl").FullName `
+            --work-root "$env:RUNNER_TEMP\real-obs\work" `
+            --output "$env:RUNNER_TEMP\real-obs\evidence.json"
+
+      - name: Exercise disposable real OBS on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          QT_QPA_PLATFORM: xcb
+        run: |
+          wheel="$(find "$RUNNER_TEMP/python-dist" -maxdepth 1 -type f -name '*.whl' -print -quit)"
+          xvfb-run -a dcc-mcp-obs-accept-host \
+            --obs-executable /usr/bin/obs \
+            --native-plugin-archive "$RUNNER_TEMP/native-plugin.zip" \
+            --python-wheel "$wheel" \
+            --work-root "$RUNNER_TEMP/real-obs/work" \
+            --output "$RUNNER_TEMP/real-obs/evidence.json"
+
+      - name: Exercise disposable real OBS on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          wheel="$(find "$RUNNER_TEMP/python-dist" -maxdepth 1 -type f -name '*.whl' -print -quit)"
+          dcc-mcp-obs-accept-host \
+            --obs-executable /Applications/OBS.app/Contents/MacOS/OBS \
+            --native-plugin-archive "$RUNNER_TEMP/native-plugin.zip" \
+            --python-wheel "$wheel" \
+            --work-root "$RUNNER_TEMP/real-obs/work" \
+            --output "$RUNNER_TEMP/real-obs/evidence.json"
+
+      - name: Upload privacy-safe acceptance evidence
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: real-obs-evidence-${{ matrix.platform }}
+          path: ${{ runner.temp }}/real-obs/evidence.json
+          if-no-files-found: error
+          retention-days: 14

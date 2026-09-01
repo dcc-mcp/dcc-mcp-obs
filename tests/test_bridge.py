@@ -479,9 +479,9 @@ def test_recording_stop_allows_bounded_obs_finalization_delay() -> None:
                     "outputPaused": False,
                     "eventSequence": 9 + offset,
                 }
-                for offset in range(6)
+                for offset in range(24)
             ],
-            {**IDENTITY, "outputActive": False, "outputPaused": False, "eventSequence": 15},
+            {**IDENTITY, "outputActive": False, "outputPaused": False, "eventSequence": 33},
         ]
     )
     bridge = ObsControlBridge(
@@ -496,7 +496,7 @@ def test_recording_stop_allows_bounded_obs_finalization_delay() -> None:
     assert result["outputActive"] is False
     assert [request for request, _data, _deadline in transport.requests].count(
         "GetRecordingStatus"
-    ) == 7
+    ) == 25
 
 
 def test_cross_instance_drift_fails_before_following_call() -> None:

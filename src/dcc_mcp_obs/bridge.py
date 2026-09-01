@@ -747,12 +747,29 @@ class ObsControlBridge:
             type(duration_ms) is not int or duration_ms < 0 or duration_ms > 3_600_000
         ):
             raise BridgeError("OBS_ARGUMENT_INVALID")
+        self._select_exact_name(
+            self.list_transitions(),
+            "transitions",
+            "transitionName",
+            transition_name,
+            missing_code="OBS_TRANSITION_NOT_FOUND",
+        )
         data: dict[str, object] = {"transitionName": transition_name, "capability": "transitions"}
         if duration_ms is not None:
             data["durationMs"] = duration_ms
-        return self._name_mutation(
-            "SetCurrentTransition", "GetCurrentTransition", "transitionName", transition_name, data
-        )
+        deadline = self._operation_deadline()
+        accepted = self._checked("SetCurrentTransition", data, deadline=deadline)
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        for attempt in range(self._postcondition_attempts):
+            readback = self._checked("GetCurrentTransition", deadline=deadline)
+            if readback.get("transitionName") == transition_name and (
+                duration_ms is None or readback.get("durationMs") == duration_ms
+            ):
+                return {**readback, "accepted": True, "verified": True}
+            if attempt + 1 < self._postcondition_attempts:
+                self._poll(deadline)
+        raise BridgeError("OBS_POSTCONDITION_FAILED")
 
     def trigger_transition(self, scene_name: str) -> dict[str, object]:
         self._select_exact_name(
@@ -828,21 +845,26 @@ class ObsControlBridge:
         before = self._checked("GetStudioModeStatus", deadline=deadline)
         before_program = before.get("programSceneName")
         before_preview = before.get("previewSceneName")
-        if not isinstance(before_program, str) or not isinstance(before_preview, str):
+        if (
+            not isinstance(before_program, str)
+            or not isinstance(before_preview, str)
+            or before_program == before_preview
+        ):
             raise BridgeError("OBS_POSTCONDITION_FAILED")
         accepted = self._checked(
             "TriggerStudioModeTransition", {"capability": "studio_transition"}, deadline=deadline
         )
         if accepted.get("accepted") is not True:
             raise BridgeError("OBS_MUTATION_REJECTED")
-        # An accepted acknowledgement alone can describe a no-op.  Require the
-        # native Studio Mode readback to prove the preview/program swap.
+        # An accepted acknowledgement alone can describe a no-op. OBS can
+        # either keep preview on the transitioned scene or swap it back to the
+        # old program scene, depending on the operator's swap-scenes setting.
+        # In both modes the program scene must become the prior preview scene.
         for attempt in range(self._postcondition_attempts):
             status = self._checked("GetStudioModeStatus", deadline=deadline)
-            if (
-                status.get("programSceneName") == before_preview
-                and status.get("previewSceneName") == before_program
-            ):
+            if status.get("programSceneName") == before_preview and status.get(
+                "previewSceneName"
+            ) in {before_preview, before_program}:
                 return {**status, "accepted": True, "verified": True}
             if attempt + 1 < self._postcondition_attempts:
                 self._poll(deadline)
@@ -2179,11 +2201,16 @@ class ObsControlBridge:
         accepted = self._checked(request_type, deadline=deadline)
         if accepted.get("accepted") is not True:
             raise BridgeError("OBS_MUTATION_REJECTED")
-        for attempt in range(self._postcondition_attempts):
+        # OBS may need several seconds to drain the encoder and muxer before
+        # its authoritative recording state becomes inactive. Keep the same
+        # operation deadline, but allow denser bounded readback for this one
+        # asynchronous terminal transition.
+        attempts = self._postcondition_attempts * (5 if request_type == "StopRecording" else 1)
+        for attempt in range(attempts):
             readback = self._checked("GetRecordingStatus", deadline=deadline)
             if readback.get("outputActive") is active and readback.get("outputPaused") is paused:
                 return {**readback, "verified": True}
-            if attempt + 1 < self._postcondition_attempts:
+            if attempt + 1 < attempts:
                 remaining = deadline - self._clock()
                 if remaining <= 0:
                     raise BridgeError("OBS_TIMEOUT")

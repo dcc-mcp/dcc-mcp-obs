@@ -32,7 +32,7 @@ request crosses the native boundary.
 ## Validation boundary
 
 The repository runs fake-host/adversarial contract tests and compiles the
-native contract tests on Windows, macOS, and Linux. These checks validate the
-typed protocol and lifecycle gates only. They do not replace acceptance on a
-licensed, live OBS Studio host; that acceptance remains a separate release
-gate.
+native contract tests on Windows, macOS, and Linux. The separate
+[disposable real-OBS gate](real-obs-acceptance.md) then exercises the packaged
+plugin and installed wheel against actual OBS processes on those platforms,
+including scene-item CRUD, transitions, and Studio Mode readback.

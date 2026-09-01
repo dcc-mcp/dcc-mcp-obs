@@ -46,7 +46,7 @@ shipped tools only after their typed contracts land.
 ## Full-control roadmap
 
 - [Profiles, scene collections, bounded hotkeys, screenshots, and operator status](https://github.com/dcc-mcp/dcc-mcp-obs/issues/3)
-- [Disposable real-OBS acceptance](https://github.com/dcc-mcp/dcc-mcp-obs/issues/4)
+- [Disposable real-OBS acceptance](docs/real-obs-acceptance.md)
 
 ## Requirements
 
@@ -181,10 +181,11 @@ Equivalent CI builds run on Windows, macOS, and Linux.
 
 ## Validation boundary
 
-Unit tests, fake protocol sessions, native compilation, package smoke tests,
-and CI do not prove a licensed/live OBS host. This initial delivery makes no
-real-OBS acceptance claim. A disposable live-host acceptance issue remains a
-separate release gate.
+Unit tests, adversarial fake protocol sessions, native compilation, and package
+smoke tests remain separate from host acceptance. The disposable real-OBS gate
+launches the packaged plugin and installed wheel on Windows, macOS, and Linux,
+verifies exact process/session binding and state readback, and publishes only
+privacy-safe evidence. See [the acceptance contract](docs/real-obs-acceptance.md).
 
 ## License
 
