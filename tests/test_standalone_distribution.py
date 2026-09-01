@@ -4,6 +4,7 @@ import hashlib
 import json
 import runpy
 import sys
+from importlib import metadata
 from pathlib import Path
 
 import yaml
@@ -52,7 +53,7 @@ def test_standalone_installs_its_bundled_native_plugin(tmp_path: Path, monkeypat
         "schema_version": 1,
         "product": "dcc-mcp-obs-standalone",
         "version": "1.1.0",
-        "core_version": "0.20.22",
+        "core_version": metadata.version("dcc-mcp-core"),
         "platform": _standalone_entry.install_cli._platform_name(),
         "files": [
             {

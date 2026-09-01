@@ -57,9 +57,9 @@
       "domain": "agent_input_overlay",
       "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": ["get_agent_input_overlay", "create_agent_input_overlay", "emit_agent_input_activity", "clear_agent_input_overlay"],
+      "delivered_operations": ["get_agent_input_overlay", "create_agent_input_overlay", "set_agent_input_overlay_layout", "emit_agent_input_activity", "clear_agent_input_overlay"],
       "remaining_operations": [],
-      "dangerous_operations": ["create_agent_input_overlay", "emit_agent_input_activity", "clear_agent_input_overlay"],
+      "dangerous_operations": ["create_agent_input_overlay", "set_agent_input_overlay_layout", "emit_agent_input_activity", "clear_agent_input_overlay"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
     },
     {
@@ -129,9 +129,9 @@
       "domain": "recording",
       "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": ["get_recording_status", "start_recording", "stop_recording", "pause_recording", "resume_recording"],
+      "delivered_operations": ["get_recording_status", "start_recording", "stop_recording", "pause_recording", "resume_recording", "get_scene_recording_session", "start_scene_recordings", "stop_scene_recordings"],
       "remaining_operations": [],
-      "dangerous_operations": ["start_recording", "stop_recording", "pause_recording", "resume_recording"],
+      "dangerous_operations": ["start_recording", "stop_recording", "pause_recording", "resume_recording", "start_scene_recordings", "stop_scene_recordings"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/1"
     },
     {
@@ -174,9 +174,9 @@
       "domain": "outputs",
       "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": ["list_outputs", "get_output_status", "start_output", "stop_output"],
+      "delivered_operations": ["list_outputs", "get_output_status", "start_output", "stop_output", "get_scene_recording_session", "start_scene_recordings", "stop_scene_recordings"],
       "remaining_operations": [],
-      "dangerous_operations": ["start_output", "stop_output"],
+      "dangerous_operations": ["start_output", "stop_output", "start_scene_recordings", "stop_scene_recordings"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/2"
     },
     {

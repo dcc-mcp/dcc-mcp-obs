@@ -267,6 +267,7 @@ def test_transport_allowlist_is_exactly_the_typed_public_requests() -> None:
         "RequestGracefulShutdown",
         "CreateAgentInputOverlay",
         "GetAgentInputOverlay",
+        "SetAgentInputOverlayLayout",
         "EmitAgentInputActivity",
         "ClearAgentInputOverlay",
         "ListScenes",
@@ -302,6 +303,9 @@ def test_transport_allowlist_is_exactly_the_typed_public_requests() -> None:
         "StopRecording",
         "PauseRecording",
         "ResumeRecording",
+        "StartSceneRecordings",
+        "GetSceneRecordingSession",
+        "StopSceneRecordings",
         "GetStreamingStatus",
         "StartStreaming",
         "StopStreaming",
@@ -344,8 +348,11 @@ def test_transport_allowlist_matches_native_vendor_registration() -> None:
     assert {
         "RequestGracefulShutdown",
         "CreateAgentInputOverlay",
+        "SetAgentInputOverlayLayout",
         "EmitAgentInputActivity",
         "ClearAgentInputOverlay",
+        "StartSceneRecordings",
+        "StopSceneRecordings",
     } <= MUTATING_VENDOR_REQUESTS
     assert "GetAgentInputOverlay" not in MUTATING_VENDOR_REQUESTS
 

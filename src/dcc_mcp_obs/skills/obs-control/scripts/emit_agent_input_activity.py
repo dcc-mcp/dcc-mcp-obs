@@ -13,6 +13,7 @@ def main(
     wheel_direction="none",
     character_count=0,
     duration_ms=1600,
+    agent_id="agent",
     **_kwargs,
 ):
     with obs_bridge() as bridge:
@@ -27,5 +28,6 @@ def main(
                 wheel_direction=wheel_direction,
                 character_count=character_count,
                 duration_ms=duration_ms,
+                agent_id=agent_id,
             ),
         )

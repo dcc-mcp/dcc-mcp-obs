@@ -24,6 +24,7 @@ target_sources(
     native/src/agent-input-overlay.cpp
     native/src/dcc-mcp-menu.cpp
     native/src/plugin-main.cpp
+    native/src/scene-recording-session.cpp
     native/src/sidecar-launcher.cpp
 )
 

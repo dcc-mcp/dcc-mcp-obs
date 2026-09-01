@@ -26,7 +26,8 @@ namespace {
 
 constexpr uint32_t kOverlayWidth = 620;
 constexpr uint32_t kOverlayHeight = 104;
-constexpr float kOverlayMargin = 48.0f;
+constexpr int kDefaultOverlayOpacity = 78;
+constexpr int kDefaultOverlayMargin = 48;
 
 struct AgentInputOverlaySource {
 	std::mutex mutex;
@@ -71,6 +72,7 @@ QImage render_overlay_image(obs_data_t *settings)
 	QPainter painter(&image);
 	painter.setRenderHint(QPainter::Antialiasing, true);
 	painter.setRenderHint(QPainter::TextAntialiasing, true);
+	painter.setOpacity(std::clamp(static_cast<double>(obs_data_get_int(settings, "opacity")) / 100.0, 0.2, 1.0));
 
 	QPainterPath background;
 	background.addRoundedRect(QRectF(1.0, 1.0, kOverlayWidth - 2.0, kOverlayHeight - 2.0), 18.0, 18.0);
@@ -89,10 +91,13 @@ QImage render_overlay_image(obs_data_t *settings)
 	painter.setFont(badge_small);
 	painter.setPen(QColor(139, 154, 173));
 	painter.drawText(QRectF(31.0, 25.0, 76.0, 20.0), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("DCC-MCP"));
-	QFont badge_large(QStringLiteral("Inter"), 15, QFont::Bold);
+	QFont badge_large(QStringLiteral("Inter"), 12, QFont::Bold);
 	painter.setFont(badge_large);
 	painter.setPen(QColor(245, 248, 252));
-	painter.drawText(QRectF(31.0, 45.0, 76.0, 28.0), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("AGENT"));
+	const QString agent_id = QString::fromUtf8(obs_data_get_string(settings, "agentId"));
+	const QString display_agent = painter.fontMetrics().elidedText(
+		agent_id.isEmpty() ? QStringLiteral("AGENT") : agent_id, Qt::ElideRight, 76);
+	painter.drawText(QRectF(31.0, 45.0, 76.0, 28.0), Qt::AlignLeft | Qt::AlignVCenter, display_agent);
 
 	const std::string kind = obs_data_get_string(settings, "eventKind");
 	const QString cue = QString::fromUtf8(obs_data_get_string(settings, "cueLabel"));
@@ -128,6 +133,10 @@ void source_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "durationMs", 0);
 	obs_data_set_default_int(settings, "expiresAtMs", 0);
 	obs_data_set_default_string(settings, "theme", "dcc_mcp_dark");
+	obs_data_set_default_int(settings, "opacity", kDefaultOverlayOpacity);
+	obs_data_set_default_int(settings, "margin", kDefaultOverlayMargin);
+	obs_data_set_default_string(settings, "agentId", "agent");
+	obs_data_set_default_string(settings, "anchor", "bottom_right");
 }
 
 void source_update(void *data, obs_data_t *settings)
@@ -228,37 +237,63 @@ obs_sceneitem_t *overlay_item(obs_scene_t *scene, const std::string &source_name
 													 : nullptr;
 }
 
-std::string anchor_for_item(obs_sceneitem_t *item)
+std::string anchor_for_item(obs_sceneitem_t *item, float margin)
 {
 	obs_video_info video{};
 	vec2 position{};
 	obs_sceneitem_get_pos(item, &position);
 	if (!obs_get_video_info(&video))
 		return "custom";
-	const float bottom = std::max(0.0f, static_cast<float>(video.base_height) - kOverlayHeight - kOverlayMargin);
-	const float left = kOverlayMargin;
+	const float top = margin;
+	const float middle = std::max(0.0f, (static_cast<float>(video.base_height) - kOverlayHeight) / 2.0f);
+	const float bottom = std::max(0.0f, static_cast<float>(video.base_height) - kOverlayHeight - margin);
+	const float left = margin;
 	const float center = std::max(0.0f, (static_cast<float>(video.base_width) - kOverlayWidth) / 2.0f);
-	const float right = std::max(0.0f, static_cast<float>(video.base_width) - kOverlayWidth - kOverlayMargin);
-	if (std::fabs(position.y - bottom) > 1.0f)
-		return "custom";
-	if (std::fabs(position.x - left) <= 1.0f)
-		return "bottom_left";
-	if (std::fabs(position.x - center) <= 1.0f)
-		return "bottom_center";
-	if (std::fabs(position.x - right) <= 1.0f)
-		return "bottom_right";
+	const float right = std::max(0.0f, static_cast<float>(video.base_width) - kOverlayWidth - margin);
+	const auto near = [](float lhs, float rhs) {
+		return std::fabs(lhs - rhs) <= 1.0f;
+	};
+	if (near(position.y, top)) {
+		if (near(position.x, left))
+			return "top_left";
+		if (near(position.x, center))
+			return "top_center";
+		if (near(position.x, right))
+			return "top_right";
+	}
+	if (near(position.y, middle)) {
+		if (near(position.x, left))
+			return "center_left";
+		if (near(position.x, right))
+			return "center_right";
+	}
+	if (near(position.y, bottom)) {
+		if (near(position.x, left))
+			return "bottom_left";
+		if (near(position.x, center))
+			return "bottom_center";
+		if (near(position.x, right))
+			return "bottom_right";
+	}
 	return "custom";
 }
 
-void position_item(obs_sceneitem_t *item, const std::string &anchor, const obs_video_info &video)
+void position_item(obs_sceneitem_t *item, const std::string &anchor, const obs_video_info &video, float margin)
 {
-	const float bottom = std::max(0.0f, static_cast<float>(video.base_height) - kOverlayHeight - kOverlayMargin);
-	float x = kOverlayMargin;
-	if (anchor == "bottom_center")
+	const float top = margin;
+	const float middle = std::max(0.0f, (static_cast<float>(video.base_height) - kOverlayHeight) / 2.0f);
+	const float bottom = std::max(0.0f, static_cast<float>(video.base_height) - kOverlayHeight - margin);
+	float x = margin;
+	if (anchor == "top_center" || anchor == "bottom_center")
 		x = std::max(0.0f, (static_cast<float>(video.base_width) - kOverlayWidth) / 2.0f);
-	else if (anchor == "bottom_right")
-		x = std::max(0.0f, static_cast<float>(video.base_width) - kOverlayWidth - kOverlayMargin);
-	vec2 position{x, bottom};
+	else if (anchor == "top_right" || anchor == "center_right" || anchor == "bottom_right")
+		x = std::max(0.0f, static_cast<float>(video.base_width) - kOverlayWidth - margin);
+	float y = top;
+	if (anchor == "center_left" || anchor == "center_right")
+		y = middle;
+	else if (anchor == "bottom_left" || anchor == "bottom_center" || anchor == "bottom_right")
+		y = bottom;
+	vec2 position{x, y};
 	vec2 scale{1.0f, 1.0f};
 	obs_sceneitem_set_alignment(item, OBS_ALIGN_LEFT | OBS_ALIGN_TOP);
 	obs_sceneitem_set_pos(item, &position);
@@ -382,7 +417,12 @@ obs_data_t *create_agent_input_overlay(const std::string &scene_name, const std:
 	if (item == nullptr && !obs_data_has_user_value(result, "ok"))
 		set_error(result, "OBS_REQUEST_FAILED");
 	if (item != nullptr) {
-		position_item(item, anchor, video);
+		obs_data_t *settings = obs_source_get_settings(obs_sceneitem_get_source(item));
+		const float margin = static_cast<float>(obs_data_get_int(settings, "margin"));
+		obs_data_set_string(settings, "anchor", anchor.c_str());
+		obs_source_update(obs_sceneitem_get_source(item), settings);
+		obs_data_release(settings);
+		position_item(item, anchor, video, margin);
 		obs_data_set_bool(result, "accepted", true);
 	}
 	if (overlay != nullptr)
@@ -410,7 +450,12 @@ obs_data_t *get_agent_input_overlay(const std::string &scene_name, const std::st
 	obs_data_set_string(result, "sourceName", source_name_value.c_str());
 	obs_data_set_string(result, "sourceKind", kAgentInputOverlaySourceId);
 	obs_data_set_string(result, "theme", "dcc_mcp_dark");
-	obs_data_set_string(result, "anchor", anchor_for_item(item).c_str());
+	const int opacity = static_cast<int>(obs_data_get_int(settings, "opacity"));
+	const int margin = static_cast<int>(obs_data_get_int(settings, "margin"));
+	obs_data_set_string(result, "anchor", anchor_for_item(item, static_cast<float>(margin)).c_str());
+	obs_data_set_int(result, "opacity", opacity);
+	obs_data_set_int(result, "margin", margin);
+	obs_data_set_string(result, "agentId", obs_data_get_string(settings, "agentId"));
 	obs_data_set_bool(result, "active", active);
 	obs_data_set_int(result, "activitySequence", obs_data_get_int(settings, "activitySequence"));
 	obs_data_set_string(result, "eventKind", active ? obs_data_get_string(settings, "eventKind") : "none");
@@ -423,6 +468,35 @@ obs_data_t *get_agent_input_overlay(const std::string &scene_name, const std::st
 	obs_data_set_int(result, "durationMs", active ? obs_data_get_int(settings, "durationMs") : 0);
 	obs_data_set_int(result, "remainingMs", remaining);
 	obs_data_release(settings);
+	obs_source_release(scene_source_value);
+	return result;
+}
+
+obs_data_t *set_agent_input_overlay_layout(const std::string &scene_name, const std::string &source_name_value,
+					   const AgentInputOverlayLayout &layout)
+{
+	obs_data_t *result = obs_data_create();
+	obs_source_t *scene_source_value = nullptr;
+	obs_sceneitem_t *item = nullptr;
+	obs_source_t *overlay = nullptr;
+	if (!resolve_binding(scene_name, source_name_value, &scene_source_value, &item, &overlay)) {
+		set_error(result, "OBS_SOURCE_NOT_FOUND");
+		return result;
+	}
+	obs_video_info video{};
+	if (!obs_get_video_info(&video) || video.base_width == 0 || video.base_height == 0) {
+		set_error(result, "OBS_INSTANCE_NOT_READY");
+		obs_source_release(scene_source_value);
+		return result;
+	}
+	obs_data_t *settings = obs_source_get_settings(overlay);
+	obs_data_set_int(settings, "opacity", layout.opacity);
+	obs_data_set_int(settings, "margin", layout.margin);
+	obs_data_set_string(settings, "anchor", layout.anchor.c_str());
+	obs_source_update(overlay, settings);
+	obs_data_release(settings);
+	position_item(item, layout.anchor, video, static_cast<float>(layout.margin));
+	obs_data_set_bool(result, "accepted", true);
 	obs_source_release(scene_source_value);
 	return result;
 }
@@ -442,6 +516,7 @@ obs_data_t *emit_agent_input_activity(const std::string &scene_name, const std::
 	const uint64_t sequence = static_cast<uint64_t>(obs_data_get_int(settings, "activitySequence")) + 1;
 	obs_data_set_bool(settings, "active", true);
 	obs_data_set_int(settings, "activitySequence", static_cast<long long>(sequence));
+	obs_data_set_string(settings, "agentId", activity.agent_id.c_str());
 	obs_data_set_string(settings, "eventKind", activity.event_kind.c_str());
 	std::string keys_csv;
 	for (const auto &key : activity.keys) {

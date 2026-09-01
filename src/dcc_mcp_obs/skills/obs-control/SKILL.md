@@ -98,14 +98,20 @@ returned PNG. Do not treat scene/source metadata or an active recording flag
 as visual evidence. If the frame is black or incorrect, stop before recording,
 repair the exact source binding or capture method, and capture a fresh frame.
 
-For Agent demonstrations, call `create_agent_input_overlay` once for every
-recording scene while keeping the default shared source name. A single
-`emit_agent_input_activity` call then updates the shared source wherever it is
-attached, including three game scenes recorded in batches. Emit a shortcut or
-mouse cue immediately before the matching typed tool action; for code entry,
-emit only `event_kind=typing` plus `character_count`, show the code through a
-normal scene source, then run it. Call `clear_agent_input_overlay` when a demo
+For simultaneous Agent demonstrations, call `create_agent_input_overlay` once
+per game scene with a distinct source name. Inspect each game frame and use
+`set_agent_input_overlay_layout` to choose a non-obscuring edge anchor, bounded
+opacity, and margin. Include `agent_id` with every
+`emit_agent_input_activity` call. Emit only semantic shortcuts, mouse cues, or
+typing counts; never typed text. Call `clear_agent_input_overlay` when a demo
 section ends. The overlay does not install OS hooks or observe user input.
+
+Use `start_scene_recordings` for simultaneous per-game MP4s. Each requested
+scene must contain exactly one enabled Windows window-capture source; its native
+dimensions become that output's video dimensions. Do not include VS Code,
+editor, or other non-game scenes. Verify `videoWidth`, `videoHeight`, output
+paths, and active state through `get_scene_recording_session`, then stop the
+whole exact session with `stop_scene_recordings`.
 
 ## UI fallback
 

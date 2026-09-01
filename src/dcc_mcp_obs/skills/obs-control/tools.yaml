@@ -311,6 +311,125 @@ tools:
     call_examples: [{arguments: {}, note: Resume a paused recording and verify it is unpaused.}]
     next-tools: {on-success: [obs_control__get_recording_status], on-failure: [obs_control__get_status]}
 
+  - name: get_scene_recording_session
+    description: Read one bounded session of independent video-only MP4 recordings, including each exact game-window resolution and artifact path.
+    source_file: scripts/get_scene_recording_session.py
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [session_id]
+      properties:
+        session_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$'}
+    output_schema: &scene_recording_status_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties: &scene_recording_status_properties
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context:
+          type: object
+          additionalProperties: false
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sessionId, sessionActive, startedAt, recordings]
+          properties:
+            instanceId: {type: string, minLength: 1, maxLength: 128}
+            pluginVersion: {type: string, minLength: 1}
+            obsVersion: {type: string, minLength: 1}
+            hostPid: {type: integer, minimum: 1}
+            eventSequence: {type: integer, minimum: 0}
+            ok: {const: true}
+            sessionId: {type: string, minLength: 1, maxLength: 128}
+            sessionActive: {type: boolean}
+            startedAt: {type: string, minLength: 1, maxLength: 64}
+            recordings:
+              type: array
+              minItems: 1
+              maxItems: 8
+              items:
+                type: object
+                additionalProperties: false
+                required: [sceneName, fileName, outputPath, outputActive, videoOnly, videoWidth, videoHeight, totalBytes, totalFrames, lastError]
+                properties:
+                  sceneName: {type: string, minLength: 1, maxLength: 256}
+                  fileName: {type: string, minLength: 5, maxLength: 160, pattern: '\.mp4$'}
+                  outputPath: {type: string, minLength: 1, maxLength: 4096}
+                  outputActive: {type: boolean}
+                  videoOnly: {const: true}
+                  videoWidth: {type: integer, minimum: 1, maximum: 16384}
+                  videoHeight: {type: integer, minimum: 1, maximum: 16384}
+                  totalBytes: {type: integer, minimum: 0}
+                  totalFrames: {type: integer, minimum: 0}
+                  lastError: {type: string, maxLength: 128}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {session_id: 01234567-89ab-cdef-0123-456789abcdef}, note: Read exact per-game recording state.}]
+    next-tools: {on-failure: [obs_control__get_status]}
+  - name: start_scene_recordings
+    description: Atomically start one video-only MP4 per exact game scene, using the captured game window's native dimensions and a shared start timestamp in each filename.
+    source_file: scripts/start_scene_recordings.py
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [recordings]
+      properties:
+        recordings:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items:
+            type: object
+            additionalProperties: false
+            required: [scene_name, file_name_prefix]
+            properties:
+              scene_name: {type: string, minLength: 1, maxLength: 256}
+              file_name_prefix: {type: string, minLength: 1, maxLength: 96, pattern: '^[^<>:"/\\|?*]+[^<>:"/\\|?*. ]$|^[^<>:"/\\|?*. ]$'}
+    output_schema: &scene_recording_mutation_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context, postcondition]
+      properties:
+        <<: *scene_recording_status_properties
+        postcondition:
+          type: object
+          additionalProperties: false
+          required: [verified]
+          properties: {verified: {const: true}}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: false, open_world_hint: false, deferred_hint: false}
+    call_examples:
+      - arguments:
+          recordings:
+            - {scene_name: RL - Vampire Survivors, file_name_prefix: Vampire Survivors}
+            - {scene_name: RL - The Bazaar, file_name_prefix: The Bazaar}
+            - {scene_name: RL - Black Myth Wukong, file_name_prefix: Black Myth Wukong}
+        note: Start only the three game scenes; do not include editor or VS Code scenes.
+    next-tools: {on-success: [obs_control__get_scene_recording_session], on-failure: [obs_control__get_status]}
+  - name: stop_scene_recordings
+    description: Stop every output in one exact independent scene-recording session and verify all are inactive.
+    source_file: scripts/stop_scene_recordings.py
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [session_id]
+      properties:
+        session_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$'}
+    output_schema: *scene_recording_mutation_output
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {session_id: 01234567-89ab-cdef-0123-456789abcdef}, note: Stop and verify every game recording in the session.}]
+    next-tools: {on-success: [obs_control__get_scene_recording_session], on-failure: [obs_control__get_status]}
+
   - name: get_streaming_status
     description: Get typed OBS streaming status.
     source_file: scripts/get_streaming_status.py
@@ -1316,7 +1435,7 @@ tools:
         context:
           type: object
           additionalProperties: false
-          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sceneName, sceneItemId, sourceName, sourceKind, theme, anchor, active, activitySequence, eventKind, keys, mouseButton, wheelDirection, characterCount, cueLabel, durationMs, remainingMs]
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sceneName, sceneItemId, sourceName, sourceKind, theme, anchor, opacity, margin, agentId, active, activitySequence, eventKind, keys, mouseButton, wheelDirection, characterCount, cueLabel, durationMs, remainingMs]
           properties:
             instanceId: {type: string, minLength: 1, maxLength: 128}
             pluginVersion: {type: string, minLength: 1}
@@ -1329,7 +1448,10 @@ tools:
             sourceName: {type: string, minLength: 1, maxLength: 256}
             sourceKind: {const: dcc_mcp_agent_input_overlay}
             theme: {const: dcc_mcp_dark}
-            anchor: {enum: [bottom_left, bottom_center, bottom_right, custom]}
+            anchor: {enum: [top_left, top_center, top_right, center_left, center_right, bottom_left, bottom_center, bottom_right, custom]}
+            opacity: {type: integer, minimum: 20, maximum: 100}
+            margin: {type: integer, minimum: 8, maximum: 160}
+            agentId: {type: string, maxLength: 64}
             active: {type: boolean}
             activitySequence: {type: integer, minimum: 0}
             eventKind: {enum: [none, shortcut, mouse_button, mouse_wheel, typing]}
@@ -1360,7 +1482,7 @@ tools:
       properties:
         scene_name: {type: string, minLength: 1, maxLength: 256}
         source_name: {type: string, minLength: 1, maxLength: 256, default: DCC-MCP Agent Input}
-        anchor: {enum: [bottom_left, bottom_center, bottom_right], default: bottom_right}
+        anchor: {enum: [top_left, top_center, top_right, center_left, center_right, bottom_left, bottom_center, bottom_right], default: bottom_right}
     output_schema: &agent_input_overlay_mutation_output
       type: object
       additionalProperties: false
@@ -1379,6 +1501,27 @@ tools:
     annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
     call_examples: [{arguments: {scene_name: RL - Game 1, anchor: bottom_right}, note: Attach the same shared overlay source to each recording scene.}]
     next-tools: {on-success: [obs_control__get_agent_input_overlay], on-failure: [obs_control__list_scenes, obs_control__get_status]}
+  - name: set_agent_input_overlay_layout
+    description: Move one scene-bound Agent input overlay to a bounded edge anchor and adjust opacity/margin after inspecting the game frame for a non-obscuring location.
+    source_file: scripts/set_agent_input_overlay_layout.py
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [scene_name, anchor, opacity, margin]
+      properties:
+        scene_name: {type: string, minLength: 1, maxLength: 256}
+        source_name: {type: string, minLength: 1, maxLength: 256, default: DCC-MCP Agent Input}
+        anchor: {enum: [top_left, top_center, top_right, center_left, center_right, bottom_left, bottom_center, bottom_right]}
+        opacity: {type: integer, minimum: 20, maximum: 100}
+        margin: {type: integer, minimum: 8, maximum: 160}
+    output_schema: *agent_input_overlay_mutation_output
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {scene_name: RL - Game 1, anchor: top_left, opacity: 55, margin: 32}, note: Choose an edge after inspecting the game frame.}]
+    next-tools: {on-success: [obs_control__get_agent_input_overlay], on-failure: [obs_control__get_status]}
   - name: emit_agent_input_activity
     description: Show a bounded semantic keyboard, mouse, wheel, or typing-count cue without capturing global input or text content.
     source_file: scripts/emit_agent_input_activity.py
@@ -1399,6 +1542,7 @@ tools:
         wheel_direction: {enum: [none, up, down, left, right], default: none}
         character_count: {type: integer, minimum: 0, maximum: 10000, default: 0}
         duration_ms: {type: integer, minimum: 250, maximum: 5000, default: 1600}
+        agent_id: {type: string, minLength: 1, maxLength: 64, default: agent}
     output_schema: *agent_input_overlay_mutation_output
     execution: sync
     affinity: any
@@ -1406,7 +1550,7 @@ tools:
     timeout_hint_secs: 30
     annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: false, open_world_hint: false, deferred_hint: false}
     call_examples:
-      - {arguments: {scene_name: RL - Game 1, event_kind: shortcut, keys: [ctrl, shift, r]}, note: Show a shortcut without exposing typed text.}
+      - {arguments: {scene_name: RL - Game 1, event_kind: shortcut, keys: [ctrl, shift, r], agent_id: trainer-1}, note: Show a shortcut and the operating agent without exposing typed text.}
       - {arguments: {scene_name: RL - Game 1, event_kind: mouse_button, mouse_button: left}, note: Show a left-click cue.}
       - {arguments: {scene_name: RL - Game 1, event_kind: typing, character_count: 12}, note: Show only a character count, never the text content.}
     next-tools: {on-success: [obs_control__get_agent_input_overlay], on-failure: [obs_control__get_status]}

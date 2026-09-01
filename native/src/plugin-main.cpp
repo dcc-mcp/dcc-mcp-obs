@@ -21,6 +21,7 @@
 #include <mutex>
 #include <limits>
 #include <random>
+#include <set>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -36,6 +37,7 @@
 #include "obs-websocket-api.h"
 #include "agent-input-overlay.hpp"
 #include "dcc-mcp-menu.hpp"
+#include "scene-recording-session.hpp"
 #include "sidecar-launcher.hpp"
 #include "ui-task-gate.hpp"
 
@@ -87,6 +89,7 @@ std::string g_instance_id;
 std::atomic<bool> g_plugin_loaded{false};
 std::unique_ptr<dcc_mcp_obs::DccMcpMenu> g_dcc_mcp_menu;
 std::unique_ptr<dcc_mcp_obs::SidecarLauncher> g_sidecar_launcher;
+std::unique_ptr<dcc_mcp_obs::SceneRecordingSessionManager> g_scene_recording_sessions;
 
 QMainWindow *obs_main_window()
 {
@@ -236,6 +239,13 @@ void stop_configured_sidecar(void *)
 	g_sidecar_launcher.reset();
 }
 
+void stop_scene_recording_sessions(void *)
+{
+	if (g_scene_recording_sessions != nullptr)
+		g_scene_recording_sessions->shutdown();
+	g_scene_recording_sessions.reset();
+}
+
 enum class UiOperation {
 	Invalid,
 	Status,
@@ -244,6 +254,7 @@ enum class UiOperation {
 	ListSources,
 	CreateAgentInputOverlay,
 	GetAgentInputOverlay,
+	SetAgentInputOverlayLayout,
 	EmitAgentInputActivity,
 	ClearAgentInputOverlay,
 	RequestGracefulShutdown,
@@ -252,6 +263,9 @@ enum class UiOperation {
 	StopRecording,
 	PauseRecording,
 	ResumeRecording,
+	StartSceneRecordings,
+	GetSceneRecordingSession,
+	StopSceneRecordings,
 	StreamingStatus,
 	StartStreaming,
 	StopStreaming,
@@ -323,7 +337,11 @@ struct UiState {
 	std::string source_kind;
 	std::string transition_name;
 	std::string overlay_anchor;
+	int overlay_opacity = 78;
+	int overlay_margin = 48;
 	dcc_mcp_obs::AgentInputActivity agent_input_activity;
+	std::vector<dcc_mcp_obs::SceneRecordingSpec> scene_recording_specs;
+	std::string scene_recording_session_id;
 	std::string window_executable_filter;
 	std::string window_title_filter;
 	WindowCaptureBinding window_capture;
@@ -1276,11 +1294,14 @@ void execute_ui_operation(void *private_data)
 	obs_data_t *result = nullptr;
 	const bool is_mutation =
 		state->operation == UiOperation::CreateAgentInputOverlay ||
+		state->operation == UiOperation::SetAgentInputOverlayLayout ||
 		state->operation == UiOperation::EmitAgentInputActivity ||
 		state->operation == UiOperation::ClearAgentInputOverlay ||
 		state->operation == UiOperation::RequestGracefulShutdown ||
 		state->operation == UiOperation::StartRecording || state->operation == UiOperation::StopRecording ||
 		state->operation == UiOperation::PauseRecording || state->operation == UiOperation::ResumeRecording ||
+		state->operation == UiOperation::StartSceneRecordings ||
+		state->operation == UiOperation::StopSceneRecordings ||
 		state->operation == UiOperation::StartStreaming || state->operation == UiOperation::StopStreaming ||
 		state->operation == UiOperation::StartReplayBuffer ||
 		state->operation == UiOperation::StopReplayBuffer ||
@@ -1971,6 +1992,19 @@ void execute_ui_operation(void *private_data)
 		case UiOperation::GetAgentInputOverlay:
 			result = dcc_mcp_obs::get_agent_input_overlay(state->scene_name, state->source_name);
 			break;
+		case UiOperation::SetAgentInputOverlayLayout:
+			if (!state->gate.claim_mutation(state->deadline)) {
+				result = obs_data_create();
+				set_error(result, "OBS_UI_TIMEOUT");
+			} else {
+				dcc_mcp_obs::AgentInputOverlayLayout layout;
+				layout.anchor = state->overlay_anchor;
+				layout.opacity = state->overlay_opacity;
+				layout.margin = state->overlay_margin;
+				result = dcc_mcp_obs::set_agent_input_overlay_layout(state->scene_name,
+										     state->source_name, layout);
+			}
+			break;
 		case UiOperation::EmitAgentInputActivity:
 			if (!state->gate.claim_mutation(state->deadline)) {
 				result = obs_data_create();
@@ -1994,10 +2028,13 @@ void execute_ui_operation(void *private_data)
 			const bool streaming_active = obs_frontend_streaming_active();
 			const bool replay_buffer_active = obs_frontend_replay_buffer_active();
 			const bool virtual_camera_active = obs_frontend_virtualcam_active();
+			const bool scene_recording_active = g_scene_recording_sessions != nullptr &&
+							    g_scene_recording_sessions->active();
 			const void *main_window = obs_frontend_get_main_window();
 			if (main_window == nullptr)
 				set_error(result, "OBS_INSTANCE_NOT_READY");
-			else if (recording_active || streaming_active || replay_buffer_active || virtual_camera_active)
+			else if (recording_active || streaming_active || replay_buffer_active ||
+				 virtual_camera_active || scene_recording_active)
 				set_error(result, "OBS_OUTPUT_ACTIVE");
 			else if (!state->gate.claim_mutation(state->deadline))
 				set_error(result, "OBS_UI_TIMEOUT");
@@ -2064,6 +2101,35 @@ void execute_ui_operation(void *private_data)
 			}
 			break;
 		}
+		case UiOperation::StartSceneRecordings:
+			if (!state->gate.claim_mutation(state->deadline)) {
+				result = obs_data_create();
+				set_error(result, "OBS_UI_TIMEOUT");
+			} else if (g_scene_recording_sessions == nullptr) {
+				result = obs_data_create();
+				set_error(result, "OBS_INSTANCE_NOT_READY");
+			} else {
+				result = g_scene_recording_sessions->start(state->scene_recording_specs);
+			}
+			break;
+		case UiOperation::GetSceneRecordingSession:
+			result = g_scene_recording_sessions != nullptr
+					 ? g_scene_recording_sessions->status(state->scene_recording_session_id)
+					 : obs_data_create();
+			if (g_scene_recording_sessions == nullptr)
+				set_error(result, "OBS_INSTANCE_NOT_READY");
+			break;
+		case UiOperation::StopSceneRecordings:
+			if (!state->gate.claim_mutation(state->deadline)) {
+				result = obs_data_create();
+				set_error(result, "OBS_UI_TIMEOUT");
+			} else if (g_scene_recording_sessions == nullptr) {
+				result = obs_data_create();
+				set_error(result, "OBS_INSTANCE_NOT_READY");
+			} else {
+				result = g_scene_recording_sessions->stop(state->scene_recording_session_id);
+			}
+			break;
 		case UiOperation::StreamingStatus:
 			result = streaming_status();
 			break;
@@ -2317,8 +2383,10 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, cons
 		      bool has_duration, int duration_ms, bool has_pos, bool has_scale, bool has_rotation, float pos_x,
 		      float pos_y, float scale_x, float scale_y, float rotation,
 		      const WindowCaptureBinding &window_capture, const WindowCaptureBinding &expected_window_capture,
-		      const std::string &overlay_anchor, const dcc_mcp_obs::AgentInputActivity &agent_input_activity,
-		      uint64_t deadline_at_ms, obs_data_t *response)
+		      const std::string &overlay_anchor, int overlay_opacity, int overlay_margin,
+		      const dcc_mcp_obs::AgentInputActivity &agent_input_activity,
+		      const std::vector<dcc_mcp_obs::SceneRecordingSpec> &scene_recording_specs,
+		      const std::string &scene_recording_session_id, uint64_t deadline_at_ms, obs_data_t *response)
 {
 	auto state = std::make_shared<UiState>();
 	state->operation = operation;
@@ -2331,7 +2399,11 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, cons
 	state->source_kind = source_kind;
 	state->transition_name = transition_name;
 	state->overlay_anchor = overlay_anchor;
+	state->overlay_opacity = overlay_opacity;
+	state->overlay_margin = overlay_margin;
 	state->agent_input_activity = agent_input_activity;
+	state->scene_recording_specs = scene_recording_specs;
+	state->scene_recording_session_id = scene_recording_session_id;
 	state->window_executable_filter = window_executable_filter;
 	state->window_title_filter = window_title_filter;
 	state->window_capture = window_capture;
@@ -2450,6 +2522,8 @@ UiOperation operation_for(const std::string &request)
 		return UiOperation::CreateAgentInputOverlay;
 	if (request == "GetAgentInputOverlay")
 		return UiOperation::GetAgentInputOverlay;
+	if (request == "SetAgentInputOverlayLayout")
+		return UiOperation::SetAgentInputOverlayLayout;
 	if (request == "EmitAgentInputActivity")
 		return UiOperation::EmitAgentInputActivity;
 	if (request == "ClearAgentInputOverlay")
@@ -2466,6 +2540,12 @@ UiOperation operation_for(const std::string &request)
 		return UiOperation::PauseRecording;
 	if (request == "ResumeRecording")
 		return UiOperation::ResumeRecording;
+	if (request == "StartSceneRecordings")
+		return UiOperation::StartSceneRecordings;
+	if (request == "GetSceneRecordingSession")
+		return UiOperation::GetSceneRecordingSession;
+	if (request == "StopSceneRecordings")
+		return UiOperation::StopSceneRecordings;
 	if (request == "GetStreamingStatus")
 		return UiOperation::StreamingStatus;
 	if (request == "StartStreaming")
@@ -2535,11 +2615,15 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 	std::string source_kind;
 	std::string transition_name;
 	std::string overlay_anchor;
+	int overlay_opacity = 78;
+	int overlay_margin = 48;
 	std::string window_executable_filter;
 	std::string window_title_filter;
 	WindowCaptureBinding window_capture;
 	WindowCaptureBinding expected_window_capture;
 	dcc_mcp_obs::AgentInputActivity agent_input_activity;
+	std::vector<dcc_mcp_obs::SceneRecordingSpec> scene_recording_specs;
+	std::string scene_recording_session_id;
 	int64_t scene_item_id = 0;
 	bool enabled = true, studio_enabled = false, has_duration = false;
 	int duration_ms = 0;
@@ -2579,6 +2663,61 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 		}
 	}
 	const std::string request_name(request);
+	if (request_name == "StartSceneRecordings") {
+		obs_data_array_t *recordings = request_data != nullptr ? obs_data_get_array(request_data, "recordings")
+								       : nullptr;
+		const size_t count = recordings != nullptr ? obs_data_array_count(recordings) : 0;
+		std::set<std::string> scenes;
+		std::set<std::string> prefixes;
+		bool valid = count >= 1 && count <= 8;
+		for (size_t index = 0; valid && index < count; ++index) {
+			obs_data_t *item = obs_data_array_item(recordings, index);
+			const char *scene = item != nullptr ? obs_data_get_string(item, "sceneName") : nullptr;
+			const char *prefix = item != nullptr ? obs_data_get_string(item, "fileNamePrefix") : nullptr;
+			dcc_mcp_obs::SceneRecordingSpec spec{scene != nullptr ? scene : "",
+							     prefix != nullptr ? prefix : ""};
+			std::string folded = spec.file_name_prefix;
+			std::transform(folded.begin(), folded.end(), folded.begin(), [](unsigned char character) {
+				return static_cast<char>(std::tolower(character));
+			});
+			const std::string invalid = "<>:\"/\\|?*";
+			valid = !spec.scene_name.empty() && spec.scene_name.size() <= 256 &&
+				!spec.file_name_prefix.empty() && spec.file_name_prefix.size() <= 96 &&
+				spec.file_name_prefix.front() != ' ' && spec.file_name_prefix.back() != ' ' &&
+				spec.file_name_prefix.back() != '.' &&
+				std::none_of(spec.file_name_prefix.begin(), spec.file_name_prefix.end(),
+					     [&](unsigned char character) {
+						     return character < 32 || character == 127 ||
+							    invalid.find(static_cast<char>(character)) !=
+								    std::string::npos;
+					     }) &&
+				scenes.insert(spec.scene_name).second && prefixes.insert(folded).second;
+			if (valid)
+				scene_recording_specs.push_back(std::move(spec));
+			if (item != nullptr)
+				obs_data_release(item);
+		}
+		if (recordings != nullptr)
+			obs_data_array_release(recordings);
+		if (!valid) {
+			set_error(response_data, "OBS_ARGUMENT_INVALID");
+			return;
+		}
+	}
+	if (request_name == "GetSceneRecordingSession" || request_name == "StopSceneRecordings") {
+		const char *value = request_data != nullptr ? obs_data_get_string(request_data, "sessionId") : nullptr;
+		scene_recording_session_id = value != nullptr ? value : "";
+		const bool valid = !scene_recording_session_id.empty() && scene_recording_session_id.size() <= 128 &&
+				   std::all_of(scene_recording_session_id.begin(), scene_recording_session_id.end(),
+					       [](unsigned char character) {
+						       return std::isalnum(character) || character == '-' ||
+							      character == '_';
+					       });
+		if (!valid) {
+			set_error(response_data, "OBS_ARGUMENT_INVALID");
+			return;
+		}
+	}
 	if (request_name == "ListWindowCaptureCandidates" || request_name == "RestoreWindowCaptureCandidate") {
 		const char *executable = request_data != nullptr ? obs_data_get_string(request_data, "executable")
 								 : nullptr;
@@ -2647,7 +2786,8 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 		request_name == "SetSceneItemTransform" || request_name == "RemoveSceneItem" ||
 		request_name == "TriggerTransition" || request_name == "SetCurrentPreviewScene" ||
 		request_name == "CreateAgentInputOverlay" || request_name == "GetAgentInputOverlay" ||
-		request_name == "EmitAgentInputActivity" || request_name == "ClearAgentInputOverlay";
+		request_name == "SetAgentInputOverlayLayout" || request_name == "EmitAgentInputActivity" ||
+		request_name == "ClearAgentInputOverlay";
 	if (scene_request && request_data != nullptr) {
 		const char *value = obs_data_get_string(request_data, "sceneName");
 		if (value != nullptr)
@@ -2758,23 +2898,41 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 	}
 	const bool overlay_request =
 		request_name == "CreateAgentInputOverlay" || request_name == "GetAgentInputOverlay" ||
-		request_name == "EmitAgentInputActivity" || request_name == "ClearAgentInputOverlay";
+		request_name == "SetAgentInputOverlayLayout" || request_name == "EmitAgentInputActivity" ||
+		request_name == "ClearAgentInputOverlay";
 	if (overlay_request &&
 	    (scene_name.empty() || source_name.empty() || scene_name.size() > 256 || source_name.size() > 256)) {
 		set_error(response_data, "OBS_ARGUMENT_INVALID");
 		return;
 	}
-	if (request_name == "CreateAgentInputOverlay") {
+	if (request_name == "CreateAgentInputOverlay" || request_name == "SetAgentInputOverlayLayout") {
 		const char *value = request_data != nullptr ? obs_data_get_string(request_data, "anchor") : nullptr;
 		if (value != nullptr)
 			overlay_anchor = value;
-		if (overlay_anchor != "bottom_left" && overlay_anchor != "bottom_center" &&
-		    overlay_anchor != "bottom_right") {
+		const bool valid_anchor = overlay_anchor == "top_left" || overlay_anchor == "top_center" ||
+					  overlay_anchor == "top_right" || overlay_anchor == "center_left" ||
+					  overlay_anchor == "center_right" || overlay_anchor == "bottom_left" ||
+					  overlay_anchor == "bottom_center" || overlay_anchor == "bottom_right";
+		if (!valid_anchor) {
 			set_error(response_data, "OBS_ARGUMENT_INVALID");
 			return;
 		}
+		if (request_name == "SetAgentInputOverlayLayout") {
+			overlay_opacity = request_data != nullptr
+						  ? static_cast<int>(obs_data_get_int(request_data, "opacity"))
+						  : 0;
+			overlay_margin = request_data != nullptr
+						 ? static_cast<int>(obs_data_get_int(request_data, "margin"))
+						 : 0;
+			if (overlay_opacity < 20 || overlay_opacity > 100 || overlay_margin < 8 ||
+			    overlay_margin > 160) {
+				set_error(response_data, "OBS_ARGUMENT_INVALID");
+				return;
+			}
+		}
 	}
 	if (request_name == "EmitAgentInputActivity") {
+		const char *agent_id = request_data != nullptr ? obs_data_get_string(request_data, "agentId") : nullptr;
 		const char *event_kind = request_data != nullptr ? obs_data_get_string(request_data, "eventKind")
 								 : nullptr;
 		const char *mouse_button = request_data != nullptr ? obs_data_get_string(request_data, "mouseButton")
@@ -2782,6 +2940,7 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 		const char *wheel_direction =
 			request_data != nullptr ? obs_data_get_string(request_data, "wheelDirection") : nullptr;
 		agent_input_activity.event_kind = event_kind != nullptr ? event_kind : "";
+		agent_input_activity.agent_id = agent_id != nullptr ? agent_id : "";
 		agent_input_activity.mouse_button = mouse_button != nullptr ? mouse_button : "";
 		agent_input_activity.wheel_direction = wheel_direction != nullptr ? wheel_direction : "";
 		agent_input_activity.character_count =
@@ -2837,7 +2996,11 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 			 agent_input_activity.mouse_button == "none" &&
 			 agent_input_activity.wheel_direction == "none" && agent_input_activity.character_count >= 1 &&
 			 agent_input_activity.character_count <= 10000);
-		if (!valid_kind || !valid_mouse || !valid_wheel || !keys_valid || !semantic_valid ||
+		const bool valid_agent_id =
+			!agent_input_activity.agent_id.empty() && agent_input_activity.agent_id.size() <= 64 &&
+			std::all_of(agent_input_activity.agent_id.begin(), agent_input_activity.agent_id.end(),
+				    [](unsigned char value) { return value >= 32 && value != 127; });
+		if (!valid_kind || !valid_mouse || !valid_wheel || !keys_valid || !semantic_valid || !valid_agent_id ||
 		    agent_input_activity.duration_ms < 250 || agent_input_activity.duration_ms > 5000) {
 			set_error(response_data, "OBS_ARGUMENT_INVALID");
 			return;
@@ -2869,8 +3032,8 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 		required_capability = "studio_transition";
 	else if (request_name == "RequestGracefulShutdown")
 		required_capability = "application_lifecycle";
-	else if (request_name == "CreateAgentInputOverlay" || request_name == "EmitAgentInputActivity" ||
-		 request_name == "ClearAgentInputOverlay")
+	else if (request_name == "CreateAgentInputOverlay" || request_name == "SetAgentInputOverlayLayout" ||
+		 request_name == "EmitAgentInputActivity" || request_name == "ClearAgentInputOverlay")
 		required_capability = "agent_input_overlay";
 	if (required_capability != nullptr) {
 		const char *capability = request_data != nullptr ? obs_data_get_string(request_data, "capability")
@@ -2930,7 +3093,8 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 			 source_name, source_kind, transition_name, window_executable_filter, window_title_filter,
 			 scene_item_id, enabled, studio_enabled, has_duration, duration_ms, has_pos, has_scale,
 			 has_rotation, pos_x, pos_y, scale_x, scale_y, rotation, window_capture,
-			 expected_window_capture, overlay_anchor, agent_input_activity, deadline_at_ms, response_data);
+			 expected_window_capture, overlay_anchor, overlay_opacity, overlay_margin, agent_input_activity,
+			 scene_recording_specs, scene_recording_session_id, deadline_at_ms, response_data);
 	if (request_name == "RequestGracefulShutdown" && obs_data_get_bool(response_data, "shutdownScheduled"))
 		obs_queue_task(OBS_TASK_UI, request_frontend_exit, nullptr, false);
 }
@@ -2951,6 +3115,7 @@ constexpr const char *kRequests[] = {
 	"RequestGracefulShutdown",
 	"CreateAgentInputOverlay",
 	"GetAgentInputOverlay",
+	"SetAgentInputOverlayLayout",
 	"EmitAgentInputActivity",
 	"ClearAgentInputOverlay",
 	"ListScenes",
@@ -2987,6 +3152,9 @@ constexpr const char *kRequests[] = {
 	"StopRecording",
 	"PauseRecording",
 	"ResumeRecording",
+	"StartSceneRecordings",
+	"GetSceneRecordingSession",
+	"StopSceneRecordings",
 	"GetStreamingStatus",
 	"StartStreaming",
 	"StopStreaming",
@@ -3025,6 +3193,7 @@ bool obs_module_load(void)
 {
 	g_plugin_loaded.store(true);
 	g_instance_id = make_instance_id();
+	g_scene_recording_sessions = std::make_unique<dcc_mcp_obs::SceneRecordingSessionManager>();
 	dcc_mcp_obs::register_agent_input_overlay_source();
 	obs_frontend_add_event_callback(frontend_event, nullptr);
 	blog(LOG_INFO, "dcc-mcp-obs native plugin loaded");
@@ -3047,6 +3216,7 @@ void obs_module_post_load(void)
 void obs_module_unload(void)
 {
 	g_plugin_loaded.store(false);
+	obs_queue_task(OBS_TASK_UI, stop_scene_recording_sessions, nullptr, true);
 	obs_queue_task(OBS_TASK_UI, stop_configured_sidecar, nullptr, true);
 	obs_queue_task(OBS_TASK_UI, remove_dcc_mcp_menu, nullptr, true);
 	obs_frontend_remove_event_callback(frontend_event, nullptr);

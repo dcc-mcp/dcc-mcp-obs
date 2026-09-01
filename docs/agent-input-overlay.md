@@ -14,6 +14,9 @@ The source renders only an event explicitly emitted by the Agent:
 - one wheel direction; or
 - a character count for typing activity.
 
+Every emitted cue also includes a bounded `agent_id`, shown in the badge so a
+viewer can tell which Agent is operating without revealing typed content.
+
 The contract has no text or arbitrary-label field. It does not install OS
 keyboard or mouse hooks, infer human activity, store keystroke history, or open
 another network service. Code, terminals, and game windows remain ordinary OBS
@@ -23,25 +26,28 @@ their content.
 ## Three-scene recording workflow
 
 1. Discover the exact three game scenes.
-2. Call `create_agent_input_overlay` for each scene with the same default
-   source name, `DCC-MCP Agent Input`. OBS reuses the shared source while each
-   scene keeps its own positioned scene item.
-3. Before an Agent action, call `emit_agent_input_activity` against any attached
-   scene. All scenes containing that shared source receive the same bounded cue.
-4. To demonstrate code, keep the editor or terminal visible through its normal
-   source, emit a shortcut/mouse/typing-count cue, and then run the code.
+2. Call `create_agent_input_overlay` for each scene with a distinct source name
+   when different Agents can operate simultaneously.
+3. Inspect each game frame, then call `set_agent_input_overlay_layout` with a
+   safe edge anchor, 20-100 opacity, and 8-160 pixel margin.
+4. Before an Agent action, call `emit_agent_input_activity` with that scene's
+   source name and `agent_id`.
 5. Call `clear_agent_input_overlay` between sections when an immediate clear is
    preferable to the bounded automatic expiry.
 6. Capture and inspect a fresh program frame before starting a long recording.
+7. Start one independent recording per game scene. Do not include editor or VS
+   Code scenes in the recording plan.
 
-The default `dcc_mcp_dark` theme and bottom-right anchor are deliberately fixed
-product choices. `bottom_left` and `bottom_center` are also supported when they
-avoid important game UI.
+The default `dcc_mcp_dark` theme uses 78% opacity and a 48-pixel margin. Eight
+edge anchors are available; the center of the game frame is intentionally not
+an allowed anchor. Independent recording clones scale the overlay to at most
+40% of the game-window width and 18% of its height.
 
 ## Typed tools
 
 - `get_agent_input_overlay`
 - `create_agent_input_overlay`
+- `set_agent_input_overlay_layout`
 - `emit_agent_input_activity`
 - `clear_agent_input_overlay`
 

@@ -83,7 +83,22 @@ _IDENTITY_KEYS = frozenset(
 WINDOW_CAPTURE_METHODS = frozenset({"automatic", "bitblt", "windows_graphics_capture"})
 AGENT_INPUT_OVERLAY_SOURCE_KIND = "dcc_mcp_agent_input_overlay"
 AGENT_INPUT_OVERLAY_THEME = "dcc_mcp_dark"
-AGENT_INPUT_OVERLAY_ANCHORS = frozenset({"bottom_left", "bottom_center", "bottom_right"})
+AGENT_INPUT_OVERLAY_ANCHORS = frozenset(
+    {
+        "top_left",
+        "top_center",
+        "top_right",
+        "center_left",
+        "center_right",
+        "bottom_left",
+        "bottom_center",
+        "bottom_right",
+    }
+)
+AGENT_INPUT_OVERLAY_MIN_OPACITY = 20
+AGENT_INPUT_OVERLAY_MAX_OPACITY = 100
+AGENT_INPUT_OVERLAY_MIN_MARGIN = 8
+AGENT_INPUT_OVERLAY_MAX_MARGIN = 160
 AGENT_INPUT_EVENT_KINDS = frozenset({"shortcut", "mouse_button", "mouse_wheel", "typing"})
 AGENT_INPUT_KEYS = frozenset(
     {
@@ -1245,6 +1260,51 @@ class ObsControlBridge:
         public_response = {key: value for key, value in response.items() if key != "keysCsv"}
         return {**public_response, "keys": keys_csv.split(",") if keys_csv else []}
 
+    def set_agent_input_overlay_layout(
+        self,
+        *,
+        scene_name: str,
+        anchor: str,
+        opacity: int,
+        margin: int,
+        source_name: str = DEFAULT_AGENT_INPUT_OVERLAY_SOURCE_NAME,
+    ) -> dict[str, object]:
+        scene_name = self._require_name(scene_name)
+        source_name = self._require_name(source_name)
+        if (
+            anchor not in AGENT_INPUT_OVERLAY_ANCHORS
+            or type(opacity) is not int
+            or not AGENT_INPUT_OVERLAY_MIN_OPACITY <= opacity <= AGENT_INPUT_OVERLAY_MAX_OPACITY
+            or type(margin) is not int
+            or not AGENT_INPUT_OVERLAY_MIN_MARGIN <= margin <= AGENT_INPUT_OVERLAY_MAX_MARGIN
+        ):
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        deadline = self._operation_deadline()
+        accepted = self._checked(
+            "SetAgentInputOverlayLayout",
+            {
+                "sceneName": scene_name,
+                "sourceName": source_name,
+                "anchor": anchor,
+                "opacity": opacity,
+                "margin": margin,
+                "capability": "agent_input_overlay",
+            },
+            deadline=deadline,
+        )
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        readback = self._get_agent_input_overlay(
+            scene_name=scene_name, source_name=source_name, deadline=deadline
+        )
+        if (
+            readback.get("anchor") != anchor
+            or readback.get("opacity") != opacity
+            or readback.get("margin") != margin
+        ):
+            raise BridgeError("OBS_POSTCONDITION_FAILED")
+        return {**readback, "verified": True}
+
     def emit_agent_input_activity(
         self,
         *,
@@ -1256,6 +1316,7 @@ class ObsControlBridge:
         wheel_direction: str = "none",
         character_count: int = 0,
         duration_ms: int = 1600,
+        agent_id: str = "agent",
     ) -> dict[str, object]:
         scene_name = self._require_name(scene_name)
         source_name = self._require_name(source_name)
@@ -1273,6 +1334,9 @@ class ObsControlBridge:
             or not 0 <= character_count <= 10000
             or not 0 <= len(normalized_keys) <= 4
             or any(type(key) is not str or key not in AGENT_INPUT_KEYS for key in normalized_keys)
+            or type(agent_id) is not str
+            or not 1 <= len(agent_id) <= 64
+            or any(ord(character) < 32 or ord(character) == 127 for character in agent_id)
         ):
             raise BridgeError("OBS_ARGUMENT_INVALID")
         if (
@@ -1296,6 +1360,7 @@ class ObsControlBridge:
             "wheelDirection": wheel_direction,
             "characterCount": character_count,
             "durationMs": duration_ms,
+            "agentId": agent_id,
             "capability": "agent_input_overlay",
         }
         accepted = self._checked("EmitAgentInputActivity", request, deadline=deadline)
@@ -1314,6 +1379,7 @@ class ObsControlBridge:
             or readback.get("wheelDirection") != wheel_direction
             or readback.get("characterCount") != character_count
             or readback.get("durationMs") != duration_ms
+            or readback.get("agentId") != agent_id
             or not 0 < readback.get("remainingMs", 0) <= duration_ms
         ):
             raise BridgeError("OBS_POSTCONDITION_FAILED")
@@ -1424,6 +1490,112 @@ class ObsControlBridge:
 
     def list_outputs(self) -> dict[str, object]:
         return self._checked("ListOutputs", deadline=self._operation_deadline())
+
+    def scene_recording_status(self, *, session_id: str) -> dict[str, object]:
+        session_id = self._require_session_id(session_id)
+        return self._checked(
+            "GetSceneRecordingSession",
+            {"sessionId": session_id},
+            deadline=self._operation_deadline(),
+        )
+
+    def start_scene_recordings(
+        self, *, recordings: list[Mapping[str, object]]
+    ) -> dict[str, object]:
+        normalized = self._normalize_scene_recording_plan(recordings)
+        deadline = self._operation_deadline()
+        accepted = self._checked(
+            "StartSceneRecordings", {"recordings": normalized}, deadline=deadline
+        )
+        session_id = accepted.get("sessionId")
+        if accepted.get("accepted") is not True or not isinstance(session_id, str):
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        session_id = self._require_session_id(session_id)
+        expected_scenes = [item["sceneName"] for item in normalized]
+        for attempt in range(self._postcondition_attempts):
+            readback = self._checked(
+                "GetSceneRecordingSession", {"sessionId": session_id}, deadline=deadline
+            )
+            actual_scenes = [item["sceneName"] for item in readback["recordings"]]
+            if (
+                readback.get("sessionId") == session_id
+                and readback.get("sessionActive") is True
+                and actual_scenes == expected_scenes
+                and all(item.get("outputActive") is True for item in readback["recordings"])
+            ):
+                return {**readback, "verified": True}
+            if attempt + 1 < self._postcondition_attempts:
+                remaining = deadline - self._clock()
+                if remaining <= 0:
+                    raise BridgeError("OBS_TIMEOUT")
+                self._sleeper(min(self._postcondition_poll_seconds, remaining))
+        raise BridgeError("OBS_POSTCONDITION_FAILED")
+
+    def stop_scene_recordings(self, *, session_id: str) -> dict[str, object]:
+        session_id = self._require_session_id(session_id)
+        deadline = self._operation_deadline()
+        accepted = self._checked(
+            "StopSceneRecordings", {"sessionId": session_id}, deadline=deadline
+        )
+        if accepted.get("accepted") is not True or accepted.get("sessionId") != session_id:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        for attempt in range(self._postcondition_attempts):
+            readback = self._checked(
+                "GetSceneRecordingSession", {"sessionId": session_id}, deadline=deadline
+            )
+            if (
+                readback.get("sessionId") == session_id
+                and readback.get("sessionActive") is False
+                and all(item.get("outputActive") is False for item in readback["recordings"])
+            ):
+                return {**readback, "verified": True}
+            if attempt + 1 < self._postcondition_attempts:
+                remaining = deadline - self._clock()
+                if remaining <= 0:
+                    raise BridgeError("OBS_TIMEOUT")
+                self._sleeper(min(self._postcondition_poll_seconds, remaining))
+        raise BridgeError("OBS_POSTCONDITION_FAILED")
+
+    @staticmethod
+    def _require_session_id(session_id: object) -> str:
+        if (
+            type(session_id) is not str
+            or not 1 <= len(session_id) <= 128
+            or any(not (character.isalnum() or character in "-_") for character in session_id)
+        ):
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        return session_id
+
+    @classmethod
+    def _normalize_scene_recording_plan(cls, recordings: object) -> list[dict[str, str]]:
+        if not isinstance(recordings, list) or not 1 <= len(recordings) <= 8:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        normalized: list[dict[str, str]] = []
+        scenes: set[str] = set()
+        prefixes: set[str] = set()
+        invalid_filename_characters = frozenset('<>:"/\\|?*')
+        for item in recordings:
+            if not isinstance(item, Mapping) or set(item) != {"scene_name", "file_name_prefix"}:
+                raise BridgeError("OBS_ARGUMENT_INVALID")
+            scene_name = cls._require_name(item["scene_name"])
+            prefix = item["file_name_prefix"]
+            if (
+                type(prefix) is not str
+                or not 1 <= len(prefix) <= 96
+                or prefix != prefix.strip()
+                or prefix.endswith(".")
+                or any(
+                    character in invalid_filename_characters or ord(character) < 32
+                    for character in prefix
+                )
+                or scene_name in scenes
+                or prefix.casefold() in prefixes
+            ):
+                raise BridgeError("OBS_ARGUMENT_INVALID")
+            scenes.add(scene_name)
+            prefixes.add(prefix.casefold())
+            normalized.append({"sceneName": scene_name, "fileNamePrefix": prefix})
+        return normalized
 
     def output_status(self, *, output_name: str) -> dict[str, object]:
         if not isinstance(output_name, str) or not output_name or len(output_name) > 256:
@@ -1574,6 +1746,7 @@ class ObsControlBridge:
             "ListAllowlistedHotkeys",
             "GetOperatorStatus",
             "GetAgentInputOverlay",
+            "GetSceneRecordingSession",
             "CaptureScreenshot",
             "CaptureProgramFrame",
         } and (not set(response) >= _IDENTITY_KEYS or response.get("ok") is not True):
@@ -1697,6 +1870,9 @@ class ObsControlBridge:
                 "sourceKind",
                 "theme",
                 "anchor",
+                "opacity",
+                "margin",
+                "agentId",
                 "active",
                 "activitySequence",
                 "eventKind",
@@ -1721,6 +1897,16 @@ class ObsControlBridge:
                 or response.get("sourceKind") != AGENT_INPUT_OVERLAY_SOURCE_KIND
                 or response.get("theme") != AGENT_INPUT_OVERLAY_THEME
                 or response.get("anchor") not in AGENT_INPUT_OVERLAY_ANCHORS | {"custom"}
+                or type(response.get("opacity")) is not int
+                or not AGENT_INPUT_OVERLAY_MIN_OPACITY
+                <= response["opacity"]
+                <= AGENT_INPUT_OVERLAY_MAX_OPACITY
+                or type(response.get("margin")) is not int
+                or not AGENT_INPUT_OVERLAY_MIN_MARGIN
+                <= response["margin"]
+                <= AGENT_INPUT_OVERLAY_MAX_MARGIN
+                or not isinstance(response.get("agentId"), str)
+                or len(response["agentId"]) > 64
                 or type(response.get("active")) is not bool
                 or type(response.get("activitySequence")) is not int
                 or response["activitySequence"] < 0
@@ -1741,6 +1927,66 @@ class ObsControlBridge:
                 or not 0 <= response["remainingMs"] <= 5000
             ):
                 raise BridgeError("OBS_RESPONSE_INVALID")
+            return
+        if request_type == "GetSceneRecordingSession":
+            allowed = _IDENTITY_KEYS | {"sessionId", "sessionActive", "startedAt", "recordings"}
+            recordings = response.get("recordings")
+            if (
+                set(response) != allowed
+                or not isinstance(response.get("sessionId"), str)
+                or not 1 <= len(response["sessionId"]) <= 128
+                or type(response.get("sessionActive")) is not bool
+                or not isinstance(response.get("startedAt"), str)
+                or not 1 <= len(response["startedAt"]) <= 64
+                or not isinstance(recordings, list)
+                or not 1 <= len(recordings) <= 8
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            seen_scenes: set[str] = set()
+            recording_fields = {
+                "sceneName",
+                "fileName",
+                "outputPath",
+                "outputActive",
+                "videoOnly",
+                "videoWidth",
+                "videoHeight",
+                "totalBytes",
+                "totalFrames",
+                "lastError",
+            }
+            for item in recordings:
+                if not isinstance(item, Mapping) or set(item) != recording_fields:
+                    raise BridgeError("OBS_RESPONSE_INVALID")
+                scene_name = item.get("sceneName")
+                file_name = item.get("fileName")
+                output_path = item.get("outputPath")
+                path_file_name = str(output_path).replace("\\", "/").rsplit("/", 1)[-1]
+                if (
+                    not isinstance(scene_name, str)
+                    or not 1 <= len(scene_name) <= 256
+                    or scene_name in seen_scenes
+                    or not isinstance(file_name, str)
+                    or not file_name.lower().endswith(".mp4")
+                    or len(file_name) > 160
+                    or not isinstance(output_path, str)
+                    or not 1 <= len(output_path) <= 4096
+                    or path_file_name != file_name
+                    or type(item.get("outputActive")) is not bool
+                    or item.get("videoOnly") is not True
+                    or type(item.get("videoWidth")) is not int
+                    or not 1 <= item["videoWidth"] <= 16384
+                    or type(item.get("videoHeight")) is not int
+                    or not 1 <= item["videoHeight"] <= 16384
+                    or type(item.get("totalBytes")) is not int
+                    or item["totalBytes"] < 0
+                    or type(item.get("totalFrames")) is not int
+                    or item["totalFrames"] < 0
+                    or not isinstance(item.get("lastError"), str)
+                    or len(item["lastError"]) > 128
+                ):
+                    raise BridgeError("OBS_RESPONSE_INVALID")
+                seen_scenes.add(scene_name)
             return
         if request_type in {"ListTransitions", "GetCurrentTransition"}:
             allowed = _IDENTITY_KEYS | {
@@ -2097,8 +2343,11 @@ class ObsControlBridge:
             "TriggerAllowlistedHotkey",
             "RequestGracefulShutdown",
             "CreateAgentInputOverlay",
+            "SetAgentInputOverlayLayout",
             "EmitAgentInputActivity",
             "ClearAgentInputOverlay",
+            "StartSceneRecordings",
+            "StopSceneRecordings",
         }:
             allowed = set(_IDENTITY_KEYS) | {"accepted"}
             if request_type == "SetCurrentProfile":
@@ -2179,6 +2428,8 @@ class ObsControlBridge:
                 allowed |= {"shutdownScheduled"}
             elif request_type in {"EmitAgentInputActivity", "ClearAgentInputOverlay"}:
                 allowed |= {"activitySequence"}
+            elif request_type in {"StartSceneRecordings", "StopSceneRecordings"}:
+                allowed |= {"sessionId"}
             if (
                 set(response) - allowed
                 or response.get("ok") is not True
@@ -2277,6 +2528,11 @@ class ObsControlBridge:
             if request_type in {"EmitAgentInputActivity", "ClearAgentInputOverlay"} and (
                 type(response.get("activitySequence")) is not int
                 or response["activitySequence"] < 1
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            if request_type in {"StartSceneRecordings", "StopSceneRecordings"} and (
+                not isinstance(response.get("sessionId"), str)
+                or not 1 <= len(response["sessionId"]) <= 128
             ):
                 raise BridgeError("OBS_RESPONSE_INVALID")
             return

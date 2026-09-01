@@ -107,6 +107,7 @@ def test_capability_matrix_freezes_full_product_scope() -> None:
     assert domains["agent_input_overlay"]["delivered_operations"] == [
         "get_agent_input_overlay",
         "create_agent_input_overlay",
+        "set_agent_input_overlay_layout",
         "emit_agent_input_activity",
         "clear_agent_input_overlay",
     ]
