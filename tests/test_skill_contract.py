@@ -26,11 +26,30 @@ def _assert_unique_yaml_keys(node: Node, path: str = "$") -> None:
             _assert_unique_yaml_keys(value_node, f"{path}[{index}]")
 
 
+def _assert_no_yaml_merge_keys(node: Node, path: str = "$") -> None:
+    if isinstance(node, MappingNode):
+        for key_node, value_node in node.value:
+            assert key_node.tag != "tag:yaml.org,2002:merge", (
+                f"runtime-incompatible YAML merge key at {path}"
+            )
+            _assert_no_yaml_merge_keys(value_node, f"{path}.{key_node.value}")
+    elif isinstance(node, SequenceNode):
+        for index, value_node in enumerate(node.value):
+            _assert_no_yaml_merge_keys(value_node, f"{path}[{index}]")
+
+
 def test_obs_skill_yaml_has_unique_mapping_keys() -> None:
     text = (ROOT / "src/dcc_mcp_obs/skills/obs-control/tools.yaml").read_text(encoding="utf-8")
     node = yaml.compose(text)
     assert node is not None
     _assert_unique_yaml_keys(node)
+
+
+def test_obs_skill_yaml_avoids_runtime_incompatible_merge_keys() -> None:
+    text = (ROOT / "src/dcc_mcp_obs/skills/obs-control/tools.yaml").read_text(encoding="utf-8")
+    node = yaml.compose(text)
+    assert node is not None
+    _assert_no_yaml_merge_keys(node)
 
 
 def test_every_obs_skill_tool_references_a_bundled_script() -> None:
