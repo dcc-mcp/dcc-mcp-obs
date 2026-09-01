@@ -21,21 +21,26 @@ OBS WebSocket 只承担鉴权传输，不提供不受限制的 raw request 或�
 - OBS 顶层原生 `DCC MCP` 菜单，提供状态、叠加层、Gateway Admin 和插件信息
 - 录制状态
 - 开始、停止、暂停、继续录制
+- 类型化直播、回放缓存、虚拟摄像机和具名输出控制
+- 经评审的 source/input/property/filter 契约，以及精确音频和媒体控制
 - 每次写操作后独立的类型化状态读回
 - 稳定脱敏错误、有界 UI 派发和跨实例漂移拒绝
 
-其余域由机器可读的[能力矩阵](../../contracts/obs-capabilities-v1.json)跟踪；在类型化
-契约落地前不会伪装成已支持工具。
+已交付与剩余域由机器可读的[能力矩阵](../../contracts/obs-capabilities-v1.json)跟踪；
+类型化契约落地前不会伪装成已支持工具。
 
-## 完整控制路线图
+## 已交付控制面
 
 - [直播、回放缓存、虚拟摄像机和输出](https://github.com/dcc-mcp/dcc-mcp-obs/issues/2)
-- [配置、场景集合、有界热键、截图和操作者状态](https://github.com/dcc-mcp/dcc-mcp-obs/issues/3)
-- [可丢弃真实 OBS 验收](https://github.com/dcc-mcp/dcc-mcp-obs/issues/4)
-- [输入、属性、滤镜、音频和媒体](https://github.com/dcc-mcp/dcc-mcp-obs/issues/5)
+- [输入、属性、滤镜、音频和媒体](../typed-source-controls.md)
 - [类型化场景图控制](../scene-graph.md)
 - [Windows 精确窗口捕获](../window-capture.md)
 - [内置 Agent 输入提示](../agent-input-overlay.md)
+
+## 完整控制路线图
+
+- [配置、场景集合、有界热键、截图和操作者状态](https://github.com/dcc-mcp/dcc-mcp-obs/issues/3)
+- [可丢弃真实 OBS 验收](https://github.com/dcc-mcp/dcc-mcp-obs/issues/4)
 
 ## 要求
 
@@ -93,6 +98,10 @@ dcc-mcp-obs --host-pid <obs-pid>
 录制视频、按键展示、键盘、鼠标、输入提示等中英文检索词。Agent 先搜索并加载 Skill，再调用场景、场景图、录制、
 直播、回放缓冲、虚拟摄像头和输出域的类型化工具。场景图写操作必须经过原生
 插件的精确实例校验、截止时间和状态读回。
+
+公共接口不会转发任意 input settings。版本 `1.0` 只评审并开放
+`color_source_v3` 的有界 `width`、`height`、`color`，以及 `gain_filter`
+的有界 `db`。source、滤镜、音频和媒体写操作均使用精确名称与有界读回校验。
 
 录制 Agent 演示时，先用 `create_agent_input_overlay` 将同一个共享
 `DCC-MCP Agent Input` source 分别挂到三个游戏场景，再在动作前调用

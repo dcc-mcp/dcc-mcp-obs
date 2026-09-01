@@ -37,19 +37,19 @@
     },
     {
       "domain": "sources",
-      "status": "partial",
+      "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": ["list_sources", "list_window_capture_candidates", "restore_window_capture_candidate", "create_window_capture_source", "get_window_capture_source", "rebind_window_capture_source"],
-      "remaining_operations": ["get_source_identity", "create_source", "rename_source", "remove_source"],
+      "delivered_operations": ["list_sources", "get_source_identity", "create_source", "rename_source", "remove_source", "list_window_capture_candidates", "restore_window_capture_candidate", "create_window_capture_source", "get_window_capture_source", "rebind_window_capture_source"],
+      "remaining_operations": [],
       "dangerous_operations": ["restore_window_capture_candidate", "create_window_capture_source", "rebind_window_capture_source", "create_source", "rename_source", "remove_source"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
     },
     {
       "domain": "inputs",
-      "status": "partial",
+      "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": ["list_window_capture_candidates", "restore_window_capture_candidate", "create_window_capture_source", "get_window_capture_source", "rebind_window_capture_source"],
-      "remaining_operations": ["list_input_kinds", "get_input_settings", "set_input_settings"],
+      "delivered_operations": ["list_input_kinds", "get_input_settings", "set_input_settings", "list_window_capture_candidates", "restore_window_capture_candidate", "create_window_capture_source", "get_window_capture_source", "rebind_window_capture_source"],
+      "remaining_operations": [],
       "dangerous_operations": ["restore_window_capture_candidate", "create_window_capture_source", "rebind_window_capture_source", "set_input_settings"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
     },
@@ -64,29 +64,29 @@
     },
     {
       "domain": "properties",
-      "status": "planned",
+      "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": [],
-      "remaining_operations": ["describe_properties", "validate_property_value", "set_property_value"],
+      "delivered_operations": ["describe_properties", "validate_property_value", "set_property_value"],
+      "remaining_operations": [],
       "dangerous_operations": ["set_property_value"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
     },
     {
       "domain": "filters",
-      "status": "planned",
+      "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": [],
-      "remaining_operations": ["list_filters", "create_filter", "set_filter_enabled", "set_filter_settings", "remove_filter"],
+      "delivered_operations": ["list_filters", "get_filter", "create_filter", "set_filter_enabled", "set_filter_settings", "remove_filter"],
+      "remaining_operations": [],
       "dangerous_operations": ["create_filter", "set_filter_enabled", "set_filter_settings", "remove_filter"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
     },
     {
       "domain": "audio",
-      "status": "planned",
+      "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": [],
-      "remaining_operations": ["get_volume", "set_volume", "get_mute", "set_mute", "get_monitor_type", "set_monitor_type"],
-      "dangerous_operations": ["set_volume", "set_mute", "set_monitor_type"],
+      "delivered_operations": ["get_source_volume", "set_source_volume", "get_source_mute", "set_source_mute", "get_source_monitor_type", "set_source_monitor_type"],
+      "remaining_operations": [],
+      "dangerous_operations": ["set_source_volume", "set_source_mute", "set_source_monitor_type"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
     },
     {
@@ -163,10 +163,10 @@
     },
     {
       "domain": "media",
-      "status": "planned",
+      "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": [],
-      "remaining_operations": ["get_media_status", "play_media", "pause_media", "restart_media", "stop_media", "seek_media"],
+      "delivered_operations": ["get_media_status", "play_media", "pause_media", "restart_media", "stop_media", "seek_media"],
+      "remaining_operations": [],
       "dangerous_operations": ["play_media", "pause_media", "restart_media", "stop_media", "seek_media"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
     },

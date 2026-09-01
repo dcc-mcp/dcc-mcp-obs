@@ -1,6 +1,6 @@
 ---
 name: obs-control
-description: Inspect and control typed OBS lifecycle, profiles, scene collections, scenes, scene items, exact Windows window-capture sources, built-in Agent keyboard and mouse activity overlays, transitions, Studio Mode, recording, streaming, replay buffer, virtual camera, allowlisted hotkeys, and outputs for OBS Studio and Open Broadcaster Software.
+description: Inspect and control typed OBS lifecycle, profiles, scene collections, scenes, scene items, reviewed sources, inputs, properties, filters, audio, media, exact Windows window-capture sources, built-in Agent keyboard and mouse activity overlays, transitions, Studio Mode, recording, streaming, replay buffer, virtual camera, allowlisted hotkeys, and outputs for OBS Studio and Open Broadcaster Software.
 license: GPL-2.0-or-later
 compatibility: "OBS Studio 28+ with obs-websocket 5.x; standalone bundles need no system Python; PyPI/source installs need Python 3.10+"
 metadata:
@@ -8,8 +8,8 @@ metadata:
     dcc: obs
     layer: domain
     version: "1.1.0"  # x-release-please-version
-    tags: [obs, lifecycle, graceful-shutdown, profiles, scene-collections, scenes, scene-items, window-capture, agent-input-overlay, keyboard-activity, mouse-activity, transitions, studio-mode, recording, streaming, replay-buffer, virtual-camera, allowlisted-hotkeys, screenshots, outputs, sources]
-    search-hint: "OBS Open Broadcaster Software lifecycle graceful shutdown exit close profiles scene collections scenes scene graph scene items transitions Studio Mode preview program hotkeys screenshots operator status recording streaming replay buffer virtual camera outputs record video pause resume Agent input overlay keyboard mouse activity keystroke display typing count 录屏 录制视频 直播 回放 缓冲 虚拟摄像头 配置文件 场景集合 场景图 场景项 转场 导播台 预览 节目 快捷键 按键展示 键盘 鼠标 输入提示 打字计数 截图 输出 优雅退出 关闭"
+    tags: [obs, lifecycle, graceful-shutdown, profiles, scene-collections, scenes, scene-items, sources, inputs, properties, filters, audio, media, window-capture, agent-input-overlay, keyboard-activity, mouse-activity, transitions, studio-mode, recording, streaming, replay-buffer, virtual-camera, allowlisted-hotkeys, screenshots, outputs]
+    search-hint: "OBS Open Broadcaster Software lifecycle graceful shutdown exit close profiles scene collections scenes scene graph scene items sources inputs properties filters audio media transitions Studio Mode preview program hotkeys screenshots operator status recording streaming replay buffer virtual camera outputs record video pause resume Agent input overlay keyboard mouse activity keystroke display typing count 录屏 录制视频 直播 回放 缓冲 虚拟摄像头 配置文件 场景集合 场景图 场景项 source 输入 属性 滤镜 音频 媒体 转场 导播台 预览 节目 快捷键 按键展示 键盘 鼠标 输入提示 打字计数 截图 输出 优雅退出 关闭"
     tools: tools.yaml
 ---
 
@@ -18,7 +18,8 @@ metadata:
 Use this skill whenever the user refers to OBS, Open Broadcaster Software,
 profiles, scene collections, scenes, scene items, transitions, Studio Mode,
 recording, streaming, replay buffer, virtual camera, allowlisted hotkeys,
-screenshots, outputs, scene/source inspection, Agent input overlays, keyboard or
+screenshots, outputs, scene/source inspection, inputs, properties, filters,
+audio, media, Agent input overlays, keyboard or
 mouse activity display, 录屏, 直播, 回放缓冲, 虚拟摄像头, 场景图, 场景项,
 按键展示, 键盘, 鼠标, 输入提示, 转场, 导播台, 预览, or 输出.
 
@@ -63,8 +64,22 @@ mouse activity display, 录屏, 直播, 回放缓冲, 虚拟摄像头, 场景图
     the semantic action the Agent is about to perform: an allowlisted shortcut,
     mouse button, wheel direction, or typing count. Never submit typed text,
     secrets, arbitrary labels, or inferred human input.
+13. Generic source settings are never forwarded. Public schema version `1.0`
+    allows only `color_source_v3` with bounded `width`, `height`, and `color`,
+    and `gain_filter` with bounded `db`. Unsupported kinds, versions, fields,
+    and values fail before mutation.
+14. Bind source, filter, audio, and media operations to exact discovered names.
+    Audio setters allow only bounded volume, boolean mute, and the three named
+    monitor routes. Media transport requires a controllable-media source and
+    every mutation must reconcile through `get_media_status`.
 
 ## Scene graph workflow
+
+For reviewed source, property, filter, audio, and media work, start with
+`get_source_identity`, `list_input_kinds`, or `list_filters`. Preserve exact
+names and schema version `1.0`; continue after a mutation only when
+`postcondition.verified=true`. See the
+[typed source control reference](../../../docs/typed-source-controls.md).
 
 For scene-graph work, discover scenes before selecting one, then discover the
 scene items or transitions needed by the mutation. Keep the returned scene

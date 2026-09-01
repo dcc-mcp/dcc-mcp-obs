@@ -1611,3 +1611,557 @@ tools:
     annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
     call_examples: [{arguments: {scene_name: RL - Game 1}, note: Clear a stale cue before changing demo sections.}]
     next-tools: {on-success: [obs_control__get_agent_input_overlay], on-failure: [obs_control__get_status]}
+  - name: get_source_identity
+    description: Read bounded identity and dimensions for one exact OBS source.
+    source_file: scripts/get_source_identity.py
+    input_schema: &typed_source_name_input {type: object, properties: {source_name: {type: string, minLength: 1, maxLength: 256}}, required: [source_name], additionalProperties: false}
+    output_schema: &typed_source_identity_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context:
+          type: object
+          additionalProperties: false
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sourceName, sourceKind, sourceType, outputFlags, active, showing, width, height]
+          properties: &typed_source_context_properties
+            instanceId: {type: string, minLength: 1, maxLength: 128}
+            pluginVersion: {type: string, minLength: 1}
+            obsVersion: {type: string, minLength: 1}
+            hostPid: {type: integer, minimum: 1}
+            eventSequence: {type: integer, minimum: 0}
+            ok: {const: true}
+            sourceName: {type: string, minLength: 1, maxLength: 256}
+            newSourceName: {type: string, minLength: 1, maxLength: 256}
+            sourceKind: {type: string, minLength: 1, maxLength: 128}
+            sourceType: {enum: [input, filter, scene, transition, unknown]}
+            outputFlags: {type: integer, minimum: 0}
+            active: {type: boolean}
+            showing: {type: boolean}
+            width: {type: integer, minimum: 0, maximum: 8192}
+            height: {type: integer, minimum: 0, maximum: 8192}
+            schemaVersion: {const: "1.0"}
+            settings:
+              type: object
+              additionalProperties: false
+              properties:
+                width: {type: integer, minimum: 1, maximum: 8192}
+                height: {type: integer, minimum: 1, maximum: 8192}
+                color: {type: integer, minimum: 0, maximum: 4294967295}
+                db: {type: number, minimum: -30, maximum: 30}
+            inputKinds:
+              type: array
+              maxItems: 1
+              items: {type: object, additionalProperties: false, required: [sourceKind, displayName], properties: {sourceKind: {const: color_source_v3}, displayName: {type: string, minLength: 1, maxLength: 256}}}
+            properties:
+              type: array
+              maxItems: 3
+              items: {type: object, additionalProperties: false, required: [propertyName, valueType, minimum, maximum], properties: {propertyName: {enum: [width, height, color]}, valueType: {const: integer}, minimum: {type: integer}, maximum: {type: integer}}}
+            propertyName: {enum: [width, height, color]}
+            value: {type: integer, minimum: 0, maximum: 4294967295}
+            valid: {const: true}
+            filters:
+              type: array
+              maxItems: 64
+              items: {type: object, additionalProperties: false, required: [filterName, filterKind, enabled], properties: {filterName: {type: string, minLength: 1, maxLength: 256}, filterKind: {type: string, minLength: 1, maxLength: 128}, enabled: {type: boolean}}}
+            truncated: {type: boolean}
+            filterName: {type: string, minLength: 1, maxLength: 256}
+            filterKind: {const: gain_filter}
+            enabled: {type: boolean}
+            volume: {type: number, minimum: 0, maximum: 20}
+            muted: {type: boolean}
+            monitorType: {enum: [none, monitor_only, monitor_and_output]}
+            mediaState: {enum: [none, playing, opening, buffering, paused, stopped, ended, error]}
+            mediaDurationMs: {type: integer, minimum: 0}
+            mediaCursorMs: {type: integer, minimum: 0}
+            accepted: {const: true}
+            removed: {const: true}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    annotations: &typed_read_annotations {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {source_name: DCC Safe Color}, note: Bind later operations to one exact source identity.}]
+    next-tools: {on-failure: [obs_control__get_status]}
+  - name: create_source
+    description: Create one reviewed color source in an exact scene and verify its settings.
+    source_file: scripts/create_source.py
+    input_schema: &typed_create_source_input
+      type: object
+      additionalProperties: false
+      required: [scene_name, source_name, source_kind, schema_version, settings]
+      properties:
+        scene_name: {type: string, minLength: 1, maxLength: 256}
+        source_name: {type: string, minLength: 1, maxLength: 256}
+        source_kind: {const: color_source_v3}
+        schema_version: {const: "1.0"}
+        settings: &typed_color_settings {type: object, minProperties: 1, additionalProperties: false, properties: {width: {type: integer, minimum: 1, maximum: 8192}, height: {type: integer, minimum: 1, maximum: 8192}, color: {type: integer, minimum: 0, maximum: 4294967295}}}
+        enabled: {type: boolean, default: true}
+    output_schema: &typed_input_mutation_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context, postcondition]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sourceName, sourceKind, schemaVersion, settings], properties: *typed_source_context_properties}
+        postcondition: &typed_verified_postcondition {type: object, additionalProperties: false, required: [verified], properties: {verified: {const: true}}}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: &typed_mutation_annotations {read_only_hint: false, destructive_hint: true, idempotent_hint: false, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {scene_name: Main, source_name: DCC Safe Color, source_kind: color_source_v3, schema_version: "1.0", settings: {width: 1280, height: 720, color: 4278190080}}, note: Create only the reviewed color-source contract.}]
+    next-tools: {on-success: [obs_control__get_input_settings], on-failure: [obs_control__get_status]}
+  - name: rename_source
+    description: Rename one exact input source and verify its new identity.
+    source_file: scripts/rename_source.py
+    input_schema: {type: object, properties: {source_name: {type: string, minLength: 1, maxLength: 256}, new_source_name: {type: string, minLength: 1, maxLength: 256}}, required: [source_name, new_source_name], additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context, postcondition]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sourceName, sourceKind, sourceType, outputFlags, active, showing, width, height], properties: *typed_source_context_properties}
+        postcondition: *typed_verified_postcondition
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: *typed_mutation_annotations
+    call_examples: [{arguments: {source_name: DCC Safe Color, new_source_name: DCC Safe Color 2}, note: Rename an exact discovered source.}]
+  - name: remove_source
+    description: Remove one exact input source and verify that it no longer exists.
+    source_file: scripts/remove_source.py
+    input_schema: *typed_source_name_input
+    output_schema: &typed_remove_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context, postcondition]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, accepted, removed], properties: *typed_source_context_properties}
+        postcondition: *typed_verified_postcondition
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: *typed_mutation_annotations
+    call_examples: [{arguments: {source_name: DCC Safe Color 2}, note: Remove only an exact discovered input source.}]
+  - name: list_input_kinds
+    description: List the bounded reviewed input kinds exposed by this contract version.
+    source_file: scripts/list_input_kinds.py
+    input_schema: &typed_empty_input {type: object, properties: {}, additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, schemaVersion, inputKinds], properties: *typed_source_context_properties}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    annotations: *typed_read_annotations
+    call_examples: [{arguments: {}, note: Discover the reviewed kind and schema version before creation.}]
+  - name: get_input_settings
+    description: Read reviewed settings from one exact input source.
+    source_file: scripts/get_input_settings.py
+    input_schema: &typed_input_identity {type: object, properties: {source_name: {type: string, minLength: 1, maxLength: 256}, source_kind: {const: color_source_v3}, schema_version: {const: "1.0", default: "1.0"}}, required: [source_name, source_kind], additionalProperties: false}
+    output_schema: &typed_input_read_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sourceName, sourceKind, schemaVersion, settings], properties: *typed_source_context_properties}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    annotations: *typed_read_annotations
+    call_examples: [{arguments: {source_name: DCC Safe Color, source_kind: color_source_v3}, note: Read the exact reviewed settings.}]
+  - name: set_input_settings
+    description: Update only reviewed color-source settings and verify exact readback.
+    source_file: scripts/set_input_settings.py
+    input_schema: {type: object, properties: {source_name: {type: string, minLength: 1, maxLength: 256}, source_kind: {const: color_source_v3}, schema_version: {const: "1.0"}, settings: *typed_color_settings}, required: [source_name, source_kind, schema_version, settings], additionalProperties: false}
+    output_schema: *typed_input_mutation_output
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: *typed_mutation_annotations
+    call_examples: [{arguments: {source_name: DCC Safe Color, source_kind: color_source_v3, schema_version: "1.0", settings: {width: 1920, height: 1080}}, note: Change only reviewed bounded fields.}]
+  - name: describe_properties
+    description: Describe the bounded reviewed properties for one input kind and schema version.
+    source_file: scripts/describe_properties.py
+    input_schema: &typed_kind_input {type: object, properties: {source_kind: {const: color_source_v3}, schema_version: {const: "1.0", default: "1.0"}}, required: [source_kind], additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sourceKind, schemaVersion, properties], properties: *typed_source_context_properties}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    annotations: *typed_read_annotations
+    call_examples: [{arguments: {source_kind: color_source_v3}, note: Discover allowed property names and numeric bounds.}]
+  - name: validate_property_value
+    description: Validate one value against the reviewed property contract without changing OBS.
+    source_file: scripts/validate_property_value.py
+    input_schema: &typed_property_input {type: object, properties: {source_kind: {const: color_source_v3}, schema_version: {const: "1.0"}, property_name: {enum: [width, height, color]}, value: {type: integer, minimum: 0, maximum: 4294967295}}, required: [source_kind, schema_version, property_name, value], additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sourceKind, schemaVersion, propertyName, value, valid], properties: *typed_source_context_properties}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    annotations: *typed_read_annotations
+    call_examples: [{arguments: {source_kind: color_source_v3, schema_version: "1.0", property_name: width, value: 1920}, note: Validate before mutation.}]
+  - name: set_property_value
+    description: Set one reviewed property on an exact source and verify exact readback.
+    source_file: scripts/set_property_value.py
+    input_schema: {type: object, properties: {source_name: {type: string, minLength: 1, maxLength: 256}, source_kind: {const: color_source_v3}, schema_version: {const: "1.0"}, property_name: {enum: [width, height, color]}, value: {type: integer, minimum: 0, maximum: 4294967295}}, required: [source_name, source_kind, schema_version, property_name, value], additionalProperties: false}
+    output_schema: *typed_input_mutation_output
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: *typed_mutation_annotations
+    call_examples: [{arguments: {source_name: DCC Safe Color, source_kind: color_source_v3, schema_version: "1.0", property_name: width, value: 1920}, note: Set one reviewed property.}]
+  - name: list_filters
+    description: List bounded filters attached to one exact source.
+    source_file: scripts/list_filters.py
+    input_schema: *typed_source_name_input
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sourceName, filters, truncated], properties: *typed_source_context_properties}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    annotations: *typed_read_annotations
+    call_examples: [{arguments: {source_name: Game Audio}, note: Discover exact filter names before mutation.}]
+  - name: get_filter
+    description: Read one reviewed gain filter and its exact settings.
+    source_file: scripts/get_filter.py
+    input_schema: &typed_filter_identity {type: object, properties: {source_name: {type: string, minLength: 1, maxLength: 256}, filter_name: {type: string, minLength: 1, maxLength: 256}, filter_kind: {const: gain_filter}, schema_version: {const: "1.0", default: "1.0"}}, required: [source_name, filter_name, filter_kind], additionalProperties: false}
+    output_schema: &typed_filter_read_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sourceName, filterName, filterKind, enabled, schemaVersion, settings], properties: *typed_source_context_properties}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    annotations: *typed_read_annotations
+    call_examples: [{arguments: {source_name: Game Audio, filter_name: Agent Gain, filter_kind: gain_filter}, note: Read exact gain settings and enabled state.}]
+  - name: create_filter
+    description: Create one reviewed gain filter and verify exact settings and enabled state.
+    source_file: scripts/create_filter.py
+    input_schema: &typed_create_filter_input {type: object, properties: {source_name: {type: string, minLength: 1, maxLength: 256}, filter_name: {type: string, minLength: 1, maxLength: 256}, filter_kind: {const: gain_filter}, schema_version: {const: "1.0"}, settings: &typed_gain_settings {type: object, additionalProperties: false, required: [db], properties: {db: {type: number, minimum: -30, maximum: 30}}}, enabled: {type: boolean, default: true}}, required: [source_name, filter_name, filter_kind, schema_version, settings], additionalProperties: false}
+    output_schema: &typed_filter_mutation_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context, postcondition]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sourceName, filterName, filterKind, enabled, schemaVersion, settings], properties: *typed_source_context_properties}
+        postcondition: *typed_verified_postcondition
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: *typed_mutation_annotations
+    call_examples: [{arguments: {source_name: Game Audio, filter_name: Agent Gain, filter_kind: gain_filter, schema_version: "1.0", settings: {db: -3.0}}, note: Create only the reviewed bounded gain filter.}]
+  - name: set_filter_enabled
+    description: Change one exact filter enabled state and verify it.
+    source_file: scripts/set_filter_enabled.py
+    input_schema: {type: object, properties: {source_name: {type: string, minLength: 1, maxLength: 256}, filter_name: {type: string, minLength: 1, maxLength: 256}, enabled: {type: boolean}}, required: [source_name, filter_name, enabled], additionalProperties: false}
+    output_schema: *typed_filter_mutation_output
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: *typed_mutation_annotations
+    call_examples: [{arguments: {source_name: Game Audio, filter_name: Agent Gain, enabled: false}, note: Change only an exact discovered filter.}]
+  - name: set_filter_settings
+    description: Update one reviewed gain filter and verify exact settings.
+    source_file: scripts/set_filter_settings.py
+    input_schema: {type: object, properties: {source_name: {type: string, minLength: 1, maxLength: 256}, filter_name: {type: string, minLength: 1, maxLength: 256}, filter_kind: {const: gain_filter}, schema_version: {const: "1.0"}, settings: *typed_gain_settings}, required: [source_name, filter_name, filter_kind, schema_version, settings], additionalProperties: false}
+    output_schema: *typed_filter_mutation_output
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: *typed_mutation_annotations
+    call_examples: [{arguments: {source_name: Game Audio, filter_name: Agent Gain, filter_kind: gain_filter, schema_version: "1.0", settings: {db: -6.0}}, note: Update only the reviewed gain value.}]
+  - name: remove_filter
+    description: Remove one exact source filter and verify that it no longer exists.
+    source_file: scripts/remove_filter.py
+    input_schema: {type: object, properties: {source_name: {type: string, minLength: 1, maxLength: 256}, filter_name: {type: string, minLength: 1, maxLength: 256}}, required: [source_name, filter_name], additionalProperties: false}
+    output_schema: *typed_remove_output
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: *typed_mutation_annotations
+    call_examples: [{arguments: {source_name: Game Audio, filter_name: Agent Gain}, note: Remove only an exact discovered filter.}]
+  - name: get_source_volume
+    description: Read the exact linear volume for one source.
+    source_file: scripts/get_source_volume.py
+    input_schema: *typed_source_name_input
+    output_schema: &typed_volume_read_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sourceName, volume], properties: *typed_source_context_properties}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    annotations: *typed_read_annotations
+    call_examples: [{arguments: {source_name: Game Audio}, note: Read volume before changing it.}]
+  - name: set_source_volume
+    description: Set bounded linear source volume and verify exact readback.
+    source_file: scripts/set_source_volume.py
+    input_schema: {type: object, properties: {source_name: {type: string, minLength: 1, maxLength: 256}, volume: {type: number, minimum: 0, maximum: 20}}, required: [source_name, volume], additionalProperties: false}
+    output_schema: &typed_volume_mutation_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context, postcondition]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sourceName, volume], properties: *typed_source_context_properties}
+        postcondition: *typed_verified_postcondition
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: *typed_mutation_annotations
+    call_examples: [{arguments: {source_name: Game Audio, volume: 0.5}, note: Set a bounded linear volume.}]
+  - name: get_source_mute
+    description: Read the exact mute state for one source.
+    source_file: scripts/get_source_mute.py
+    input_schema: *typed_source_name_input
+    output_schema: &typed_mute_read_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sourceName, muted], properties: *typed_source_context_properties}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    annotations: *typed_read_annotations
+    call_examples: [{arguments: {source_name: Game Audio}, note: Read mute state before changing it.}]
+  - name: set_source_mute
+    description: Set source mute state and verify exact readback.
+    source_file: scripts/set_source_mute.py
+    input_schema: {type: object, properties: {source_name: {type: string, minLength: 1, maxLength: 256}, muted: {type: boolean}}, required: [source_name, muted], additionalProperties: false}
+    output_schema: &typed_mute_mutation_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context, postcondition]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sourceName, muted], properties: *typed_source_context_properties}
+        postcondition: *typed_verified_postcondition
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: *typed_mutation_annotations
+    call_examples: [{arguments: {source_name: Game Audio, muted: true}, note: Mute one exact source.}]
+  - name: get_source_monitor_type
+    description: Read the exact monitoring route for one source.
+    source_file: scripts/get_source_monitor_type.py
+    input_schema: *typed_source_name_input
+    output_schema: &typed_monitor_read_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sourceName, monitorType], properties: *typed_source_context_properties}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    annotations: *typed_read_annotations
+    call_examples: [{arguments: {source_name: Game Audio}, note: Read monitoring before changing the route.}]
+  - name: set_source_monitor_type
+    description: Set one allowlisted monitoring route and verify exact readback.
+    source_file: scripts/set_source_monitor_type.py
+    input_schema: {type: object, properties: {source_name: {type: string, minLength: 1, maxLength: 256}, monitor_type: {enum: [none, monitor_only, monitor_and_output]}}, required: [source_name, monitor_type], additionalProperties: false}
+    output_schema: &typed_monitor_mutation_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context, postcondition]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sourceName, monitorType], properties: *typed_source_context_properties}
+        postcondition: *typed_verified_postcondition
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: *typed_mutation_annotations
+    call_examples: [{arguments: {source_name: Game Audio, monitor_type: monitor_and_output}, note: Use only an allowlisted monitoring route.}]
+  - name: get_media_status
+    description: Read bounded media state, duration, and cursor for one controllable source.
+    source_file: scripts/get_media_status.py
+    input_schema: *typed_source_name_input
+    output_schema: &typed_media_read_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sourceName, mediaState, mediaDurationMs, mediaCursorMs], properties: *typed_source_context_properties}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    annotations: *typed_read_annotations
+    call_examples: [{arguments: {source_name: Training Replay}, note: Confirm controllable media state before transport operations.}]
+  - name: play_media
+    description: Start one controllable media source and verify playing state.
+    source_file: scripts/play_media.py
+    input_schema: *typed_source_name_input
+    output_schema: &typed_media_mutation_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context, postcondition]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: {type: object, additionalProperties: false, required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sourceName, mediaState, mediaDurationMs, mediaCursorMs], properties: *typed_source_context_properties}
+        postcondition: *typed_verified_postcondition
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: *typed_mutation_annotations
+    call_examples: [{arguments: {source_name: Training Replay}, note: Play one exact controllable source.}]
+  - name: pause_media
+    description: Pause one controllable media source and verify paused state.
+    source_file: scripts/pause_media.py
+    input_schema: *typed_source_name_input
+    output_schema: *typed_media_mutation_output
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: *typed_mutation_annotations
+    call_examples: [{arguments: {source_name: Training Replay}, note: Pause one exact controllable source.}]
+  - name: restart_media
+    description: Restart one controllable media source and verify playing state.
+    source_file: scripts/restart_media.py
+    input_schema: *typed_source_name_input
+    output_schema: *typed_media_mutation_output
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: *typed_mutation_annotations
+    call_examples: [{arguments: {source_name: Training Replay}, note: Restart one exact controllable source.}]
+  - name: stop_media
+    description: Stop one controllable media source and verify stopped state.
+    source_file: scripts/stop_media.py
+    input_schema: *typed_source_name_input
+    output_schema: *typed_media_mutation_output
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: *typed_mutation_annotations
+    call_examples: [{arguments: {source_name: Training Replay}, note: Stop one exact controllable source.}]
+  - name: seek_media
+    description: Seek one controllable media source to a bounded millisecond cursor and verify exact readback.
+    source_file: scripts/seek_media.py
+    input_schema: {type: object, properties: {source_name: {type: string, minLength: 1, maxLength: 256}, media_cursor_ms: {type: integer, minimum: 0, maximum: 86400000}}, required: [source_name, media_cursor_ms], additionalProperties: false}
+    output_schema: *typed_media_mutation_output
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: *typed_mutation_annotations
+    call_examples: [{arguments: {source_name: Training Replay, media_cursor_ms: 2000}, note: Seek within the bounded one-day cursor range.}]
