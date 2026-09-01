@@ -324,12 +324,12 @@ tools:
       type: object
       additionalProperties: false
       required: [success, message, error, prompt, context]
-      properties: &scene_recording_status_properties
+      properties:
         success: {const: true}
         message: {type: string}
         error: {type: "null"}
         prompt: {type: [string, "null"]}
-        context:
+        context: &scene_recording_status_context
           type: object
           additionalProperties: false
           required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sessionId, sessionActive, startedAt, recordings]
@@ -393,7 +393,11 @@ tools:
       additionalProperties: false
       required: [success, message, error, prompt, context, postcondition]
       properties:
-        <<: *scene_recording_status_properties
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: *scene_recording_status_context
         postcondition:
           type: object
           additionalProperties: false
@@ -438,12 +442,12 @@ tools:
       type: object
       additionalProperties: false
       required: [success, message, error, prompt, context]
-      properties: &streaming_status_properties
+      properties:
         success: {const: true}
         message: {type: string}
         error: {type: "null"}
         prompt: {type: [string, "null"]}
-        context:
+        context: &streaming_status_context
           type: object
           additionalProperties: false
           required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, streamingActive]
@@ -471,7 +475,11 @@ tools:
       additionalProperties: false
       required: [success, message, error, prompt, context, postcondition]
       properties:
-        <<: *streaming_status_properties
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: *streaming_status_context
         postcondition:
           type: object
           additionalProperties: false
@@ -504,12 +512,12 @@ tools:
       type: object
       additionalProperties: false
       required: [success, message, error, prompt, context]
-      properties: &replay_status_properties
+      properties:
         success: {const: true}
         message: {type: string}
         error: {type: "null"}
         prompt: {type: [string, "null"]}
-        context:
+        context: &replay_status_context
           type: object
           additionalProperties: false
           required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, replayBufferActive]
@@ -537,7 +545,11 @@ tools:
       additionalProperties: false
       required: [success, message, error, prompt, context, postcondition]
       properties:
-        <<: *replay_status_properties
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: *replay_status_context
         postcondition:
           type: object
           additionalProperties: false
@@ -559,7 +571,11 @@ tools:
       additionalProperties: false
       required: [success, message, error, prompt, context, postcondition]
       properties:
-        <<: *replay_status_properties
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: *replay_status_context
         postcondition:
           type: object
           additionalProperties: false
@@ -581,7 +597,10 @@ tools:
       additionalProperties: false
       required: [success, message, error, prompt, context]
       properties:
-        <<: *replay_status_properties
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
         context:
           type: object
           additionalProperties: false
@@ -611,12 +630,12 @@ tools:
       type: object
       additionalProperties: false
       required: [success, message, error, prompt, context]
-      properties: &virtual_camera_status_properties
+      properties:
         success: {const: true}
         message: {type: string}
         error: {type: "null"}
         prompt: {type: [string, "null"]}
-        context:
+        context: &virtual_camera_status_context
           type: object
           additionalProperties: false
           required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, virtualCameraActive]
@@ -644,7 +663,11 @@ tools:
       additionalProperties: false
       required: [success, message, error, prompt, context, postcondition]
       properties:
-        <<: *virtual_camera_status_properties
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: *virtual_camera_status_context
         postcondition:
           type: object
           additionalProperties: false
@@ -666,7 +689,11 @@ tools:
       additionalProperties: false
       required: [success, message, error, prompt, context, postcondition]
       properties:
-        <<: *virtual_camera_status_properties
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: *virtual_camera_status_context
         postcondition:
           type: object
           additionalProperties: false
@@ -734,12 +761,12 @@ tools:
       type: object
       additionalProperties: false
       required: [success, message, error, prompt, context]
-      properties: &output_status_properties
+      properties:
         success: {const: true}
         message: {type: string}
         error: {type: "null"}
         prompt: {type: [string, "null"]}
-        context:
+        context: &output_status_context
           type: object
           additionalProperties: false
           required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, outputName, outputKind, outputActive]
@@ -773,7 +800,11 @@ tools:
       additionalProperties: false
       required: [success, message, error, prompt, context, postcondition]
       properties:
-        <<: *output_status_properties
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: *output_status_context
         postcondition:
           type: object
           additionalProperties: false
@@ -799,7 +830,11 @@ tools:
       additionalProperties: false
       required: [success, message, error, prompt, context, postcondition]
       properties:
-        <<: *output_status_properties
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: *output_status_context
         postcondition:
           type: object
           additionalProperties: false
@@ -1427,12 +1462,12 @@ tools:
       type: object
       additionalProperties: false
       required: [success, message, error, prompt, context]
-      properties: &agent_input_overlay_status_properties
+      properties:
         success: {const: true}
         message: {type: string}
         error: {type: "null"}
         prompt: {type: [string, "null"]}
-        context:
+        context: &agent_input_overlay_status_context
           type: object
           additionalProperties: false
           required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sceneName, sceneItemId, sourceName, sourceKind, theme, anchor, opacity, margin, agentId, active, activitySequence, eventKind, keys, mouseButton, wheelDirection, characterCount, cueLabel, durationMs, remainingMs]
@@ -1488,7 +1523,11 @@ tools:
       additionalProperties: false
       required: [success, message, error, prompt, context, postcondition]
       properties:
-        <<: *agent_input_overlay_status_properties
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: *agent_input_overlay_status_context
         postcondition:
           type: object
           additionalProperties: false
