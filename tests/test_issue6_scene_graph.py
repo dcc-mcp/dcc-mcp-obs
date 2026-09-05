@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from dcc_mcp_obs import __version__
 from dcc_mcp_obs.bridge import BridgeError, ObsControlBridge
 
 
@@ -22,7 +23,7 @@ class FakeHost:
         self.calls.append((request_type, dict(data)))
         identity = {
             "instanceId": "instance-1",
-            "pluginVersion": "1.1.0",
+            "pluginVersion": __version__,
             "obsVersion": "30.0.0",
             "hostPid": 42,
             "eventSequence": len(self.calls),
@@ -193,7 +194,7 @@ def test_studio_transition_accepts_obs_non_swap_preview_behavior() -> None:
             host.calls.append((request_type, dict(data)))
             return {
                 "instanceId": "instance-1",
-                "pluginVersion": "1.1.0",
+                "pluginVersion": __version__,
                 "obsVersion": "30.0.0",
                 "hostPid": 42,
                 "eventSequence": len(host.calls),

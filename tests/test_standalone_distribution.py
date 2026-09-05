@@ -10,7 +10,7 @@ from pathlib import Path
 import yaml
 from tools import build_standalone
 
-from dcc_mcp_obs import _standalone_entry
+from dcc_mcp_obs import __version__, _standalone_entry
 
 try:
     import tomllib
@@ -52,7 +52,7 @@ def test_standalone_installs_its_bundled_native_plugin(tmp_path: Path, monkeypat
     manifest = {
         "schema_version": 1,
         "product": "dcc-mcp-obs-standalone",
-        "version": "1.1.0",
+        "version": __version__,
         "core_version": metadata.version("dcc-mcp-core"),
         "platform": _standalone_entry.install_cli._platform_name(),
         "files": [

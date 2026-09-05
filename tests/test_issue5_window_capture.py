@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from dcc_mcp_obs import __version__
 from dcc_mcp_obs.bridge import BridgeError, ObsControlBridge
 from dcc_mcp_obs.protocol import MUTATING_VENDOR_REQUESTS, VENDOR_REQUESTS
 
@@ -35,7 +36,7 @@ class FakeWindowCaptureHost:
         self.calls.append((request_type, dict(data)))
         identity: dict[str, object] = {
             "instanceId": "instance-1",
-            "pluginVersion": "1.1.0",
+            "pluginVersion": __version__,
             "obsVersion": "32.2.1",
             "hostPid": 42,
             "eventSequence": len(self.calls),
@@ -190,7 +191,7 @@ def test_window_capture_candidates_are_bounded_by_exact_executable_and_title() -
 
     assert result == {
         "instanceId": "instance-1",
-        "pluginVersion": "1.1.0",
+        "pluginVersion": __version__,
         "obsVersion": "32.2.1",
         "hostPid": 42,
         "eventSequence": 2,
