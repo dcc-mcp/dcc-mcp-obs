@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.0](https://github.com/dcc-mcp/dcc-mcp-obs/compare/v1.2.0...v1.3.0) (2026-09-05)
+
+
+### Features
+
+* separate OBS control and websocket ports ([e824827](https://github.com/dcc-mcp/dcc-mcp-obs/commit/e824827386fe0a35bd704e6b21a698ec59ea8048))
+
+
+### Bug Fixes
+
+* align tests with current release version ([38c4f5a](https://github.com/dcc-mcp/dcc-mcp-obs/commit/38c4f5a1e86bb96e653a3c35ad9c2428787512ff))
+* satisfy Python formatting checks ([f8cccf7](https://github.com/dcc-mcp/dcc-mcp-obs/commit/f8cccf7af13bbf025a9de48f6f6c12d8b9871b7d))
+
 ## [1.2.0](https://github.com/dcc-mcp/dcc-mcp-obs/compare/v1.1.0...v1.2.0) (2026-09-01)
 
 
