@@ -12,7 +12,28 @@ def test_password_is_operator_owned_and_never_rendered(monkeypatch: pytest.Monke
     assert config.password == "PRIVATE_OBS_PASSWORD"
     assert "PRIVATE_OBS_PASSWORD" not in repr(config)
     assert "PRIVATE_OBS_PASSWORD" not in str(config.public_summary())
-    assert config.public_summary() == {"host": "127.0.0.1", "port": 4455, "secure": False}
+    assert config.public_summary() == {
+        "host": "127.0.0.1",
+        "port": 4455,
+        "secure": False,
+        "controlPort": 9766,
+        "transportMode": "dual",
+    }
+
+
+def test_control_and_obs_ports_must_be_distinct(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DCC_MCP_OBS_WEBSOCKET_URL", "ws://127.0.0.1:9766")
+    config = ObsEndpointConfig.from_environment()
+    with pytest.raises(ConfigError, match="OBS_PORT_CONFLICT"):
+        config.public_summary()
+
+
+def test_transport_mode_is_explicit_and_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DCC_MCP_OBS_TRANSPORT", "websocket")
+    assert ObsEndpointConfig.from_environment().transport_mode == "websocket"
+    monkeypatch.setenv("DCC_MCP_OBS_TRANSPORT", "native")
+    with pytest.raises(ConfigError, match="OBS_TRANSPORT_INVALID"):
+        ObsEndpointConfig.from_environment()
 
 
 @pytest.mark.parametrize(

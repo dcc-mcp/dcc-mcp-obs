@@ -112,7 +112,9 @@ dcc-mcp-obs --host-pid <obs-pid>
 原生插件会在 OBS 顶层菜单栏注册 `DCC MCP`。`Server Status...` 展示精确的
 插件/OBS 版本、原生桥接就绪状态、活动输出和当前场景；`Add Agent Input Overlay`
 把共享的内置提示 source 挂到当前场景；`Open Gateway Admin` 只打开 loopback
-Gateway 地址（默认 `127.0.0.1:9765`，也可使用合法的 `DCC_MCP_GATEWAY_PORT`）。
+OBS 控制 Gateway 地址（默认 `127.0.0.1:9766`，也可使用合法的
+`DCC_MCP_OBS_CONTROL_PORT`）。OBS 官方 WebSocket 仍使用独立的
+`127.0.0.1:4455` 端口；设置 `DCC_MCP_OBS_TRANSPORT=dual` 可同时保留两条通道。
 菜单在 OBS UI 线程幂等注册，并在插件卸载时清理。
 
 关闭 OBS 时使用 `request_graceful_shutdown`，不要强制结束进程。录制、直播、

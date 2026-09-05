@@ -153,12 +153,14 @@ void add_agent_input_overlay_from_menu()
 
 int gateway_admin_port()
 {
-	const char *raw = std::getenv("DCC_MCP_GATEWAY_PORT");
+	const char *raw = std::getenv("DCC_MCP_OBS_CONTROL_PORT");
 	if (raw == nullptr || *raw == '\0')
-		return 9765;
+		raw = std::getenv("DCC_MCP_GATEWAY_PORT"); // legacy alias
+	if (raw == nullptr || *raw == '\0')
+		return 9766;
 	char *end = nullptr;
 	const long parsed = std::strtol(raw, &end, 10);
-	return end != raw && *end == '\0' && parsed > 0 && parsed <= 65535 ? static_cast<int>(parsed) : 9765;
+	return end != raw && *end == '\0' && parsed > 0 && parsed <= 65535 ? static_cast<int>(parsed) : 9766;
 }
 
 void open_dcc_mcp_gateway_admin()
