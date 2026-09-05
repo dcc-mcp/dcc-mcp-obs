@@ -82,9 +82,9 @@ class ObsEndpointConfig:
 
 
 __all__ = [
-    "ConfigError",
     "DEFAULT_CONTROL_PORT",
     "DEFAULT_OBS_WEBSOCKET_PORT",
-    "ObsEndpointConfig",
     "TRANSPORT_MODES",
+    "ConfigError",
+    "ObsEndpointConfig",
 ]
