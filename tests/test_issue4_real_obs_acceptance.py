@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from dcc_mcp_obs import server
+from dcc_mcp_obs import __version__, server
 from dcc_mcp_obs.real_obs_acceptance import (
     AcceptanceContractError,
     McpAcceptanceClient,
@@ -312,7 +312,7 @@ class FakeAcceptanceClient:
                 if self.drift_at == name
                 else "01234567-89ab-cdef-0123-456789abcdef"
             ),
-            "pluginVersion": "1.1.0",
+            "pluginVersion": __version__,
             "obsVersion": "32.2.1",
             "hostPid": 12345,
             "eventSequence": len(self.calls),
@@ -609,7 +609,7 @@ class FakeLiveTransport:
         self.sequence += 1
         return {
             "instanceId": "obs-acceptance-session",
-            "pluginVersion": "1.1.0",
+            "pluginVersion": __version__,
             "obsVersion": "32.2.1",
             "hostPid": os.getpid(),
             "eventSequence": self.sequence,
