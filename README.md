@@ -100,6 +100,13 @@ The first release accepts only `ws://127.0.0.1:<port>` and defaults to port
 4455. A password is never returned in tool results, receipts, public errors, or
 logs. Use `DCC_MCP_OBS_WEBSOCKET_URL` only to select another loopback port.
 
+The adapter exposes its own MCP control endpoint separately from OBS WebSocket.
+It defaults to `127.0.0.1:9766`; override it with
+`DCC_MCP_OBS_CONTROL_PORT`. The two ports must differ. `DCC_MCP_OBS_TRANSPORT`
+defaults to `dual`, keeping the independent control endpoint and the
+obs-websocket compatibility path available together; set it to `websocket` for
+compatibility-only deployments.
+
 Run the sidecar against one exact OBS process. Use the standalone executable
 shown above, or this command for a PyPI installation:
 
@@ -145,7 +152,7 @@ The native plugin adds a top-level `DCC MCP` menu to OBS. `Server Status...`
 shows the exact plugin and OBS versions, bridge readiness, active outputs, and
 current scene. `Add Agent Input Overlay` attaches the shared built-in source to
 the current scene. `Open Gateway Admin` opens only the loopback Gateway URL
-(`127.0.0.1`, port 9765 by default or a valid `DCC_MCP_GATEWAY_PORT`). The menu
+(`127.0.0.1`, port 9766 by default or a valid `DCC_MCP_OBS_CONTROL_PORT`). The menu
 is registered idempotently on OBS's UI thread and removed during plugin unload.
 
 Use `request_graceful_shutdown` instead of terminating the OBS process. The

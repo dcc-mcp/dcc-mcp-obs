@@ -15,7 +15,7 @@ from dcc_mcp_core.server_base import DccServerBase
 
 from .__version__ import __version__
 from .bridge import ObsControlBridge
-from .config import ObsEndpointConfig
+from .config import DEFAULT_CONTROL_PORT, ConfigError, ObsEndpointConfig
 from .dispatcher import ObsBridgeDispatcher
 from .process import process_is_alive, resolve_obs_pid
 from .protocol import ObsWebSocketTransport
@@ -29,6 +29,9 @@ class ObsMcpServer(DccServerBase):
     def __init__(self, *, port: int | None = None, host_pid: int | None = None) -> None:
         resolved_pid = resolve_obs_pid(host_pid)
         config = ObsEndpointConfig.from_environment()
+        control_port = _resolve_control_port(port)
+        if control_port == config.port:
+            raise ConfigError("OBS_PORT_CONFLICT")
         self._transport = ObsWebSocketTransport(config)
         self._bridge = ObsControlBridge(self._transport, expected_pid=resolved_pid)
         status = self._bridge.status()
@@ -43,7 +46,7 @@ class ObsMcpServer(DccServerBase):
         options = DccServerOptions.from_env(
             "obs",
             Path(__file__).resolve().parent / "skills",
-            port=port,
+            port=control_port,
             server_name="dcc-mcp-obs",
             server_version=__version__,
             adapter_version=__version__,
@@ -89,8 +92,21 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the native DCC-MCP OBS adapter.")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--host-pid", type=int)
-    parser.add_argument("--mcp-port", type=int)
+    parser.add_argument("--mcp-port", type=int, default=None)
     return parser.parse_args(argv)
+
+
+def _resolve_control_port(explicit: int | None) -> int:
+    candidate = explicit
+    if candidate is None:
+        raw = os.environ.get("DCC_MCP_OBS_CONTROL_PORT", str(DEFAULT_CONTROL_PORT))
+        try:
+            candidate = int(raw)
+        except ValueError as exc:
+            raise ConfigError("OBS_CONTROL_PORT_INVALID") from exc
+    if type(candidate) is not int or not 0 <= candidate <= 65535:
+        raise ConfigError("OBS_CONTROL_PORT_INVALID")
+    return candidate
 
 
 def main(argv: Sequence[str] | None = None) -> None:
