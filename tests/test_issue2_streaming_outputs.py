@@ -227,6 +227,54 @@ def test_issue2_parallel_scene_recordings_stop_all_outputs_and_reconcile():
     ]
 
 
+def test_issue2_parallel_scene_recordings_force_stop_after_graceful_stop_stalls():
+    file_name = "The Bazaar 2026-09-01 07-15-30.mp4"
+    output_path = str(Path.cwd() / "recordings" / file_name)
+    active = {
+        **IDENTITY,
+        "sessionId": "session-1",
+        "sessionActive": True,
+        "startedAt": "2026-09-01T07:15:30+08:00",
+        "stoppedAt": "",
+        "recordings": [scene_recording_item("RL - The Bazaar", file_name, output_path)],
+        "eventSequence": 3,
+    }
+    stopped = {
+        **active,
+        "sessionActive": False,
+        "stoppedAt": "2026-09-01T07:19:30+08:00",
+        "recordings": [
+            scene_recording_item("RL - The Bazaar", file_name, output_path, active=False)
+        ],
+        "eventSequence": 5,
+    }
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {**IDENTITY, "accepted": True, "sessionId": "session-1", "eventSequence": 2},
+            active,
+            {**active, "eventSequence": 4},
+            {**IDENTITY, "accepted": True, "sessionId": "session-1", "eventSequence": 5},
+            {**stopped, "eventSequence": 6},
+        ]
+    )
+
+    result = ObsControlBridge(
+        transport, expected_pid=1234, postcondition_attempts=2
+    ).stop_scene_recordings(session_id="session-1")
+
+    assert result["sessionActive"] is False
+    assert result["verified"] is True
+    assert [name for name, _data in transport.requests] == [
+        "GetPluginStatus",
+        "StopSceneRecordings",
+        "GetSceneRecordingSession",
+        "GetSceneRecordingSession",
+        "StopSceneRecordings",
+        "GetSceneRecordingSession",
+    ]
+
+
 @pytest.mark.parametrize(
     "recordings",
     [
