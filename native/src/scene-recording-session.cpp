@@ -83,6 +83,29 @@ bool exact_window_is_live(uint32_t process_id, uint64_t window_handle)
 #endif
 }
 
+bool exact_window_client_size(uint32_t process_id, uint64_t window_handle, uint32_t &width, uint32_t &height)
+{
+#ifdef _WIN32
+	const auto window = reinterpret_cast<HWND>(static_cast<uintptr_t>(window_handle));
+	DWORD actual_process_id = 0;
+	RECT client{};
+	if (process_id == 0 || window_handle == 0 || IsWindow(window) == FALSE || IsWindowVisible(window) == FALSE ||
+	    IsIconic(window) != FALSE || GetWindowThreadProcessId(window, &actual_process_id) == 0 ||
+	    actual_process_id != process_id || GetClientRect(window, &client) == FALSE || client.right <= client.left ||
+	    client.bottom <= client.top)
+		return false;
+	width = static_cast<uint32_t>(client.right - client.left);
+	height = static_cast<uint32_t>(client.bottom - client.top);
+	return true;
+#else
+	UNUSED_PARAMETER(process_id);
+	UNUSED_PARAMETER(window_handle);
+	UNUSED_PARAMETER(width);
+	UNUSED_PARAMETER(height);
+	return false;
+#endif
+}
+
 QString recording_directory()
 {
 	config_t *config = obs_frontend_get_profile_config();
@@ -504,8 +527,13 @@ obs_data_t *SceneRecordingSessionManager::start(const std::vector<SceneRecording
 				return result;
 			}
 		}
-		recording.video_width = obs_source_get_width(sources.capture);
-		recording.video_height = obs_source_get_height(sources.capture);
+		if (!spec.source_name.empty()) {
+			exact_window_client_size(spec.process_id, spec.window_handle, recording.video_width,
+						 recording.video_height);
+		} else {
+			recording.video_width = obs_source_get_width(sources.capture);
+			recording.video_height = obs_source_get_height(sources.capture);
+		}
 		if (recording.video_width == 0 || recording.video_height == 0) {
 			set_error(result, "OBS_INSTANCE_NOT_READY");
 			recording.release(true);
