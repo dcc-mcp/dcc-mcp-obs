@@ -229,6 +229,7 @@ struct SceneRecordingSessionManager::Impl {
 		std::string last_error;
 		uint32_t video_width = 0;
 		uint32_t video_height = 0;
+		bool stop_requested = false;
 
 		bool active() const { return output != nullptr && obs_output_active(output); }
 
@@ -691,8 +692,14 @@ obs_data_t *SceneRecordingSessionManager::stop(const std::string &session_id)
 		return result;
 	}
 	for (auto &recording : session->recordings) {
-		if (recording.active())
+		if (!recording.active())
+			continue;
+		if (recording.stop_requested)
+			obs_output_force_stop(recording.output);
+		else {
+			recording.stop_requested = true;
 			obs_output_stop(recording.output);
+		}
 	}
 	obs_data_set_bool(result, "accepted", true);
 	obs_data_set_string(result, "sessionId", session->session_id.c_str());

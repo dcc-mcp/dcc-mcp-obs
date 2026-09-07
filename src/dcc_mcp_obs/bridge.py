@@ -1599,26 +1599,29 @@ class ObsControlBridge:
     def stop_scene_recordings(self, *, session_id: str) -> dict[str, object]:
         session_id = self._require_session_id(session_id)
         deadline = self._operation_deadline()
-        accepted = self._checked(
-            "StopSceneRecordings", {"sessionId": session_id}, deadline=deadline
-        )
-        if accepted.get("accepted") is not True or accepted.get("sessionId") != session_id:
-            raise BridgeError("OBS_MUTATION_REJECTED")
-        for attempt in range(self._postcondition_attempts):
-            readback = self._checked(
-                "GetSceneRecordingSession", {"sessionId": session_id}, deadline=deadline
+        for stop_attempt in range(2):
+            accepted = self._checked(
+                "StopSceneRecordings", {"sessionId": session_id}, deadline=deadline
             )
-            if (
-                readback.get("sessionId") == session_id
-                and readback.get("sessionActive") is False
-                and all(item.get("outputActive") is False for item in readback["recordings"])
-            ):
-                return {**readback, "verified": True}
-            if attempt + 1 < self._postcondition_attempts:
-                remaining = deadline - self._clock()
-                if remaining <= 0:
-                    raise BridgeError("OBS_TIMEOUT")
-                self._sleeper(min(self._postcondition_poll_seconds, remaining))
+            if accepted.get("accepted") is not True or accepted.get("sessionId") != session_id:
+                raise BridgeError("OBS_MUTATION_REJECTED")
+            for attempt in range(self._postcondition_attempts):
+                readback = self._checked(
+                    "GetSceneRecordingSession", {"sessionId": session_id}, deadline=deadline
+                )
+                if (
+                    readback.get("sessionId") == session_id
+                    and readback.get("sessionActive") is False
+                    and all(item.get("outputActive") is False for item in readback["recordings"])
+                ):
+                    return {**readback, "verified": True}
+                if attempt + 1 < self._postcondition_attempts:
+                    remaining = deadline - self._clock()
+                    if remaining <= 0:
+                        raise BridgeError("OBS_TIMEOUT")
+                    self._sleeper(min(self._postcondition_poll_seconds, remaining))
+            if stop_attempt == 0 and deadline - self._clock() <= 0:
+                raise BridgeError("OBS_TIMEOUT")
         raise BridgeError("OBS_POSTCONDITION_FAILED")
 
     @staticmethod
