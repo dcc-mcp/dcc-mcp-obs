@@ -40,6 +40,18 @@ def test_native_plugin_uses_libobs_frontend_lifecycle() -> None:
     assert "obs_queue_task(OBS_TASK_UI" in source
 
 
+def test_private_scene_recordings_support_independent_sessions_and_exact_artifacts() -> None:
+    source = (ROOT / "native" / "src" / "scene-recording-session.cpp").read_text(encoding="utf-8")
+
+    assert "std::vector<Session> sessions" in source
+    assert "active_recording_count() + specs.size()" in source
+    assert "for (auto &recording : session->recordings)" in source
+    assert 'obs_data_set_string(item, "outputDirectory"' in source
+    assert 'obs_data_set_bool(item, "bindingVerified"' in source
+    assert "exact_window_is_live(spec.process_id, spec.window_handle)" in source
+    assert "if (impl_->active())" not in source
+
+
 def test_native_plugin_advances_sequence_for_every_completed_request() -> None:
     source = (ROOT / "native" / "src" / "plugin-main.cpp").read_text(encoding="utf-8")
     completion = source.split("void execute_ui_operation", maxsplit=1)[1].split(

@@ -140,13 +140,15 @@ allowlisted shortcut, mouse button, wheel direction, or typing count. It never
 captures global input or accepts arbitrary text. See the
 [Agent input overlay contract](docs/agent-input-overlay.md).
 
-`start_scene_recordings` atomically starts one video-only MP4 per exact game
-scene. Each output uses the single enabled `window_capture` source's native
-width and height, includes that scene's Agent input overlay, and is named
-`<game> <yyyy-MM-dd HH-mm-ss>.mp4` in the current OBS profile recording
-directory. Supply only game scenes; editor and VS Code scenes are not part of
-the recording plan. The typed session readback exposes exact dimensions,
-paths, activity, byte/frame counters, and errors for every output.
+`start_scene_recordings` starts a private video-only output without switching
+the OBS program scene. Calls create separate sessions and may overlap up to
+eight active outputs in one OBS instance; stopping one session leaves the
+others running. Each output uses its scene's single enabled `window_capture`
+source at native dimensions and includes that scene's Agent input overlay.
+Pass an absolute `output_directory` to separate application artifacts, or omit
+it to use the current OBS profile recording directory. Application/run IDs and
+an expected source/PID/HWND can be supplied and are returned in typed status;
+start fails closed when an expected window binding no longer matches.
 
 The native plugin adds a top-level `DCC MCP` menu to OBS. `Server Status...`
 shows the exact plugin and OBS versions, bridge readiness, active outputs, and

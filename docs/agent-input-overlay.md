@@ -35,8 +35,11 @@ their content.
 5. Call `clear_agent_input_overlay` between sections when an immediate clear is
    preferable to the bounded automatic expiry.
 6. Capture and inspect a fresh program frame before starting a long recording.
-7. Start one independent recording per game scene. Do not include editor or VS
-   Code scenes in the recording plan.
+7. Start one single-item recording session per game scene so each game can have
+   its own start/stop window and output directory. Supply the exact source name,
+   PID, and HWND, and keep each returned session ID with its training run. Calls
+   may overlap up to eight active outputs in one OBS instance. Do not include
+   editor or VS Code scenes in the recording plan.
 
 The default `dcc_mcp_dark` theme uses 78% opacity and a 48-pixel margin. Eight
 edge anchors are available; the center of the game frame is intentionally not

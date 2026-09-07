@@ -2,6 +2,7 @@
 
 #include <obs.h>
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -11,6 +12,12 @@ namespace dcc_mcp_obs {
 struct SceneRecordingSpec {
 	std::string scene_name;
 	std::string file_name_prefix;
+	std::string output_directory;
+	std::string application_id;
+	std::string run_id;
+	std::string source_name;
+	uint32_t process_id = 0;
+	uint64_t window_handle = 0;
 };
 
 class SceneRecordingSessionManager {

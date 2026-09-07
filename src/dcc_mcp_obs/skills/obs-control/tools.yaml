@@ -312,7 +312,7 @@ tools:
     next-tools: {on-success: [obs_control__get_recording_status], on-failure: [obs_control__get_status]}
 
   - name: get_scene_recording_session
-    description: Read one bounded session of independent video-only MP4 recordings, including each exact game-window resolution and artifact path.
+    description: Read one independently controlled video-only MP4 session, including ownership, exact window binding, time range, and artifact path.
     source_file: scripts/get_scene_recording_session.py
     input_schema:
       type: object
@@ -332,7 +332,7 @@ tools:
         context: &scene_recording_status_context
           type: object
           additionalProperties: false
-          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sessionId, sessionActive, startedAt, recordings]
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sessionId, sessionActive, startedAt, stoppedAt, recordings]
           properties:
             instanceId: {type: string, minLength: 1, maxLength: 128}
             pluginVersion: {type: string, minLength: 1}
@@ -343,6 +343,7 @@ tools:
             sessionId: {type: string, minLength: 1, maxLength: 128}
             sessionActive: {type: boolean}
             startedAt: {type: string, minLength: 1, maxLength: 64}
+            stoppedAt: {type: string, maxLength: 64}
             recordings:
               type: array
               minItems: 1
@@ -350,10 +351,17 @@ tools:
               items:
                 type: object
                 additionalProperties: false
-                required: [sceneName, fileName, outputPath, outputActive, videoOnly, videoWidth, videoHeight, totalBytes, totalFrames, lastError]
+                required: [sceneName, applicationId, runId, sourceName, processId, windowHandle, bindingVerified, fileName, outputDirectory, outputPath, outputActive, videoOnly, videoWidth, videoHeight, totalBytes, totalFrames, lastError]
                 properties:
                   sceneName: {type: string, minLength: 1, maxLength: 256}
+                  applicationId: {type: string, maxLength: 128}
+                  runId: {type: string, maxLength: 128}
+                  sourceName: {type: string, maxLength: 256}
+                  processId: {type: integer, minimum: 0, maximum: 4294967295}
+                  windowHandle: {type: integer, minimum: 0, maximum: 9223372036854775807}
+                  bindingVerified: {type: boolean}
                   fileName: {type: string, minLength: 5, maxLength: 160, pattern: '\.mp4$'}
+                  outputDirectory: {type: string, minLength: 1, maxLength: 4096}
                   outputPath: {type: string, minLength: 1, maxLength: 4096}
                   outputActive: {type: boolean}
                   videoOnly: {const: true}
@@ -370,7 +378,7 @@ tools:
     call_examples: [{arguments: {session_id: 01234567-89ab-cdef-0123-456789abcdef}, note: Read exact per-game recording state.}]
     next-tools: {on-failure: [obs_control__get_status]}
   - name: start_scene_recordings
-    description: Atomically start one video-only MP4 per exact game scene, using the captured game window's native dimensions and a shared start timestamp in each filename.
+    description: Start one independently controlled video-only MP4 session without switching the program scene; separate calls can overlap up to eight total outputs.
     source_file: scripts/start_scene_recordings.py
     input_schema:
       type: object
@@ -385,9 +393,19 @@ tools:
             type: object
             additionalProperties: false
             required: [scene_name, file_name_prefix]
+            dependentRequired:
+              source_name: [process_id, window_handle]
+              process_id: [source_name, window_handle]
+              window_handle: [source_name, process_id]
             properties:
               scene_name: {type: string, minLength: 1, maxLength: 256}
               file_name_prefix: {type: string, minLength: 1, maxLength: 96, pattern: '^[^<>:"/\\|?*]+[^<>:"/\\|?*. ]$|^[^<>:"/\\|?*. ]$'}
+              output_directory: {type: string, minLength: 1, maxLength: 4096}
+              application_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.:-]+$'}
+              run_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.:-]+$'}
+              source_name: {type: string, minLength: 1, maxLength: 256}
+              process_id: {type: integer, minimum: 1, maximum: 4294967295}
+              window_handle: {type: integer, minimum: 1, maximum: 9223372036854775807}
     output_schema: &scene_recording_mutation_output
       type: object
       additionalProperties: false
@@ -417,7 +435,7 @@ tools:
         note: Start only the three game scenes; do not include editor or VS Code scenes.
     next-tools: {on-success: [obs_control__get_scene_recording_session], on-failure: [obs_control__get_status]}
   - name: stop_scene_recordings
-    description: Stop every output in one exact independent scene-recording session and verify all are inactive.
+    description: Stop only the outputs owned by one exact scene-recording session and verify that session is inactive without affecting other sessions.
     source_file: scripts/stop_scene_recordings.py
     input_schema:
       type: object

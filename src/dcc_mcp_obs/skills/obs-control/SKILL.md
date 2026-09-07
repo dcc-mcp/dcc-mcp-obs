@@ -121,12 +121,16 @@ opacity, and margin. Include `agent_id` with every
 typing counts; never typed text. Call `clear_agent_input_overlay` when a demo
 section ends. The overlay does not install OS hooks or observe user input.
 
-Use `start_scene_recordings` for simultaneous per-game MP4s. Each requested
-scene must contain exactly one enabled Windows window-capture source; its native
-dimensions become that output's video dimensions. Do not include VS Code,
-editor, or other non-game scenes. Verify `videoWidth`, `videoHeight`, output
-paths, and active state through `get_scene_recording_session`, then stop the
-whole exact session with `stop_scene_recordings`.
+Use one `start_scene_recordings` call per independently timed application, with
+one recording item in that session. Separate calls may overlap in one OBS
+instance up to eight active outputs, and `stop_scene_recordings` affects only
+the supplied session ID. Each scene must contain exactly one enabled Windows
+window-capture source. Supply `source_name`, `process_id`, and `window_handle`
+together so start fails closed unless the source still matches that exact live
+window. Supply `application_id` and `run_id` for ownership. `output_directory`
+is optional and must be absolute; omission uses the current OBS profile's
+recording directory. Verify ownership, `bindingVerified`, dimensions, output
+path, and active state through `get_scene_recording_session`.
 
 ## UI fallback
 
