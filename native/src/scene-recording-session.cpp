@@ -1,4 +1,5 @@
 #include "scene-recording-session.hpp"
+#include "scene-recording-dimensions.hpp"
 #include "agent-input-overlay.hpp"
 
 #include <obs-frontend-api.h>
@@ -556,6 +557,8 @@ obs_data_t *SceneRecordingSessionManager::start(const std::vector<SceneRecording
 			recording.video_width = obs_source_get_width(sources.capture);
 			recording.video_height = obs_source_get_height(sources.capture);
 		}
+		recording.video_width = encoder_compatible_dimension(recording.video_width);
+		recording.video_height = encoder_compatible_dimension(recording.video_height);
 		if (recording.video_width == 0 || recording.video_height == 0) {
 			set_error(result, "OBS_INSTANCE_NOT_READY");
 			recording.release(true);
