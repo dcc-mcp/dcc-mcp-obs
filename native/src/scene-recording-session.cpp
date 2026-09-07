@@ -129,6 +129,12 @@ obs_data_t *encoder_settings()
 	return settings;
 }
 
+bool silent_audio_input(void *, uint64_t start_ts, uint64_t, uint64_t *new_ts, uint32_t, struct audio_output_data *)
+{
+	*new_ts = start_ts;
+	return true;
+}
+
 struct SceneSources {
 	obs_source_t *capture = nullptr;
 	obs_source_t *overlay = nullptr;
@@ -214,6 +220,8 @@ struct SceneRecordingSessionManager::Impl {
 		obs_view_t *view = nullptr;
 		video_t *video = nullptr;
 		obs_encoder_t *encoder = nullptr;
+		audio_t *silent_audio = nullptr;
+		obs_encoder_t *silent_audio_encoder = nullptr;
 		obs_output_t *output = nullptr;
 		uint64_t total_bytes = 0;
 		uint64_t total_frames = 0;
@@ -250,6 +258,14 @@ struct SceneRecordingSessionManager::Impl {
 			if (encoder != nullptr) {
 				obs_encoder_release(encoder);
 				encoder = nullptr;
+			}
+			if (silent_audio_encoder != nullptr) {
+				obs_encoder_release(silent_audio_encoder);
+				silent_audio_encoder = nullptr;
+			}
+			if (silent_audio != nullptr) {
+				audio_output_close(silent_audio);
+				silent_audio = nullptr;
 			}
 			if (view != nullptr) {
 				obs_view_set_source(view, 0, nullptr);
@@ -451,6 +467,12 @@ obs_data_t *SceneRecordingSessionManager::start(const std::vector<SceneRecording
 		set_error(result, "OBS_INSTANCE_NOT_READY");
 		return result;
 	}
+	obs_audio_info base_audio_info{};
+	if (!obs_get_audio_info(&base_audio_info) || base_audio_info.samples_per_sec == 0 ||
+	    base_audio_info.speakers == SPEAKERS_UNKNOWN) {
+		set_error(result, "OBS_INSTANCE_NOT_READY");
+		return result;
+	}
 
 	Impl::Session session;
 	const QDateTime started = QDateTime::currentDateTime();
@@ -590,6 +612,22 @@ obs_data_t *SceneRecordingSessionManager::start(const std::vector<SceneRecording
 		obs_data_release(video_settings);
 		if (recording.encoder != nullptr && recording.video != nullptr)
 			obs_encoder_set_video(recording.encoder, recording.video);
+		audio_output_info silent_audio_info{};
+		silent_audio_info.name = "dcc-mcp-scene-silent-audio";
+		silent_audio_info.samples_per_sec = base_audio_info.samples_per_sec;
+		silent_audio_info.format = AUDIO_FORMAT_FLOAT_PLANAR;
+		silent_audio_info.speakers = base_audio_info.speakers;
+		silent_audio_info.input_callback = silent_audio_input;
+		if (audio_output_open(&recording.silent_audio, &silent_audio_info) == AUDIO_OUTPUT_SUCCESS) {
+			obs_data_t *audio_settings = obs_data_create();
+			obs_data_set_int(audio_settings, "bitrate", 64);
+			recording.silent_audio_encoder = obs_audio_encoder_create(
+				"ffmpeg_aac", ("dcc-mcp-scene-silent-audio-encoder-" + suffix).c_str(), audio_settings,
+				0, nullptr);
+			obs_data_release(audio_settings);
+		}
+		if (recording.silent_audio_encoder != nullptr && recording.silent_audio != nullptr)
+			obs_encoder_set_audio(recording.silent_audio_encoder, recording.silent_audio);
 		obs_data_t *output_settings = obs_data_create();
 		obs_data_set_string(output_settings, "path", recording.output_path.c_str());
 		recording.output = obs_output_create("mp4_output", ("dcc-mcp-scene-output-" + suffix).c_str(),
@@ -597,7 +635,10 @@ obs_data_t *SceneRecordingSessionManager::start(const std::vector<SceneRecording
 		obs_data_release(output_settings);
 		if (recording.output != nullptr && recording.encoder != nullptr)
 			obs_output_set_video_encoder(recording.output, recording.encoder);
+		if (recording.output != nullptr && recording.silent_audio_encoder != nullptr)
+			obs_output_set_audio_encoder(recording.output, recording.silent_audio_encoder, 0);
 		if (recording.view == nullptr || recording.video == nullptr || recording.encoder == nullptr ||
+		    recording.silent_audio == nullptr || recording.silent_audio_encoder == nullptr ||
 		    recording.output == nullptr) {
 			recording.release(true);
 			set_error(result, "OBS_REQUEST_FAILED");
