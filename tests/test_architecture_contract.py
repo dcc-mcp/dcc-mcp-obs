@@ -49,6 +49,9 @@ def test_private_scene_recordings_support_independent_sessions_and_exact_artifac
     assert 'obs_data_set_string(item, "outputDirectory"' in source
     assert 'obs_data_set_bool(item, "bindingVerified"' in source
     assert "exact_window_is_live(spec.process_id, spec.window_handle)" in source
+    assert "audio_output_open(&recording.silent_audio" in source
+    assert "obs_encoder_set_audio(recording.silent_audio_encoder, recording.silent_audio)" in source
+    assert "obs_get_audio()" not in source
     assert "if (impl_->active())" not in source
 
 

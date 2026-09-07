@@ -145,6 +145,9 @@ the OBS program scene. Calls create separate sessions and may overlap up to
 eight active outputs in one OBS instance; stopping one session leaves the
 others running. Each output uses its scene's single enabled `window_capture`
 source at native dimensions and includes that scene's Agent input overlay.
+The MP4 muxer receives a private silent AAC timing track because OBS requires
+an audio encoder for MP4 outputs; the session never reads the OBS audio mixer,
+so its public contract remains video-only and cannot leak another app's audio.
 Pass an absolute `output_directory` to separate application artifacts, or omit
 it to use the current OBS profile recording directory. Application/run IDs and
 an expected source/PID/HWND can be supplied and are returned in typed status;
