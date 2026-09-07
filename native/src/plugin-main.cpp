@@ -2737,8 +2737,23 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 			obs_data_t *item = obs_data_array_item(recordings, index);
 			const char *scene = item != nullptr ? obs_data_get_string(item, "sceneName") : nullptr;
 			const char *prefix = item != nullptr ? obs_data_get_string(item, "fileNamePrefix") : nullptr;
+			const char *output_directory = item != nullptr ? obs_data_get_string(item, "outputDirectory")
+								       : nullptr;
+			const char *application_id = item != nullptr ? obs_data_get_string(item, "applicationId")
+								     : nullptr;
+			const char *run_id = item != nullptr ? obs_data_get_string(item, "runId") : nullptr;
+			const char *source_name = item != nullptr ? obs_data_get_string(item, "sourceName") : nullptr;
+			const long long process_id = item != nullptr ? obs_data_get_int(item, "processId") : 0;
+			const long long window_handle = item != nullptr ? obs_data_get_int(item, "windowHandle") : 0;
 			dcc_mcp_obs::SceneRecordingSpec spec{scene != nullptr ? scene : "",
-							     prefix != nullptr ? prefix : ""};
+							     prefix != nullptr ? prefix : "",
+							     output_directory != nullptr ? output_directory : "",
+							     application_id != nullptr ? application_id : "",
+							     run_id != nullptr ? run_id : "",
+							     source_name != nullptr ? source_name : "",
+							     process_id > 0 ? static_cast<uint32_t>(process_id) : 0,
+							     window_handle > 0 ? static_cast<uint64_t>(window_handle)
+									       : 0};
 			std::string folded = spec.file_name_prefix;
 			std::transform(folded.begin(), folded.end(), folded.begin(), [](unsigned char character) {
 				return static_cast<char>(std::tolower(character));
@@ -2754,7 +2769,10 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 							    invalid.find(static_cast<char>(character)) !=
 								    std::string::npos;
 					     }) &&
-				scenes.insert(spec.scene_name).second && prefixes.insert(folded).second;
+				scenes.insert(spec.scene_name).second && prefixes.insert(folded).second &&
+				process_id >= 0 &&
+				process_id <= static_cast<long long>(std::numeric_limits<uint32_t>::max()) &&
+				window_handle >= 0;
 			if (valid)
 				scene_recording_specs.push_back(std::move(spec));
 			if (item != nullptr)

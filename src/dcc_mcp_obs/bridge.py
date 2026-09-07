@@ -10,6 +10,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Protocol
 
 from .__version__ import __version__
@@ -1558,6 +1559,26 @@ class ObsControlBridge:
                 and readback.get("sessionActive") is True
                 and actual_scenes == expected_scenes
                 and all(item.get("outputActive") is True for item in readback["recordings"])
+                and all(
+                    actual.get("applicationId") == expected["applicationId"]
+                    and actual.get("runId") == expected["runId"]
+                    and (
+                        not expected["outputDirectory"]
+                        or self._same_recording_path(
+                            actual.get("outputDirectory"), expected["outputDirectory"]
+                        )
+                    )
+                    and (
+                        not expected["sourceName"]
+                        or (
+                            actual.get("sourceName") == expected["sourceName"]
+                            and actual.get("processId") == expected["processId"]
+                            and actual.get("windowHandle") == expected["windowHandle"]
+                            and actual.get("bindingVerified") is True
+                        )
+                    )
+                    for actual, expected in zip(readback["recordings"], normalized, strict=True)
+                )
             ):
                 return {**readback, "verified": True}
             if attempt + 1 < self._postcondition_attempts:
@@ -1566,6 +1587,14 @@ class ObsControlBridge:
                     raise BridgeError("OBS_TIMEOUT")
                 self._sleeper(min(self._postcondition_poll_seconds, remaining))
         raise BridgeError("OBS_POSTCONDITION_FAILED")
+
+    @staticmethod
+    def _same_recording_path(actual: object, expected: object) -> bool:
+        if not isinstance(actual, str) or not isinstance(expected, str):
+            return False
+        if PureWindowsPath(expected).is_absolute():
+            return PureWindowsPath(actual) == PureWindowsPath(expected)
+        return PurePosixPath(actual) == PurePosixPath(expected)
 
     def stop_scene_recordings(self, *, session_id: str) -> dict[str, object]:
         session_id = self._require_session_id(session_id)
@@ -1603,15 +1632,29 @@ class ObsControlBridge:
         return session_id
 
     @classmethod
-    def _normalize_scene_recording_plan(cls, recordings: object) -> list[dict[str, str]]:
+    def _normalize_scene_recording_plan(cls, recordings: object) -> list[dict[str, object]]:
         if not isinstance(recordings, list) or not 1 <= len(recordings) <= 8:
             raise BridgeError("OBS_ARGUMENT_INVALID")
-        normalized: list[dict[str, str]] = []
+        normalized: list[dict[str, object]] = []
         scenes: set[str] = set()
         prefixes: set[str] = set()
         invalid_filename_characters = frozenset('<>:"/\\|?*')
         for item in recordings:
-            if not isinstance(item, Mapping) or set(item) != {"scene_name", "file_name_prefix"}:
+            allowed = {
+                "scene_name",
+                "file_name_prefix",
+                "output_directory",
+                "application_id",
+                "run_id",
+                "source_name",
+                "process_id",
+                "window_handle",
+            }
+            if (
+                not isinstance(item, Mapping)
+                or not {"scene_name", "file_name_prefix"} <= set(item)
+                or not set(item) <= allowed
+            ):
                 raise BridgeError("OBS_ARGUMENT_INVALID")
             scene_name = cls._require_name(item["scene_name"])
             prefix = item["file_name_prefix"]
@@ -1630,8 +1673,63 @@ class ObsControlBridge:
                 raise BridgeError("OBS_ARGUMENT_INVALID")
             scenes.add(scene_name)
             prefixes.add(prefix.casefold())
-            normalized.append({"sceneName": scene_name, "fileNamePrefix": prefix})
+            output_directory = item.get("output_directory", "")
+            if (
+                type(output_directory) is not str
+                or len(output_directory) > 4096
+                or any(ord(character) < 32 for character in output_directory)
+                or (
+                    output_directory
+                    and not (
+                        PureWindowsPath(output_directory).is_absolute()
+                        or PurePosixPath(output_directory).is_absolute()
+                    )
+                )
+            ):
+                raise BridgeError("OBS_ARGUMENT_INVALID")
+            application_id = cls._require_optional_identifier(item.get("application_id", ""))
+            run_id = cls._require_optional_identifier(item.get("run_id", ""))
+            source_name = item.get("source_name", "")
+            process_id = item.get("process_id", 0)
+            window_handle = item.get("window_handle", 0)
+            binding_values = (source_name, process_id, window_handle)
+            if any(value not in ("", 0) for value in binding_values) and (
+                type(source_name) is not str
+                or not 1 <= len(source_name) <= 256
+                or type(process_id) is not int
+                or not 1 <= process_id <= 0xFFFFFFFF
+                or type(window_handle) is not int
+                or not 1 <= window_handle <= 0x7FFFFFFFFFFFFFFF
+            ):
+                raise BridgeError("OBS_ARGUMENT_INVALID")
+            normalized.append(
+                {
+                    "sceneName": scene_name,
+                    "fileNamePrefix": prefix,
+                    "outputDirectory": output_directory,
+                    "applicationId": application_id,
+                    "runId": run_id,
+                    "sourceName": source_name,
+                    "processId": process_id,
+                    "windowHandle": window_handle,
+                }
+            )
         return normalized
+
+    @staticmethod
+    def _require_optional_identifier(value: object) -> str:
+        if value == "":
+            return ""
+        if (
+            type(value) is not str
+            or not 1 <= len(value) <= 128
+            or any(
+                not (character.isascii() and (character.isalnum() or character in "-_.:"))
+                for character in value
+            )
+        ):
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        return value
 
     def output_status(self, *, output_name: str) -> dict[str, object]:
         if not isinstance(output_name, str) or not output_name or len(output_name) > 256:
@@ -2485,7 +2583,13 @@ class ObsControlBridge:
                 raise BridgeError("OBS_RESPONSE_INVALID")
             return
         if request_type == "GetSceneRecordingSession":
-            allowed = _IDENTITY_KEYS | {"sessionId", "sessionActive", "startedAt", "recordings"}
+            allowed = _IDENTITY_KEYS | {
+                "sessionId",
+                "sessionActive",
+                "startedAt",
+                "stoppedAt",
+                "recordings",
+            }
             recordings = response.get("recordings")
             if (
                 set(response) != allowed
@@ -2494,6 +2598,8 @@ class ObsControlBridge:
                 or type(response.get("sessionActive")) is not bool
                 or not isinstance(response.get("startedAt"), str)
                 or not 1 <= len(response["startedAt"]) <= 64
+                or not isinstance(response.get("stoppedAt"), str)
+                or len(response["stoppedAt"]) > 64
                 or not isinstance(recordings, list)
                 or not 1 <= len(recordings) <= 8
             ):
@@ -2501,7 +2607,14 @@ class ObsControlBridge:
             seen_scenes: set[str] = set()
             recording_fields = {
                 "sceneName",
+                "applicationId",
+                "runId",
+                "sourceName",
+                "processId",
+                "windowHandle",
+                "bindingVerified",
                 "fileName",
+                "outputDirectory",
                 "outputPath",
                 "outputActive",
                 "videoOnly",
@@ -2515,18 +2628,35 @@ class ObsControlBridge:
                 if not isinstance(item, Mapping) or set(item) != recording_fields:
                     raise BridgeError("OBS_RESPONSE_INVALID")
                 scene_name = item.get("sceneName")
+                application_id = item.get("applicationId")
+                run_id = item.get("runId")
+                source_name = item.get("sourceName")
                 file_name = item.get("fileName")
+                output_directory = item.get("outputDirectory")
                 output_path = item.get("outputPath")
                 path_file_name = str(output_path).replace("\\", "/").rsplit("/", 1)[-1]
                 if (
                     not isinstance(scene_name, str)
                     or not 1 <= len(scene_name) <= 256
                     or scene_name in seen_scenes
+                    or not isinstance(application_id, str)
+                    or len(application_id) > 128
+                    or not isinstance(run_id, str)
+                    or len(run_id) > 128
+                    or not isinstance(source_name, str)
+                    or len(source_name) > 256
+                    or type(item.get("processId")) is not int
+                    or not 0 <= item["processId"] <= 0xFFFFFFFF
+                    or type(item.get("windowHandle")) is not int
+                    or not 0 <= item["windowHandle"] <= 0x7FFFFFFFFFFFFFFF
+                    or type(item.get("bindingVerified")) is not bool
                     or not isinstance(file_name, str)
                     or not file_name.lower().endswith(".mp4")
                     or len(file_name) > 160
                     or not isinstance(output_path, str)
                     or not 1 <= len(output_path) <= 4096
+                    or not isinstance(output_directory, str)
+                    or not 1 <= len(output_directory) <= 4096
                     or path_file_name != file_name
                     or type(item.get("outputActive")) is not bool
                     or item.get("videoOnly") is not True

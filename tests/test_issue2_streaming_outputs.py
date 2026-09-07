@@ -30,6 +30,28 @@ class FakeTransport:
         return self.responses.pop(0)
 
 
+def scene_recording_item(scene_name, file_name, output_path, *, active=True):
+    return {
+        "sceneName": scene_name,
+        "applicationId": "",
+        "runId": "",
+        "sourceName": "",
+        "processId": 0,
+        "windowHandle": 0,
+        "bindingVerified": False,
+        "fileName": file_name,
+        "outputDirectory": str(Path(output_path).parent),
+        "outputPath": str(output_path),
+        "outputActive": active,
+        "videoOnly": True,
+        "videoWidth": 1280,
+        "videoHeight": 720,
+        "totalBytes": 4096 if active else 8192,
+        "totalFrames": 120 if active else 240,
+        "lastError": "",
+    }
+
+
 @pytest.mark.parametrize(
     ("method", "status_request", "field"),
     [
@@ -115,19 +137,11 @@ def test_issue2_parallel_scene_recordings_bind_exact_scenes_and_reconcile():
                 "sessionId": "session-1",
                 "sessionActive": True,
                 "startedAt": started_at,
+                "stoppedAt": "",
                 "recordings": [
-                    {
-                        "sceneName": item["sceneName"],
-                        "fileName": item["fileName"],
-                        "outputPath": str(output_root / item["fileName"]),
-                        "outputActive": True,
-                        "videoOnly": True,
-                        "videoWidth": 1280,
-                        "videoHeight": 720,
-                        "totalBytes": 4096,
-                        "totalFrames": 120,
-                        "lastError": "",
-                    }
+                    scene_recording_item(
+                        item["sceneName"], item["fileName"], output_root / item["fileName"]
+                    )
                     for item in recordings
                 ],
                 "eventSequence": 3,
@@ -164,6 +178,12 @@ def test_issue2_parallel_scene_recordings_bind_exact_scenes_and_reconcile():
             {
                 "sceneName": item["sceneName"],
                 "fileNamePrefix": item["fileNamePrefix"],
+                "outputDirectory": "",
+                "applicationId": "",
+                "runId": "",
+                "sourceName": "",
+                "processId": 0,
+                "windowHandle": 0,
             }
             for item in recordings
         ]
@@ -179,19 +199,9 @@ def test_issue2_parallel_scene_recordings_stop_all_outputs_and_reconcile():
         "sessionId": "session-1",
         "sessionActive": False,
         "startedAt": "2026-09-01T07:15:30+08:00",
+        "stoppedAt": "2026-09-01T07:19:30+08:00",
         "recordings": [
-            {
-                "sceneName": "RL - The Bazaar",
-                "fileName": file_name,
-                "outputPath": output_path,
-                "outputActive": False,
-                "videoOnly": True,
-                "videoWidth": 1280,
-                "videoHeight": 720,
-                "totalBytes": 8192,
-                "totalFrames": 240,
-                "lastError": "",
-            }
+            scene_recording_item("RL - The Bazaar", file_name, output_path, active=False)
         ],
         "eventSequence": 3,
     }
@@ -235,6 +245,95 @@ def test_issue2_parallel_scene_recordings_reject_invalid_or_ambiguous_plans(reco
         bridge.start_scene_recordings(recordings=recordings)
 
 
+def test_scene_recording_plan_carries_output_ownership_and_exact_window_binding():
+    output_directory = str(Path.cwd() / "recordings" / "wukong")
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {**IDENTITY, "accepted": True, "sessionId": "session-1", "eventSequence": 2},
+            {
+                **IDENTITY,
+                "sessionId": "session-1",
+                "sessionActive": True,
+                "startedAt": "2026-09-07T10:00:00+08:00",
+                "stoppedAt": "",
+                "recordings": [
+                    {
+                        **scene_recording_item(
+                            "RL - Black Myth Wukong",
+                            "Wukong 2026-09-07 10-00-00.mp4",
+                            Path(output_directory) / "Wukong 2026-09-07 10-00-00.mp4",
+                        ),
+                        "applicationId": "black-myth-wukong",
+                        "runId": "train-42",
+                        "sourceName": "Wukong Window",
+                        "processId": 4242,
+                        "windowHandle": 987654,
+                        "bindingVerified": True,
+                    }
+                ],
+                "eventSequence": 3,
+            },
+        ]
+    )
+
+    result = ObsControlBridge(transport, expected_pid=1234).start_scene_recordings(
+        recordings=[
+            {
+                "scene_name": "RL - Black Myth Wukong",
+                "file_name_prefix": "Wukong",
+                "output_directory": output_directory,
+                "application_id": "black-myth-wukong",
+                "run_id": "train-42",
+                "source_name": "Wukong Window",
+                "process_id": 4242,
+                "window_handle": 987654,
+            }
+        ]
+    )
+
+    assert result["recordings"][0]["bindingVerified"] is True
+    assert transport.requests[1][1]["recordings"] == [
+        {
+            "sceneName": "RL - Black Myth Wukong",
+            "fileNamePrefix": "Wukong",
+            "outputDirectory": output_directory,
+            "applicationId": "black-myth-wukong",
+            "runId": "train-42",
+            "sourceName": "Wukong Window",
+            "processId": 4242,
+            "windowHandle": 987654,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "recording",
+    [
+        {
+            "scene_name": "RL - Game",
+            "file_name_prefix": "Game",
+            "output_directory": "relative/path",
+        },
+        {
+            "scene_name": "RL - Game",
+            "file_name_prefix": "Game",
+            "source_name": "Game Window",
+        },
+        {
+            "scene_name": "RL - Game",
+            "file_name_prefix": "Game",
+            "application_id": "invalid owner",
+        },
+    ],
+)
+def test_scene_recording_plan_rejects_unbounded_output_or_partial_identity(recording):
+    bridge = ObsControlBridge(FakeTransport([{**IDENTITY, "ready": True}]), expected_pid=1234)
+
+    with pytest.raises(BridgeError, match="OBS_ARGUMENT_INVALID"):
+        bridge.start_scene_recordings(recordings=[recording])
+
+
 def test_issue2_parallel_scene_recordings_reject_path_filename_mismatch():
     transport = FakeTransport(
         [
@@ -244,19 +343,13 @@ def test_issue2_parallel_scene_recordings_reject_path_filename_mismatch():
                 "sessionId": "session-1",
                 "sessionActive": True,
                 "startedAt": "2026-09-01T07:15:30+08:00",
+                "stoppedAt": "",
                 "recordings": [
-                    {
-                        "sceneName": "RL - The Bazaar",
-                        "fileName": "The Bazaar 2026-09-01 07-15-30.mp4",
-                        "outputPath": str(Path.cwd() / "recordings" / "different.mp4"),
-                        "outputActive": True,
-                        "videoOnly": True,
-                        "videoWidth": 1280,
-                        "videoHeight": 720,
-                        "totalBytes": 0,
-                        "totalFrames": 0,
-                        "lastError": "",
-                    }
+                    scene_recording_item(
+                        "RL - The Bazaar",
+                        "The Bazaar 2026-09-01 07-15-30.mp4",
+                        Path.cwd() / "recordings" / "different.mp4",
+                    )
                 ],
                 "eventSequence": 2,
             },

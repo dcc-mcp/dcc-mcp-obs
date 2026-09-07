@@ -19,6 +19,12 @@
 #include <utility>
 #include <vector>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 namespace dcc_mcp_obs {
 namespace {
 
@@ -44,6 +50,37 @@ bool valid_prefix(const std::string &value)
 	       std::none_of(value.begin(), value.end(), [&](unsigned char character) {
 		       return invalid.find(static_cast<char>(character)) != std::string::npos;
 	       });
+}
+
+bool valid_optional_id(const std::string &value)
+{
+	return value.empty() ||
+	       (value.size() <= 128 && std::all_of(value.begin(), value.end(), [](unsigned char character) {
+			return std::isalnum(character) || character == '-' || character == '_' || character == '.' ||
+			       character == ':';
+		}));
+}
+
+bool valid_optional_path(const std::string &value)
+{
+	return value.empty() ||
+	       (value.size() <= 4096 && std::none_of(value.begin(), value.end(), [](unsigned char character) {
+			return character < 32 || character == 127;
+		}));
+}
+
+bool exact_window_is_live(uint32_t process_id, uint64_t window_handle)
+{
+	if (process_id == 0 || window_handle == 0)
+		return false;
+#ifdef _WIN32
+	const auto window = reinterpret_cast<HWND>(static_cast<uintptr_t>(window_handle));
+	DWORD actual_process_id = 0;
+	return IsWindow(window) != FALSE && GetWindowThreadProcessId(window, &actual_process_id) != 0 &&
+	       actual_process_id == process_id;
+#else
+	return false;
+#endif
 }
 
 QString recording_directory()
@@ -140,8 +177,15 @@ void position_overlay(obs_sceneitem_t *item, obs_source_t *source, uint32_t widt
 struct SceneRecordingSessionManager::Impl {
 	struct Recording {
 		std::string scene_name;
+		std::string application_id;
+		std::string run_id;
+		std::string source_name;
 		std::string file_name;
+		std::string output_directory;
 		std::string output_path;
+		uint32_t process_id = 0;
+		uint64_t window_handle = 0;
+		bool binding_verified = false;
 		obs_source_t *scene = nullptr;
 		obs_scene_t *recording_scene = nullptr;
 		obs_view_t *view = nullptr;
@@ -203,60 +247,137 @@ struct SceneRecordingSessionManager::Impl {
 		}
 	};
 
-	std::string session_id;
-	std::string started_at;
-	std::vector<Recording> recordings;
+	struct Session {
+		std::string session_id;
+		std::string started_at;
+		std::string stopped_at;
+		std::vector<Recording> recordings;
 
-	bool matches(const std::string &value) const { return !session_id.empty() && session_id == value; }
+		bool matches(const std::string &value) const { return !session_id.empty() && session_id == value; }
+
+		bool active() const
+		{
+			return std::any_of(recordings.begin(), recordings.end(),
+					   [](const Recording &recording) { return recording.active(); });
+		}
+
+		void release_inactive()
+		{
+			for (auto &recording : recordings) {
+				recording.capture_status();
+				if (!recording.active())
+					recording.release(false);
+			}
+			if (!active() && stopped_at.empty())
+				stopped_at = QDateTime::currentDateTime().toString(Qt::ISODate).toStdString();
+		}
+
+		void shutdown()
+		{
+			for (auto &recording : recordings)
+				recording.release(true);
+			if (stopped_at.empty())
+				stopped_at = QDateTime::currentDateTime().toString(Qt::ISODate).toStdString();
+		}
+
+		obs_data_t *status_data()
+		{
+			release_inactive();
+			obs_data_t *result = obs_data_create();
+			obs_data_set_string(result, "sessionId", session_id.c_str());
+			obs_data_set_bool(result, "sessionActive", active());
+			obs_data_set_string(result, "startedAt", started_at.c_str());
+			obs_data_set_string(result, "stoppedAt", stopped_at.c_str());
+			obs_data_array_t *items = obs_data_array_create();
+			for (auto &recording : recordings) {
+				recording.capture_status();
+				obs_data_t *item = obs_data_create();
+				obs_data_set_string(item, "sceneName", recording.scene_name.c_str());
+				obs_data_set_string(item, "applicationId", recording.application_id.c_str());
+				obs_data_set_string(item, "runId", recording.run_id.c_str());
+				obs_data_set_string(item, "sourceName", recording.source_name.c_str());
+				obs_data_set_int(item, "processId", recording.process_id);
+				obs_data_set_int(item, "windowHandle", static_cast<long long>(recording.window_handle));
+				obs_data_set_bool(item, "bindingVerified", recording.binding_verified);
+				obs_data_set_string(item, "fileName", recording.file_name.c_str());
+				obs_data_set_string(item, "outputDirectory", recording.output_directory.c_str());
+				obs_data_set_string(item, "outputPath", recording.output_path.c_str());
+				obs_data_set_bool(item, "outputActive", recording.active());
+				obs_data_set_bool(item, "videoOnly", true);
+				obs_data_set_int(item, "videoWidth", recording.video_width);
+				obs_data_set_int(item, "videoHeight", recording.video_height);
+				obs_data_set_int(item, "totalBytes", static_cast<long long>(recording.total_bytes));
+				obs_data_set_int(item, "totalFrames", static_cast<long long>(recording.total_frames));
+				obs_data_set_string(item, "lastError", recording.last_error.c_str());
+				obs_data_array_push_back(items, item);
+				obs_data_release(item);
+			}
+			obs_data_set_array(result, "recordings", items);
+			obs_data_array_release(items);
+			return result;
+		}
+	};
+
+	std::vector<Session> sessions;
+
+	Session *find(const std::string &session_id)
+	{
+		auto item = std::find_if(sessions.begin(), sessions.end(),
+					 [session_id](const Session &session) { return session.matches(session_id); });
+		return item != sessions.end() ? &*item : nullptr;
+	}
+
+	size_t active_recording_count() const
+	{
+		size_t count = 0;
+		for (const auto &session : sessions)
+			count += static_cast<size_t>(
+				std::count_if(session.recordings.begin(), session.recordings.end(),
+					      [](const Recording &recording) { return recording.active(); }));
+		return count;
+	}
+
+	bool scene_active(const std::string &scene_name) const
+	{
+		for (const auto &session : sessions) {
+			if (std::any_of(session.recordings.begin(), session.recordings.end(),
+					[&scene_name](const Recording &recording) {
+						return recording.scene_name == scene_name && recording.active();
+					}))
+				return true;
+		}
+		return false;
+	}
 
 	bool active() const
 	{
-		return std::any_of(recordings.begin(), recordings.end(),
-				   [](const Recording &recording) { return recording.active(); });
+		return std::any_of(sessions.begin(), sessions.end(),
+				   [](const Session &session) { return session.active(); });
 	}
 
 	void release_inactive()
 	{
-		for (auto &recording : recordings) {
-			recording.capture_status();
-			if (!recording.active())
-				recording.release(false);
+		for (auto &session : sessions)
+			session.release_inactive();
+	}
+
+	void prune_history()
+	{
+		constexpr size_t history_limit = 32;
+		while (sessions.size() >= history_limit) {
+			auto item = std::find_if(sessions.begin(), sessions.end(),
+						 [](const Session &session) { return !session.active(); });
+			if (item == sessions.end())
+				break;
+			item->shutdown();
+			sessions.erase(item);
 		}
 	}
 
 	void shutdown()
 	{
-		for (auto &recording : recordings)
-			recording.release(true);
-	}
-
-	obs_data_t *status_data()
-	{
-		release_inactive();
-		obs_data_t *result = obs_data_create();
-		obs_data_set_string(result, "sessionId", session_id.c_str());
-		obs_data_set_bool(result, "sessionActive", active());
-		obs_data_set_string(result, "startedAt", started_at.c_str());
-		obs_data_array_t *items = obs_data_array_create();
-		for (auto &recording : recordings) {
-			recording.capture_status();
-			obs_data_t *item = obs_data_create();
-			obs_data_set_string(item, "sceneName", recording.scene_name.c_str());
-			obs_data_set_string(item, "fileName", recording.file_name.c_str());
-			obs_data_set_string(item, "outputPath", recording.output_path.c_str());
-			obs_data_set_bool(item, "outputActive", recording.active());
-			obs_data_set_bool(item, "videoOnly", true);
-			obs_data_set_int(item, "videoWidth", recording.video_width);
-			obs_data_set_int(item, "videoHeight", recording.video_height);
-			obs_data_set_int(item, "totalBytes", static_cast<long long>(recording.total_bytes));
-			obs_data_set_int(item, "totalFrames", static_cast<long long>(recording.total_frames));
-			obs_data_set_string(item, "lastError", recording.last_error.c_str());
-			obs_data_array_push_back(items, item);
-			obs_data_release(item);
-		}
-		obs_data_set_array(result, "recordings", items);
-		obs_data_array_release(items);
-		return result;
+		for (auto &session : sessions)
+			session.shutdown();
 	}
 };
 
@@ -270,12 +391,13 @@ SceneRecordingSessionManager::~SceneRecordingSessionManager()
 obs_data_t *SceneRecordingSessionManager::start(const std::vector<SceneRecordingSpec> &specs)
 {
 	obs_data_t *result = obs_data_create();
-	if (impl_->active()) {
-		set_error(result, "OBS_OUTPUT_ACTIVE");
-		return result;
-	}
+	impl_->release_inactive();
 	if (specs.empty() || specs.size() > kMaxSceneRecordings) {
 		set_error(result, "OBS_ARGUMENT_INVALID");
+		return result;
+	}
+	if (impl_->active_recording_count() + specs.size() > kMaxSceneRecordings) {
+		set_error(result, "OBS_OUTPUT_ACTIVE");
 		return result;
 	}
 	std::set<std::string> scenes;
@@ -284,17 +406,21 @@ obs_data_t *SceneRecordingSessionManager::start(const std::vector<SceneRecording
 		std::string folded = spec.file_name_prefix;
 		std::transform(folded.begin(), folded.end(), folded.begin(),
 			       [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+		const bool has_any_binding = !spec.source_name.empty() || spec.process_id != 0 ||
+					     spec.window_handle != 0;
+		const bool has_exact_binding = valid_name(spec.source_name, 256) && spec.process_id != 0 &&
+					       spec.window_handle != 0;
 		if (!valid_name(spec.scene_name, 256) || !valid_prefix(spec.file_name_prefix) ||
+		    !valid_optional_id(spec.application_id) || !valid_optional_id(spec.run_id) ||
+		    !valid_optional_path(spec.output_directory) || (has_any_binding && !has_exact_binding) ||
 		    !scenes.insert(spec.scene_name).second || !prefixes.insert(folded).second) {
 			set_error(result, "OBS_ARGUMENT_INVALID");
 			return result;
 		}
-	}
-
-	const QString directory = recording_directory();
-	if (directory.isEmpty() || (!QDir(directory).exists() && !QDir().mkpath(directory))) {
-		set_error(result, "OBS_REQUEST_FAILED");
-		return result;
+		if (impl_->scene_active(spec.scene_name)) {
+			set_error(result, "OBS_OUTPUT_ACTIVE");
+			return result;
+		}
 	}
 	obs_video_info base_video_info{};
 	if (!obs_get_video_info(&base_video_info) || base_video_info.output_width == 0 ||
@@ -303,24 +429,36 @@ obs_data_t *SceneRecordingSessionManager::start(const std::vector<SceneRecording
 		return result;
 	}
 
-	impl_->shutdown();
-	impl_->recordings.clear();
+	Impl::Session session;
 	const QDateTime started = QDateTime::currentDateTime();
-	impl_->started_at = started.toString(Qt::ISODate).toStdString();
-	impl_->session_id = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+	session.started_at = started.toString(Qt::ISODate).toStdString();
+	session.session_id = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
 	const QString timestamp = started.toString(QStringLiteral("yyyy-MM-dd HH-mm-ss"));
 	for (size_t index = 0; index < specs.size(); ++index) {
 		const auto &spec = specs[index];
 		Impl::Recording recording;
 		recording.scene_name = spec.scene_name;
+		recording.application_id = spec.application_id;
+		recording.run_id = spec.run_id;
+		QString directory = spec.output_directory.empty()
+					    ? recording_directory()
+					    : QString::fromUtf8(spec.output_directory.c_str()).trimmed();
+		if (directory.isEmpty() || (!spec.output_directory.empty() && !QFileInfo(directory).isAbsolute()) ||
+		    directory.size() > 4096 || (!QDir(directory).exists() && !QDir().mkpath(directory))) {
+			set_error(result,
+				  spec.output_directory.empty() ? "OBS_REQUEST_FAILED" : "OBS_ARGUMENT_INVALID");
+			session.shutdown();
+			return result;
+		}
+		directory = QDir::cleanPath(directory);
+		recording.output_directory = QDir::toNativeSeparators(directory).toStdString();
 		recording.file_name = (QString::fromUtf8(spec.file_name_prefix.c_str()) + QStringLiteral(" ") +
 				       timestamp + QStringLiteral(".mp4"))
 					      .toStdString();
 		const QString output_path = QDir(directory).filePath(QString::fromUtf8(recording.file_name.c_str()));
 		if (QFileInfo::exists(output_path)) {
 			set_error(result, "OBS_OUTPUT_ACTIVE");
-			impl_->shutdown();
-			impl_->recordings.clear();
+			session.shutdown();
 			return result;
 		}
 		recording.output_path = QDir::toNativeSeparators(output_path).toStdString();
@@ -329,8 +467,7 @@ obs_data_t *SceneRecordingSessionManager::start(const std::vector<SceneRecording
 			if (recording.scene != nullptr)
 				obs_source_release(recording.scene);
 			set_error(result, "OBS_SCENE_NOT_FOUND");
-			impl_->shutdown();
-			impl_->recordings.clear();
+			session.shutdown();
 			return result;
 		}
 		obs_scene_t *source_scene = obs_scene_from_source(recording.scene);
@@ -342,21 +479,41 @@ obs_data_t *SceneRecordingSessionManager::start(const std::vector<SceneRecording
 						  ? "OBS_TARGET_AMBIGUOUS"
 						  : "OBS_SOURCE_NOT_FOUND");
 			recording.release(true);
-			impl_->shutdown();
-			impl_->recordings.clear();
+			session.shutdown();
 			return result;
+		}
+		const char *capture_source_name = obs_source_get_name(sources.capture);
+		recording.source_name = capture_source_name != nullptr ? capture_source_name : "";
+		obs_data_t *capture_settings = obs_source_get_settings(sources.capture);
+		if (capture_settings != nullptr) {
+			recording.process_id =
+				static_cast<uint32_t>(obs_data_get_int(capture_settings, "_dcc_process_id"));
+			recording.window_handle =
+				static_cast<uint64_t>(obs_data_get_int(capture_settings, "_dcc_window_handle"));
+			obs_data_release(capture_settings);
+		}
+		if (!spec.source_name.empty()) {
+			recording.binding_verified = recording.source_name == spec.source_name &&
+						     recording.process_id == spec.process_id &&
+						     recording.window_handle == spec.window_handle &&
+						     exact_window_is_live(spec.process_id, spec.window_handle);
+			if (!recording.binding_verified) {
+				set_error(result, "OBS_WINDOW_IDENTITY_DRIFT");
+				recording.release(true);
+				session.shutdown();
+				return result;
+			}
 		}
 		recording.video_width = obs_source_get_width(sources.capture);
 		recording.video_height = obs_source_get_height(sources.capture);
 		if (recording.video_width == 0 || recording.video_height == 0) {
 			set_error(result, "OBS_INSTANCE_NOT_READY");
 			recording.release(true);
-			impl_->shutdown();
-			impl_->recordings.clear();
+			session.shutdown();
 			return result;
 		}
 		recording.recording_scene = obs_scene_create_private(
-			("dcc-mcp-recording-scene-" + impl_->session_id + "-" + std::to_string(index + 1)).c_str());
+			("dcc-mcp-recording-scene-" + session.session_id + "-" + std::to_string(index + 1)).c_str());
 		bool capture_added = false;
 		bool overlay_added = sources.overlay == nullptr;
 		if (recording.recording_scene != nullptr) {
@@ -382,8 +539,7 @@ obs_data_t *SceneRecordingSessionManager::start(const std::vector<SceneRecording
 		if (!capture_added || !overlay_added) {
 			recording.release(true);
 			set_error(result, "OBS_REQUEST_FAILED");
-			impl_->shutdown();
-			impl_->recordings.clear();
+			session.shutdown();
 			return result;
 		}
 		obs_video_info video_info = base_video_info;
@@ -400,7 +556,7 @@ obs_data_t *SceneRecordingSessionManager::start(const std::vector<SceneRecording
 			recording.video = obs_view_add2(recording.view, &video_info);
 		}
 		obs_data_t *video_settings = encoder_settings();
-		const std::string suffix = impl_->session_id + "-" + std::to_string(index + 1);
+		const std::string suffix = session.session_id + "-" + std::to_string(index + 1);
 		recording.encoder = obs_video_encoder_create("obs_x264", ("dcc-mcp-scene-encoder-" + suffix).c_str(),
 							     video_settings, nullptr);
 		obs_data_release(video_settings);
@@ -417,54 +573,57 @@ obs_data_t *SceneRecordingSessionManager::start(const std::vector<SceneRecording
 		    recording.output == nullptr) {
 			recording.release(true);
 			set_error(result, "OBS_REQUEST_FAILED");
-			impl_->shutdown();
-			impl_->recordings.clear();
+			session.shutdown();
 			return result;
 		}
-		impl_->recordings.push_back(std::move(recording));
+		session.recordings.push_back(std::move(recording));
 	}
 
-	for (auto &recording : impl_->recordings) {
+	for (auto &recording : session.recordings) {
 		if (!obs_output_start(recording.output)) {
 			const char *error = obs_output_get_last_error(recording.output);
 			recording.last_error = error != nullptr ? error : "output start failed";
-			for (auto &rollback : impl_->recordings) {
+			for (auto &rollback : session.recordings) {
 				rollback.release(true);
 				QFile::remove(QString::fromUtf8(rollback.output_path.c_str()));
 			}
 			set_error(result, "OBS_REQUEST_FAILED");
-			impl_->recordings.clear();
 			return result;
 		}
 	}
+	const std::string session_id = session.session_id;
+	impl_->prune_history();
+	impl_->sessions.push_back(std::move(session));
 	obs_data_set_bool(result, "accepted", true);
-	obs_data_set_string(result, "sessionId", impl_->session_id.c_str());
+	obs_data_set_string(result, "sessionId", session_id.c_str());
 	return result;
 }
 
 obs_data_t *SceneRecordingSessionManager::status(const std::string &session_id)
 {
-	if (!impl_->matches(session_id)) {
+	auto *session = impl_->find(session_id);
+	if (session == nullptr) {
 		obs_data_t *result = obs_data_create();
 		set_error(result, "OBS_OUTPUT_NOT_FOUND");
 		return result;
 	}
-	return impl_->status_data();
+	return session->status_data();
 }
 
 obs_data_t *SceneRecordingSessionManager::stop(const std::string &session_id)
 {
 	obs_data_t *result = obs_data_create();
-	if (!impl_->matches(session_id)) {
+	auto *session = impl_->find(session_id);
+	if (session == nullptr) {
 		set_error(result, "OBS_OUTPUT_NOT_FOUND");
 		return result;
 	}
-	for (auto &recording : impl_->recordings) {
+	for (auto &recording : session->recordings) {
 		if (recording.active())
 			obs_output_stop(recording.output);
 	}
 	obs_data_set_bool(result, "accepted", true);
-	obs_data_set_string(result, "sessionId", impl_->session_id.c_str());
+	obs_data_set_string(result, "sessionId", session->session_id.c_str());
 	return result;
 }
 
