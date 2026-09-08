@@ -75,9 +75,18 @@ class ObsMcpServer(DccServerBase):
 def start_server(*, port: int | None = None, host_pid: int | None = None) -> ObsMcpServer:
     global _server
     if _server is None or not _server.is_running:
-        _server = ObsMcpServer(port=port, host_pid=host_pid)
-        _server.register_builtin_actions()
-        _server.start()
+        if _server is not None:
+            _server.stop()
+        candidate = ObsMcpServer(port=port, host_pid=host_pid)
+        try:
+            candidate.register_builtin_actions()
+            candidate.start()
+            if not candidate.load_skill("obs-control"):
+                raise RuntimeError("OBS_SKILL_LOAD_FAILED")
+        except Exception:
+            candidate.stop()
+            raise
+        _server = candidate
     return _server
 
 
