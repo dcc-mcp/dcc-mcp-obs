@@ -119,7 +119,7 @@ QImage render_overlay_image(obs_data_t *settings, uint32_t width, uint32_t heigh
 	QFont label_font(QStringLiteral("Inter"), 10, QFont::DemiBold);
 	QFont value_font(QStringLiteral("Inter"), 11, QFont::Bold);
 	int y = 84;
-	for (const auto &entry : rows) {
+	for (const auto entry : rows) {
 		const auto row = entry.toObject();
 		painter.setFont(label_font);
 		painter.setPen(QColor(139, 154, 173));
@@ -337,7 +337,7 @@ bool validate_presentation_overlay_content(const PresentationOverlayContent &con
 	const auto document = QJsonDocument::fromJson(QByteArray::fromStdString(content.rows_json), &error);
 	if (error.error != QJsonParseError::NoError || !document.isArray() || document.array().size() > 8)
 		return false;
-	for (const auto &entry : document.array()) {
+	for (const auto entry : document.array()) {
 		if (!entry.isObject())
 			return false;
 		const auto row = entry.toObject();
