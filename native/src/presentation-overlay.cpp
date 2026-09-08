@@ -23,10 +23,6 @@ namespace {
 
 constexpr int kMinimumWidth = 360;
 constexpr int kMaximumWidth = 960;
-constexpr int kMinimumOpacity = 20;
-constexpr int kMaximumOpacity = 100;
-constexpr int kMinimumMargin = 8;
-constexpr int kMaximumMargin = 160;
 constexpr int kMaximumLogoBytes = 16 * 1024 * 1024;
 
 struct PresentationOverlaySource {
