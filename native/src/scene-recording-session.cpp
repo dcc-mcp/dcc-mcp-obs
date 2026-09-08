@@ -1,6 +1,7 @@
 #include "scene-recording-session.hpp"
 #include "scene-recording-dimensions.hpp"
 #include "agent-input-overlay.hpp"
+#include "presentation-overlay.hpp"
 
 #include <obs-frontend-api.h>
 #include <util/config-file.h>
@@ -138,9 +139,11 @@ bool silent_audio_input(void *, uint64_t start_ts, uint64_t, uint64_t *new_ts, u
 
 struct SceneSources {
 	obs_source_t *capture = nullptr;
-	obs_source_t *overlay = nullptr;
+	obs_source_t *agent_overlay = nullptr;
+	obs_source_t *presentation_overlay = nullptr;
 	bool ambiguous_capture = false;
-	bool ambiguous_overlay = false;
+	bool ambiguous_agent_overlay = false;
+	bool ambiguous_presentation_overlay = false;
 };
 
 bool collect_scene_sources(obs_scene_t *, obs_sceneitem_t *item, void *private_data)
@@ -158,15 +161,21 @@ bool collect_scene_sources(obs_scene_t *, obs_sceneitem_t *item, void *private_d
 		else
 			sources->capture = source;
 	} else if (std::string(id) == kAgentInputOverlaySourceId) {
-		if (sources->overlay != nullptr)
-			sources->ambiguous_overlay = true;
+		if (sources->agent_overlay != nullptr)
+			sources->ambiguous_agent_overlay = true;
 		else
-			sources->overlay = source;
+			sources->agent_overlay = source;
+	} else if (std::string(id) == kPresentationOverlaySourceId) {
+		if (sources->presentation_overlay != nullptr)
+			sources->ambiguous_presentation_overlay = true;
+		else
+			sources->presentation_overlay = source;
 	}
 	return true;
 }
 
-void position_overlay(obs_sceneitem_t *item, obs_source_t *source, uint32_t width, uint32_t height)
+void position_overlay(obs_sceneitem_t *item, obs_source_t *source, uint32_t width, uint32_t height,
+		      float maximum_width_fraction, float maximum_height_fraction)
 {
 	obs_data_t *settings = obs_source_get_settings(source);
 	const std::string anchor = obs_data_get_string(settings, "anchor");
@@ -174,8 +183,9 @@ void position_overlay(obs_sceneitem_t *item, obs_source_t *source, uint32_t widt
 	obs_data_release(settings);
 	const float source_width = static_cast<float>(std::max<uint32_t>(1, obs_source_get_width(source)));
 	const float source_height = static_cast<float>(std::max<uint32_t>(1, obs_source_get_height(source)));
-	const float scale_value = std::min(1.0f, std::min(static_cast<float>(width) * 0.40f / source_width,
-							  static_cast<float>(height) * 0.18f / source_height));
+	const float scale_value =
+		std::min(1.0f, std::min(static_cast<float>(width) * maximum_width_fraction / source_width,
+					static_cast<float>(height) * maximum_height_fraction / source_height));
 	const float rendered_width = source_width * scale_value;
 	const float rendered_height = source_height * scale_value;
 	const float left = margin;
@@ -521,8 +531,10 @@ obs_data_t *SceneRecordingSessionManager::start(const std::vector<SceneRecording
 		SceneSources sources;
 		if (source_scene != nullptr)
 			obs_scene_enum_items(source_scene, collect_scene_sources, &sources);
-		if (sources.capture == nullptr || sources.ambiguous_capture || sources.ambiguous_overlay) {
-			set_error(result, sources.ambiguous_capture || sources.ambiguous_overlay
+		if (sources.capture == nullptr || sources.ambiguous_capture || sources.ambiguous_agent_overlay ||
+		    sources.ambiguous_presentation_overlay) {
+			set_error(result, sources.ambiguous_capture || sources.ambiguous_agent_overlay ||
+							  sources.ambiguous_presentation_overlay
 						  ? "OBS_TARGET_AMBIGUOUS"
 						  : "OBS_SOURCE_NOT_FOUND");
 			recording.release(true);
@@ -569,7 +581,8 @@ obs_data_t *SceneRecordingSessionManager::start(const std::vector<SceneRecording
 		recording.recording_scene = obs_scene_create_private(
 			("dcc-mcp-recording-scene-" + session.session_id + "-" + std::to_string(index + 1)).c_str());
 		bool capture_added = false;
-		bool overlay_added = sources.overlay == nullptr;
+		bool agent_overlay_added = sources.agent_overlay == nullptr;
+		bool presentation_overlay_added = sources.presentation_overlay == nullptr;
 		if (recording.recording_scene != nullptr) {
 			obs_sceneitem_t *capture_item = obs_scene_add(recording.recording_scene, sources.capture);
 			if (capture_item != nullptr) {
@@ -580,17 +593,26 @@ obs_data_t *SceneRecordingSessionManager::start(const std::vector<SceneRecording
 				obs_sceneitem_set_pos(capture_item, &origin);
 				obs_sceneitem_set_scale(capture_item, &native_scale);
 			}
-			if (sources.overlay != nullptr) {
+			if (sources.presentation_overlay != nullptr) {
 				obs_sceneitem_t *overlay_item =
-					obs_scene_add(recording.recording_scene, sources.overlay);
+					obs_scene_add(recording.recording_scene, sources.presentation_overlay);
 				if (overlay_item != nullptr) {
-					overlay_added = true;
-					position_overlay(overlay_item, sources.overlay, recording.video_width,
-							 recording.video_height);
+					presentation_overlay_added = true;
+					position_overlay(overlay_item, sources.presentation_overlay,
+							 recording.video_width, recording.video_height, 0.48f, 0.62f);
+				}
+			}
+			if (sources.agent_overlay != nullptr) {
+				obs_sceneitem_t *overlay_item =
+					obs_scene_add(recording.recording_scene, sources.agent_overlay);
+				if (overlay_item != nullptr) {
+					agent_overlay_added = true;
+					position_overlay(overlay_item, sources.agent_overlay, recording.video_width,
+							 recording.video_height, 0.40f, 0.18f);
 				}
 			}
 		}
-		if (!capture_added || !overlay_added) {
+		if (!capture_added || !agent_overlay_added || !presentation_overlay_added) {
 			recording.release(true);
 			set_error(result, "OBS_REQUEST_FAILED");
 			session.shutdown();

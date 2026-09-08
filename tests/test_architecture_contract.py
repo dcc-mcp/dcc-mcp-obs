@@ -53,6 +53,12 @@ def test_private_scene_recordings_support_independent_sessions_and_exact_artifac
     assert "obs_encoder_set_audio(recording.silent_audio_encoder, recording.silent_audio)" in source
     assert "obs_get_audio()" not in source
     assert "if (impl_->active())" not in source
+    assert "kPresentationOverlaySourceId" in source
+    assert "sources.presentation_overlay" in source
+    assert "sources.agent_overlay" in source
+    assert "video_info.base_width = recording.video_width" in source
+    assert "video_info.output_width = recording.video_width" in source
+    assert "vec2 native_scale{1.0f, 1.0f}" in source
 
 
 def test_native_plugin_advances_sequence_for_every_completed_request() -> None:
@@ -96,6 +102,7 @@ def test_capability_matrix_freezes_full_product_scope() -> None:
         "sources",
         "inputs",
         "agent_input_overlay",
+        "presentation_overlay",
         "properties",
         "filters",
         "audio",
@@ -125,6 +132,12 @@ def test_capability_matrix_freezes_full_product_scope() -> None:
         "set_agent_input_overlay_layout",
         "emit_agent_input_activity",
         "clear_agent_input_overlay",
+    ]
+    assert domains["presentation_overlay"]["delivered_operations"] == [
+        "get_presentation_overlay",
+        "create_presentation_overlay",
+        "set_presentation_overlay_layout",
+        "update_presentation_overlay",
     ]
     assert domains["recording"]["status"] == "delivered"
     assert all(
