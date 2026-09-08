@@ -32,7 +32,7 @@ def test_delayed_native_ui_mutation_is_cancelled_before_execution(tmp_path: Path
 def test_every_destructive_obs_mutation_claims_after_state_probes() -> None:
     source = (ROOT / "native" / "src" / "plugin-main.cpp").read_text(encoding="utf-8")
     cases = (
-        ("StartRecording", "obs_frontend_recording_start();"),
+        ("StartRecording", "start_recording_in_directory(state->recording_output_directory)"),
         ("StopRecording", "obs_frontend_recording_stop();"),
         ("PauseRecording", "obs_frontend_recording_pause(true);"),
         ("ResumeRecording", "obs_frontend_recording_pause(false);"),

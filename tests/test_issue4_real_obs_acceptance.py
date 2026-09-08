@@ -378,6 +378,7 @@ class FakeAcceptanceClient:
                 {
                     "outputActive": False,
                     "outputPaused": False,
+                    "outputState": "idle",
                     "outputPath": "",
                     "totalBytes": 0,
                     "totalFrames": 0,
@@ -385,17 +386,22 @@ class FakeAcceptanceClient:
                 }
             )
         elif name == "obs_control__start_recording":
-            context.update({"outputActive": True, "outputPaused": False})
+            context.update(
+                {"outputActive": True, "outputPaused": False, "outputState": "recording"}
+            )
         elif name == "obs_control__pause_recording":
-            context.update({"outputActive": True, "outputPaused": True})
+            context.update({"outputActive": True, "outputPaused": True, "outputState": "recording"})
         elif name == "obs_control__resume_recording":
-            context.update({"outputActive": True, "outputPaused": False})
+            context.update(
+                {"outputActive": True, "outputPaused": False, "outputState": "recording"}
+            )
         elif name == "obs_control__stop_recording":
             self.output.write_bytes(b"real-obs-recording")
             context.update(
                 {
                     "outputActive": False,
                     "outputPaused": False,
+                    "outputState": "complete",
                     "outputPath": str(self.output),
                     "totalBytes": self.output.stat().st_size,
                     "totalFrames": 30,
