@@ -1,9 +1,9 @@
-from dcc_mcp_core.skill import skill_entry, skill_success
+from dcc_mcp_core.skill import skill_success
 
-from dcc_mcp_obs.skills.obs_control.scripts._client import obs_bridge
+from dcc_mcp_obs.skills.obs_control.scripts._client import obs_bridge, obs_skill_entry
 
 
-@skill_entry
+@obs_skill_entry
 def main(**_kwargs):
     with obs_bridge() as bridge:
         return skill_success("OBS outputs were listed.", **bridge.list_outputs())

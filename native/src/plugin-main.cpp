@@ -329,6 +329,7 @@ struct WindowCaptureBinding {
 	std::string capture_method = "automatic";
 	bool capture_cursor = true;
 	bool client_area = true;
+	bool capture_audio = false;
 };
 
 struct UiState {
@@ -982,7 +983,7 @@ bool find_scene_source_item(obs_scene_t *, obs_sceneitem_t *item, void *private_
 }
 
 bool window_capture_settings_match(obs_data_t *settings, const UiState &state, const ValidatedWindowBinding &actual,
-				   bool include_method)
+				   bool include_method, bool include_audio = true)
 {
 	return settings != nullptr &&
 	       std::string(obs_data_get_string(settings, "_dcc_binding_schema")) == kWindowBindingSchema &&
@@ -996,6 +997,7 @@ bool window_capture_settings_match(obs_data_t *settings, const UiState &state, c
 	       std::string(obs_data_get_string(settings, "window")) == actual.selector &&
 	       obs_data_get_bool(settings, "cursor") == state.window_capture.capture_cursor &&
 	       obs_data_get_bool(settings, "client_area") == state.window_capture.client_area &&
+	       (!include_audio || obs_data_get_bool(settings, "capture_audio") == state.window_capture.capture_audio) &&
 	       (!include_method || obs_data_get_int(settings, "method") ==
 					   window_capture_method_value(state.window_capture.capture_method));
 }
@@ -1017,6 +1019,7 @@ bool stored_window_capture_configuration_matches(obs_data_t *settings, const UiS
 {
 	return settings != nullptr && obs_data_get_bool(settings, "cursor") == state.window_capture.capture_cursor &&
 	       obs_data_get_bool(settings, "client_area") == state.window_capture.client_area &&
+	       obs_data_get_bool(settings, "capture_audio") == state.window_capture.capture_audio &&
 	       obs_data_get_int(settings, "method") == window_capture_method_value(state.window_capture.capture_method);
 }
 #endif
@@ -1082,6 +1085,7 @@ obs_data_t *window_capture_source_status(const UiState &state)
 	obs_data_set_string(result, "executable", actual.executable.c_str());
 	obs_data_set_bool(result, "captureCursor", state.window_capture.capture_cursor);
 	obs_data_set_bool(result, "clientArea", state.window_capture.client_area);
+	obs_data_set_bool(result, "captureAudio", state.window_capture.capture_audio);
 	obs_data_set_string(result, "captureMethod", state.window_capture.capture_method.c_str());
 	obs_data_set_bool(result, "bindingVerified", true);
 	obs_source_release(source);
@@ -1691,7 +1695,7 @@ void execute_ui_operation(void *private_data)
 			if (scene_source == nullptr)
 				set_error(result, "OBS_SCENE_NOT_FOUND");
 			else if (existing != nullptr)
-				set_error(result, "OBS_TARGET_AMBIGUOUS");
+				set_error(result, "OBS_SOURCE_ALREADY_EXISTS");
 			else if (!state->gate.claim_mutation(state->deadline))
 				set_error(result, "OBS_UI_TIMEOUT");
 			else if (!exact_window_is_still_live(state->window_capture, actual))
@@ -1704,7 +1708,7 @@ void execute_ui_operation(void *private_data)
 				obs_data_set_int(settings, "priority", 1);
 				obs_data_set_bool(settings, "cursor", state->window_capture.capture_cursor);
 				obs_data_set_bool(settings, "client_area", state->window_capture.client_area);
-				obs_data_set_bool(settings, "capture_audio", false);
+				obs_data_set_bool(settings, "capture_audio", state->window_capture.capture_audio);
 				obs_data_set_string(settings, "_dcc_binding_schema", kWindowBindingSchema);
 				obs_data_set_int(settings, "_dcc_process_id", state->window_capture.process_id);
 				obs_data_set_int(settings, "_dcc_window_handle",
@@ -1765,12 +1769,12 @@ void execute_ui_operation(void *private_data)
 			if (scene != nullptr)
 				obs_scene_enum_items(scene, find_scene_source_item, &match);
 			auto *settings = source == nullptr ? nullptr : obs_source_get_settings(source);
-			const bool source_matches = source != nullptr &&
-						    std::string(obs_source_get_id(source)) == "window_capture" &&
-						    match.count == 1 && match.item != nullptr &&
-						    window_capture_settings_match(settings, *state, actual, false) &&
-						    obs_sceneitem_visible(match.item) == state->enabled &&
-						    exact_window_is_still_live(state->window_capture, actual);
+			const bool source_matches =
+				source != nullptr && std::string(obs_source_get_id(source)) == "window_capture" &&
+				match.count == 1 && match.item != nullptr &&
+				window_capture_settings_match(settings, *state, actual, false, false) &&
+				obs_sceneitem_visible(match.item) == state->enabled &&
+				exact_window_is_still_live(state->window_capture, actual);
 			if (scene_source == nullptr)
 				set_error(result, "OBS_SCENE_NOT_FOUND");
 			else if (source == nullptr)
@@ -1781,22 +1785,27 @@ void execute_ui_operation(void *private_data)
 				set_error(result, "OBS_WINDOW_IDENTITY_DRIFT");
 			else {
 				const long long previous_method = obs_data_get_int(settings, "method");
+				const bool previous_capture_audio = obs_data_get_bool(settings, "capture_audio");
 				const int requested_method =
 					window_capture_method_value(state->window_capture.capture_method);
-				if (previous_method != requested_method &&
-				    !state->gate.claim_mutation(state->deadline)) {
+				const bool settings_changed = previous_method != requested_method ||
+							      previous_capture_audio !=
+								      state->window_capture.capture_audio;
+				if (settings_changed && !state->gate.claim_mutation(state->deadline)) {
 					set_error(result, "OBS_UI_TIMEOUT");
 				} else if (!exact_window_is_still_live(state->window_capture, actual)) {
 					set_error(result, "OBS_WINDOW_IDENTITY_DRIFT");
 				} else {
-					if (previous_method != requested_method) {
+					if (settings_changed) {
 						obs_data_set_int(settings, "method", requested_method);
+						obs_data_set_bool(settings, "capture_audio",
+								  state->window_capture.capture_audio);
 						obs_source_update(source, settings);
 					}
 					auto *verified = window_capture_source_status(*state);
-					if (obs_data_has_user_value(verified, "ok") &&
-					    previous_method != requested_method) {
+					if (obs_data_has_user_value(verified, "ok") && settings_changed) {
 						obs_data_set_int(settings, "method", previous_method);
+						obs_data_set_bool(settings, "capture_audio", previous_capture_audio);
 						obs_source_update(source, settings);
 					}
 					obs_data_release(result);
@@ -2909,6 +2918,7 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 			    capture_method == nullptr || window_capture_method_value(capture_method) < 0 ||
 			    !obs_data_has_user_value(request_data, "captureCursor") ||
 			    !obs_data_has_user_value(request_data, "clientArea") ||
+			    !obs_data_has_user_value(request_data, "captureAudio") ||
 			    !obs_data_has_user_value(request_data, "enabled")) {
 				set_error(response_data, "OBS_ARGUMENT_INVALID");
 				return;
@@ -2919,6 +2929,7 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 			window_capture.capture_method = capture_method;
 			window_capture.capture_cursor = obs_data_get_bool(request_data, "captureCursor");
 			window_capture.client_area = obs_data_get_bool(request_data, "clientArea");
+			window_capture.capture_audio = obs_data_get_bool(request_data, "captureAudio");
 			enabled = obs_data_get_bool(request_data, "enabled");
 		}
 		if (request_name == "RebindWindowCaptureSource") {

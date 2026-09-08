@@ -73,6 +73,7 @@ class FakeWindowCaptureHost:
             "executable": "Bazaar.exe",
             "captureCursor": data.get("captureCursor", True),
             "clientArea": data.get("clientArea", True),
+            "captureAudio": data.get("captureAudio", False),
             "captureMethod": data.get("captureMethod", "automatic"),
             "bindingVerified": True,
         }
@@ -116,6 +117,7 @@ def test_window_capture_source_is_exactly_bound_and_read_back() -> None:
         "windowTitle": "The Bazaar",
         "captureCursor": False,
         "clientArea": True,
+        "captureAudio": False,
         "captureMethod": "automatic",
         "enabled": True,
         "capability": "window_capture",
@@ -133,13 +135,38 @@ def test_window_capture_method_is_typed_and_can_be_updated_in_place() -> None:
         window_title="The Bazaar",
         capture_cursor=False,
         client_area=True,
+        capture_audio=True,
         capture_method="windows_graphics_capture",
     )
 
     assert result["verified"] is True
     assert result["captureMethod"] == "windows_graphics_capture"
+    assert result["captureAudio"] is True
     request_type, payload = host.calls[-2]
     assert request_type == "SetWindowCaptureMethod"
+    assert payload["captureMethod"] == "windows_graphics_capture"
+    assert payload["captureAudio"] is True
+    assert host.calls[-1][0] == "GetWindowCaptureSource"
+
+
+def test_window_capture_audio_has_a_dedicated_typed_entry_point() -> None:
+    host = FakeWindowCaptureHost()
+    result = make_bridge(host).set_window_capture_audio(
+        scene_name="RL - Wukong",
+        source_name="RL - Wukong Window",
+        process_id=120000,
+        window_handle=220000000,
+        window_title="The Bazaar",
+        capture_audio=True,
+        capture_method="windows_graphics_capture",
+        capture_cursor=False,
+    )
+
+    assert result["verified"] is True
+    assert result["captureAudio"] is True
+    request_type, payload = host.calls[-2]
+    assert request_type == "SetWindowCaptureMethod"
+    assert payload["captureAudio"] is True
     assert payload["captureMethod"] == "windows_graphics_capture"
     assert host.calls[-1][0] == "GetWindowCaptureSource"
 
@@ -175,6 +202,7 @@ def test_window_capture_source_can_be_atomically_rebound_after_process_restart()
         "windowTitle": "The Bazaar",
         "captureCursor": False,
         "clientArea": True,
+        "captureAudio": False,
         "captureMethod": "windows_graphics_capture",
         "enabled": True,
         "capability": "window_capture",
@@ -431,6 +459,18 @@ def test_window_capture_vendor_surface_and_skill_are_bounded() -> None:
     assert "raw" not in str(create).lower()
     update = by_name["set_window_capture_method"]
     assert update["source_file"] == "scripts/set_window_capture_method.py"
+
+    audio = by_name["set_window_capture_audio"]
+    assert audio["source_file"] == "scripts/set_window_capture_audio.py"
+    assert audio["input_schema"]["required"] == [
+        "scene_name",
+        "source_name",
+        "process_id",
+        "window_handle",
+        "window_title",
+        "capture_audio",
+        "capture_method",
+    ]
     assert update["annotations"]["open_world_hint"] is False
     assert update["annotations"]["idempotent_hint"] is True
     rebind = by_name["rebind_window_capture_source"]
