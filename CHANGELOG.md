@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.0](https://github.com/dcc-mcp/dcc-mcp-obs/compare/v1.2.0...v1.3.0) (2026-09-08)
+
+
+### Features
+
+* classify recording outcomes ([#54](https://github.com/dcc-mcp/dcc-mcp-obs/issues/54)) ([7889fe9](https://github.com/dcc-mcp/dcc-mcp-obs/commit/7889fe9252d2b23e6849c226dc532e3b8c19214a))
+* harden window capture contracts ([#53](https://github.com/dcc-mcp/dcc-mcp-obs/issues/53)) ([9a3ca13](https://github.com/dcc-mcp/dcc-mcp-obs/commit/9a3ca13befb7831bd41736afc8aef8e952f23daf))
+* separate OBS control and websocket ports ([e824827](https://github.com/dcc-mcp/dcc-mcp-obs/commit/e824827386fe0a35bd704e6b21a698ec59ea8048))
+* support independent recording sessions ([40d093e](https://github.com/dcc-mcp/dcc-mcp-obs/commit/40d093e3085df9d29f753df8fe9b1ae4ed25a9af))
+
+
+### Bug Fixes
+
+* align tests with current release version ([38c4f5a](https://github.com/dcc-mcp/dcc-mcp-obs/commit/38c4f5a1e86bb96e653a3c35ad9c2428787512ff))
+* autoload obs control skill ([#55](https://github.com/dcc-mcp/dcc-mcp-obs/issues/55)) ([09e527e](https://github.com/dcc-mcp/dcc-mcp-obs/commit/09e527ed2bf782464bc4ab8e51d7804e30bfd51b))
+* force stalled recording stops ([7006b43](https://github.com/dcc-mcp/dcc-mcp-obs/commit/7006b43b035c141285e83153c42318ed0d98cbd8))
+* record inactive exact window sources ([58a1d6a](https://github.com/dcc-mcp/dcc-mcp-obs/commit/58a1d6ae43dba0ac6b0d92926d1a63f7eced8186))
+* satisfy mp4 audio contract ([2f23207](https://github.com/dcc-mcp/dcc-mcp-obs/commit/2f232076c0991a312c543b1c5e2ffe5b48f7ee6b))
+* satisfy Python formatting checks ([f8cccf7](https://github.com/dcc-mcp/dcc-mcp-obs/commit/f8cccf7af13bbf025a9de48f6f6c12d8b9871b7d))
+* support odd recording dimensions ([f07fd4d](https://github.com/dcc-mcp/dcc-mcp-obs/commit/f07fd4da3ddf314402f0d81bef2543f2c30faa60))
+
 ## [1.2.0](https://github.com/dcc-mcp/dcc-mcp-obs/compare/v1.1.0...v1.2.0) (2026-09-01)
 
 
