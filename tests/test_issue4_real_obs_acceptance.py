@@ -637,14 +637,13 @@ def test_mcp_acceptance_client_binds_every_tool_call_to_one_session(
     monkeypatch.setattr(server, "ObsWebSocketTransport", FakeLiveTransport)
     monkeypatch.setattr(_client, "resolve_obs_pid", lambda _pid=None: os.getpid())
     monkeypatch.setattr(_client, "ObsWebSocketTransport", FakeLiveTransport)
-    instance = server.ObsMcpServer(port=0, host_pid=os.getpid())
-    instance.register_builtin_actions()
-    handle = instance.start()
+    monkeypatch.setattr(server, "_server", None)
+    instance = server.start_server(port=0, host_pid=os.getpid())
+    url = instance.mcp_url
+    assert isinstance(url, str)
 
     try:
-        client = McpAcceptanceClient(
-            handle.mcp_url(), session_id="obs-acceptance-session", timeout_seconds=5
-        )
+        client = McpAcceptanceClient(url, session_id="obs-acceptance-session", timeout_seconds=5)
         client.initialize()
         first_session = client.session_id
         result = client.call("obs_control__get_status", {})
@@ -654,7 +653,7 @@ def test_mcp_acceptance_client_binds_every_tool_call_to_one_session(
         assert result["success"] is True
         assert result["context"]["instanceId"] == "obs-acceptance-session"
     finally:
-        instance.stop()
+        server.stop_server()
 
 
 def test_native_unload_does_not_call_obs_websocket_after_frontend_exit() -> None:

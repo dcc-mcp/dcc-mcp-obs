@@ -19,6 +19,8 @@ from .config import ObsEndpointConfig
 
 MAX_FRAME_BYTES = 1_048_576
 MAX_INTERLEAVED_EVENTS = 64
+_NATIVE_MAX_DEADLINE_SECONDS = 120.0
+_NATIVE_DEADLINE_ROUNDING_RESERVE_SECONDS = 0.001
 VENDOR_REQUESTS = frozenset(
     {
         "GetPluginStatus",
@@ -260,8 +262,12 @@ class ObsWebSocketTransport:
                 # Carry the caller's absolute wall-clock deadline across the
                 # websocket vendor boundary. Native UI work must never
                 # reconstruct a fresh budget after this request arrives.
+                native_remaining = min(
+                    self._remaining(deadline),
+                    _NATIVE_MAX_DEADLINE_SECONDS - _NATIVE_DEADLINE_ROUNDING_RESERVE_SECONDS,
+                )
                 request_payload["__dccDeadlineAtMs"] = math.ceil(
-                    (time.time() + self._remaining(deadline)) * 1000
+                    (time.time() + native_remaining) * 1000
                 )
                 self._remaining(deadline)
                 self._send_json(

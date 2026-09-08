@@ -129,9 +129,45 @@ class McpAcceptanceClient:
         discovered = self._raw_tools_call("search_skills", {"query": "OBS recording scenes"})
         if "obs-control" not in json.dumps(discovered, sort_keys=True):
             _fail("OBS_ACCEPTANCE_ADAPTER_RESPONSE_INVALID")
-        loaded = self._raw_tools_call("load_skill", {"skill_name": "obs-control"})
-        if "obs_control__get_status" not in json.dumps(loaded, sort_keys=True):
+        available_tools = self._list_tool_names()
+        if not {"get_status", "stop_recording"}.issubset(available_tools):
             _fail("OBS_ACCEPTANCE_ADAPTER_RESPONSE_INVALID")
+
+    def _list_tool_names(self) -> set[str]:
+        names: set[str] = set()
+        cursor: str | None = None
+        observed_cursors: set[str] = set()
+        while True:
+            params: dict[str, object] = {"cursor": cursor} if cursor else {}
+            response = self._post(
+                {
+                    "jsonrpc": "2.0",
+                    "id": self._next_id(),
+                    "method": "tools/list",
+                    "params": params,
+                }
+            )
+            result = response.get("result")
+            if not isinstance(result, Mapping):
+                _fail("OBS_ACCEPTANCE_ADAPTER_RESPONSE_INVALID")
+            tools = result.get("tools")
+            if not isinstance(tools, list):
+                _fail("OBS_ACCEPTANCE_ADAPTER_RESPONSE_INVALID")
+            for tool in tools:
+                if not isinstance(tool, Mapping) or not isinstance(tool.get("name"), str):
+                    _fail("OBS_ACCEPTANCE_ADAPTER_RESPONSE_INVALID")
+                names.add(tool["name"])
+            next_cursor = result.get("nextCursor")
+            if next_cursor is None:
+                return names
+            if (
+                not isinstance(next_cursor, str)
+                or not next_cursor
+                or next_cursor in observed_cursors
+            ):
+                _fail("OBS_ACCEPTANCE_ADAPTER_RESPONSE_INVALID")
+            observed_cursors.add(next_cursor)
+            cursor = next_cursor
 
     def _raw_tools_call(self, name: str, arguments: dict[str, object]) -> dict[str, object]:
         response = self._post(
@@ -1143,12 +1179,12 @@ def run_real_obs_acceptance(
     os.environ["DCC_MCP_REGISTRY_DIR"] = str(root / "registry")
     os.environ["DCC_MCP_GATEWAY_PORT"] = "0"
     os.environ["DCC_MCP_DISABLE_DEFAULT_SKILL_PATHS"] = "1"
-    instance = server.ObsMcpServer(port=0, host_pid=host_pid)
-    instance.register_builtin_actions()
-    handle = instance.start()
-    client = McpAcceptanceClient(
-        handle.mcp_url(), session_id=expected_instance_id, timeout_seconds=30
-    )
+    instance = server.start_server(port=0, host_pid=host_pid)
+    url = instance.mcp_url
+    if not isinstance(url, str):
+        server.stop_server()
+        _fail("OBS_ACCEPTANCE_ADAPTER_CONNECTION_FAILED")
+    client = McpAcceptanceClient(url, session_id=expected_instance_id, timeout_seconds=30)
     instance_stopped = False
     try:
         client.initialize()
@@ -1178,7 +1214,7 @@ def run_real_obs_acceptance(
         # Close the adapter's authenticated OBS WebSocket before waiting for
         # OBS module unload. Otherwise OBS waits for this client while this
         # process waits for OBS, creating a shutdown-order deadlock.
-        instance.stop()
+        server.stop_server()
         instance_stopped = True
         try:
             process.wait(timeout=15)
@@ -1188,7 +1224,7 @@ def run_real_obs_acceptance(
         return evidence
     finally:
         if not instance_stopped:
-            instance.stop()
+            server.stop_server()
 
 
 def main(argv: Sequence[str] | None = None) -> None:

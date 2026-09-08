@@ -6,6 +6,8 @@ import time
 import urllib.request
 from typing import Any
 
+import pytest
+
 from dcc_mcp_obs import __version__, server
 from dcc_mcp_obs.skills.obs_control.scripts import _client
 
@@ -161,3 +163,101 @@ def test_real_mcp_search_load_describe_and_call_path(monkeypatch, tmp_path) -> N
         assert "obs-integration" in json.dumps(result)
     finally:
         instance.stop()
+
+
+def test_start_server_loads_obs_control_during_startup(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class FakeServer:
+        is_running = False
+
+        def __init__(self, *, port=None, host_pid=None) -> None:
+            calls.append(f"init:{port}:{host_pid}")
+
+        def register_builtin_actions(self) -> None:
+            calls.append("register")
+
+        def load_skill(self, name: str) -> bool:
+            calls.append(f"load:{name}")
+            return True
+
+        def start(self) -> None:
+            calls.append("start")
+            self.is_running = True
+
+        def stop(self) -> None:
+            calls.append("stop")
+            self.is_running = False
+
+    monkeypatch.setattr(server, "_server", None)
+    monkeypatch.setattr(server, "ObsMcpServer", FakeServer)
+
+    result = server.start_server(port=9766, host_pid=42)
+
+    assert result.is_running is True
+    assert calls == ["init:9766:42", "register", "start", "load:obs-control"]
+
+
+def test_start_server_fails_closed_when_obs_control_cannot_load(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class FakeServer:
+        is_running = False
+
+        def __init__(self, **_kwargs) -> None:
+            calls.append("init")
+
+        def register_builtin_actions(self) -> None:
+            calls.append("register")
+
+        def load_skill(self, name: str) -> bool:
+            calls.append(f"load:{name}")
+            return False
+
+        def start(self) -> None:
+            calls.append("start")
+            self.is_running = True
+
+        def stop(self) -> None:
+            calls.append("stop")
+
+    monkeypatch.setattr(server, "_server", None)
+    monkeypatch.setattr(server, "ObsMcpServer", FakeServer)
+
+    with pytest.raises(RuntimeError, match="OBS_SKILL_LOAD_FAILED"):
+        server.start_server(port=9766, host_pid=42)
+
+    assert calls == ["init", "register", "start", "load:obs-control", "stop"]
+
+
+def test_start_server_stops_candidate_when_obs_control_load_raises(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class FakeServer:
+        is_running = False
+
+        def __init__(self, **_kwargs) -> None:
+            calls.append("init")
+
+        def register_builtin_actions(self) -> None:
+            calls.append("register")
+
+        def start(self) -> None:
+            calls.append("start")
+            self.is_running = True
+
+        def load_skill(self, name: str) -> bool:
+            calls.append(f"load:{name}")
+            raise ValueError("invalid skill")
+
+        def stop(self) -> None:
+            calls.append("stop")
+            self.is_running = False
+
+    monkeypatch.setattr(server, "_server", None)
+    monkeypatch.setattr(server, "ObsMcpServer", FakeServer)
+
+    with pytest.raises(ValueError, match="invalid skill"):
+        server.start_server(port=9766, host_pid=42)
+
+    assert calls == ["init", "register", "start", "load:obs-control", "stop"]

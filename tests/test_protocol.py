@@ -136,6 +136,20 @@ def test_absolute_deadline_epoch_uses_ceil_and_stale_deadline_fails_closed(monke
         transport.vendor_request("StartRecording", {}, deadline=clock.now)
 
 
+def test_native_deadline_reserves_one_millisecond_for_epoch_rounding(monkeypatch) -> None:
+    clock = ManualClock()
+    monkeypatch.setattr("dcc_mcp_obs.protocol.time.time", lambda: 1000.25)
+    socket = ScriptedSocket([_hello(), {"op": 2, "d": {"negotiatedRpcVersion": 1}}, _response()])
+    transport = ObsWebSocketTransport(
+        ObsEndpointConfig(password="secret"), connector=lambda _url, _timeout: socket, clock=clock
+    )
+
+    transport.vendor_request("StopRecording", {}, deadline=120)
+
+    request_data = socket.sent[1]["d"]["requestData"]["requestData"]
+    assert request_data["__dccDeadlineAtMs"] == 1120249
+
+
 def test_post_send_mutation_timeout_is_indeterminate() -> None:
     clock = ManualClock()
 
