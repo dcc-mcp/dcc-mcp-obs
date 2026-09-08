@@ -714,7 +714,7 @@ def _install(plan: dict[str, Any], target: Path, *, allow_existing: bool) -> Non
     if target.exists():
         if not allow_existing:
             raise InstallError("OBS_PLUGIN_ALREADY_INSTALLED", "preflight", EXIT_PREFLIGHT)
-        previous_receipt = _verify(target)
+        previous_receipt = _verify(target, expected_version=None)
     target.parent.mkdir(parents=True, exist_ok=True)
     _require_safe_target_path(target)
     stage = Path(tempfile.mkdtemp(prefix=".dcc-mcp-obs-stage-", dir=target.parent))
@@ -766,7 +766,10 @@ def _replace_owned_install(
     previous_receipt: dict[str, Any],
     next_receipt: dict[str, Any],
 ) -> None:
-    recaptured_receipt = _verify(target)
+    previous_version = previous_receipt.get("version")
+    if not isinstance(previous_version, str):
+        raise InstallError("OBS_RECEIPT_INVALID", "verify", EXIT_VERIFY)
+    recaptured_receipt = _verify(target, expected_version=previous_version)
     if (
         not isinstance(previous_receipt, _VerifiedReceipt)
         or dict(previous_receipt) != dict(recaptured_receipt)
@@ -861,7 +864,7 @@ def _replace_owned_install(
                     rollback_failed = True
         if not rollback_failed and transaction_started:
             try:
-                restored_receipt = _verify(target)
+                restored_receipt = _verify(target, expected_version=previous_version)
                 if dict(restored_receipt) != dict(
                     previous_receipt
                 ) or not _identity_maps_same_objects(
@@ -888,7 +891,22 @@ def _replace_owned_install(
         raise
 
 
-def _verify(target: Path) -> _VerifiedReceipt:
+def _semantic_version(value: object) -> tuple[int, int, int] | None:
+    if not isinstance(value, str):
+        return None
+    components = value.split(".")
+    if len(components) != 3 or any(
+        not component.isascii()
+        or not component.isdigit()
+        or (len(component) > 1 and component.startswith("0"))
+        for component in components
+    ):
+        return None
+    major, minor, patch = components
+    return int(major), int(minor), int(patch)
+
+
+def _verify(target: Path, *, expected_version: str | None = __version__) -> _VerifiedReceipt:
     _require_safe_target_path(target)
     if not target.is_dir():
         raise InstallError("OBS_RECEIPT_INVALID", "verify", EXIT_VERIFY)
@@ -902,12 +920,17 @@ def _verify(target: Path) -> _VerifiedReceipt:
             receipt=True,
         )
     )
+    receipt_version = _semantic_version(receipt.get("version"))
+    current_version = _semantic_version(__version__)
     if (
         set(receipt) != RECEIPT_KEYS
         or type(receipt.get("schema_version")) is not int
         or receipt.get("schema_version") != 1
         or receipt.get("product") != "dcc-mcp-obs"
-        or receipt.get("version") != __version__
+        or receipt_version is None
+        or current_version is None
+        or (expected_version is None and receipt_version > current_version)
+        or (expected_version is not None and receipt["version"] != expected_version)
         or receipt.get("platform") != _platform_name()
     ):
         raise InstallError("OBS_RECEIPT_INVALID", "verify", EXIT_VERIFY)

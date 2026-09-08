@@ -386,6 +386,50 @@ def test_upgrade_replaces_owned_files_and_preserves_unmanaged_extras(tmp_path: P
     assert unmanaged.read_text(encoding="utf-8") == "preserve me"
 
 
+def test_upgrade_accepts_a_verified_receipt_from_an_older_adapter_version(
+    tmp_path: Path,
+) -> None:
+    archive, digest, _payload = _bundle(tmp_path)
+    target = tmp_path / "installed"
+    install_args = [
+        "--plugin-archive",
+        str(archive),
+        "--sha256",
+        digest,
+        "--plugin-dir",
+        str(target),
+    ]
+    assert run(["install", *install_args])[0] == 0
+    receipt_path = target / RECEIPT_NAME
+    previous_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    previous_receipt["version"] = "1.2.0"
+    receipt_path.write_text(json.dumps(previous_receipt), encoding="utf-8")
+    replacement = b"cross-version-native-plugin"
+    upgrade, upgrade_digest, _payload = _bundle(
+        tmp_path,
+        payload=replacement,
+        name="cross-version-upgrade.zip",
+    )
+
+    code, report = run(
+        [
+            "upgrade",
+            "--plugin-archive",
+            str(upgrade),
+            "--sha256",
+            upgrade_digest,
+            "--plugin-dir",
+            str(target),
+        ]
+    )
+
+    assert code == 0
+    assert report["status"] == "requires_restart"
+    assert (target / "bin" / "dcc-mcp-obs.plugin").read_bytes() == replacement
+    current_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert current_receipt["version"] == __version__
+
+
 def test_upgrade_collision_restores_previous_owned_files_and_preserves_unmanaged_file(
     tmp_path: Path,
 ) -> None:
@@ -619,9 +663,9 @@ def test_upgrade_rechecks_exact_owned_identities_immediately_before_mutation(
     original_verify = install_cli._verify
     swapped = False
 
-    def swap_after_verify(path: Path) -> dict[str, object]:
+    def swap_after_verify(path: Path, **kwargs: object) -> dict[str, object]:
         nonlocal swapped
-        receipt = original_verify(path)
+        receipt = original_verify(path, **kwargs)
         if not swapped:
             replacement = owned.with_suffix(".replacement")
             replacement.write_bytes(original)

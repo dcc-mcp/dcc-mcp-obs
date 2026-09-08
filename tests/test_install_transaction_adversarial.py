@@ -233,9 +233,11 @@ def test_upgrade_keeps_recovery_when_verified_publication_is_replaced(
         original_verify = install_cli._verify
         verification_count = 0
 
-        def replace_after_published_verification(path: Path) -> install_cli._VerifiedReceipt:
+        def replace_after_published_verification(
+            path: Path, **kwargs: object
+        ) -> install_cli._VerifiedReceipt:
             nonlocal verification_count
-            receipt = original_verify(path)
+            receipt = original_verify(path, **kwargs)
             verification_count += 1
             if verification_count == 3:
                 replace_publication()
@@ -269,9 +271,11 @@ def test_upgrade_rolls_back_in_place_drift_after_published_verification(
     verification_count = 0
     corrupted = False
 
-    def corrupt_after_published_verification(path: Path) -> install_cli._VerifiedReceipt:
+    def corrupt_after_published_verification(
+        path: Path, **kwargs: object
+    ) -> install_cli._VerifiedReceipt:
         nonlocal corrupted, verification_count
-        receipt = original_verify(path)
+        receipt = original_verify(path, **kwargs)
         verification_count += 1
         if verification_count == 3:
             published_path.write_bytes(b"corrupt-after-verify")
@@ -517,9 +521,9 @@ def test_drift_after_rollback_readback_preserves_complete_recovery(
             raise OSError("force rollback before retirement")
         original_retire(recovery, expected)
 
-    def drift_after_rollback_readback(path: Path) -> install_cli._VerifiedReceipt:
+    def drift_after_rollback_readback(path: Path, **kwargs: object) -> install_cli._VerifiedReceipt:
         nonlocal verify_calls, contender_inode
-        receipt = original_verify(path)
+        receipt = original_verify(path, **kwargs)
         verify_calls += 1
         if verify_calls == 4:
             contender_inode = _replace_same_bytes_and_return_inode(published)
@@ -550,9 +554,9 @@ def test_terminal_success_rejects_post_verify_identity_replacement(
     verify_calls = 0
     contender_inode = 0
 
-    def replace_after_terminal_verify(path: Path) -> install_cli._VerifiedReceipt:
+    def replace_after_terminal_verify(path: Path, **kwargs: object) -> install_cli._VerifiedReceipt:
         nonlocal verify_calls, contender_inode
-        receipt = original_verify(path)
+        receipt = original_verify(path, **kwargs)
         verify_calls += 1
         if verify_calls == 4:
             contender_inode = _replace_same_bytes_and_return_inode(published)
