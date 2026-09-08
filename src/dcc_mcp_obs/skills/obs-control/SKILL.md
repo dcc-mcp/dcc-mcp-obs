@@ -117,6 +117,13 @@ returned PNG. Do not treat scene/source metadata or an active recording flag
 as visual evidence. If the frame is black or incorrect, stop before recording,
 repair the exact source binding or capture method, and capture a fresh frame.
 
+For normal Program recording, pass an absolute `output_directory` to
+`start_recording` when the artifact belongs in a run-specific location; omit
+it to use the OBS profile default. After `stop_recording`, continue polling
+`get_recording_status` when `stopPending=true`. Accept an artifact as complete
+only when `outputState=complete`; preserve and recover `stalled` files, and
+reject `empty`, `failed`, or `missing` outcomes.
+
 For simultaneous Agent demonstrations, call `create_agent_input_overlay` once
 per game scene with a distinct source name. Inspect each game frame and use
 `set_agent_input_overlay_layout` to choose a non-obscuring edge anchor, bounded

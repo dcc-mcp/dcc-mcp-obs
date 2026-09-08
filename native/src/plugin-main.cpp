@@ -1,7 +1,10 @@
 #include <obs-frontend-api.h>
 #include <obs-module.h>
+#include <util/config-file.h>
 #include <util/platform.h>
 
+#include <QDir>
+#include <QFileInfo>
 #include <QMetaObject>
 #include <QMainWindow>
 #include <QDesktopServices>
@@ -86,6 +89,7 @@ constexpr const char *kAllowlistedHotkeys[] = {
 
 obs_websocket_vendor g_vendor = nullptr;
 std::atomic<uint64_t> g_event_sequence{0};
+std::atomic<bool> g_recording_stop_requested{false};
 std::string g_instance_id;
 std::atomic<bool> g_plugin_loaded{false};
 std::unique_ptr<dcc_mcp_obs::DccMcpMenu> g_dcc_mcp_menu;
@@ -348,6 +352,7 @@ struct UiState {
 	dcc_mcp_obs::TypedSourceRequest typed_source_request;
 	std::vector<dcc_mcp_obs::SceneRecordingSpec> scene_recording_specs;
 	std::string scene_recording_session_id;
+	std::string recording_output_directory;
 	std::string window_executable_filter;
 	std::string window_title_filter;
 	WindowCaptureBinding window_capture;
@@ -1175,10 +1180,35 @@ obs_data_t *studio_mode_status()
 	return result;
 }
 
+bool start_recording_in_directory(const std::string &output_directory)
+{
+	if (output_directory.empty()) {
+		obs_frontend_recording_start();
+		return true;
+	}
+	const QString directory = QDir::cleanPath(QString::fromUtf8(output_directory.c_str()));
+	if (!QDir::isAbsolutePath(directory) || !QDir().mkpath(directory))
+		return false;
+	config_t *config = obs_frontend_get_profile_config();
+	if (config == nullptr)
+		return false;
+	const char *mode = config_get_string(config, "Output", "Mode");
+	const bool simple = mode == nullptr || std::string(mode) != "Advanced";
+	const char *section = simple ? "SimpleOutput" : "AdvOut";
+	const char *key = simple ? "FilePath" : "RecFilePath";
+	const char *current = config_get_string(config, section, key);
+	const std::string previous = current != nullptr ? current : "";
+	config_set_string(config, section, key, directory.toUtf8().constData());
+	obs_frontend_recording_start();
+	config_set_string(config, section, key, previous.c_str());
+	return true;
+}
+
 obs_data_t *recording_status()
 {
 	obs_data_t *result = obs_data_create();
-	obs_data_set_bool(result, "outputActive", obs_frontend_recording_active());
+	const bool active = obs_frontend_recording_active();
+	obs_data_set_bool(result, "outputActive", active);
 	obs_data_set_bool(result, "outputPaused", obs_frontend_recording_paused());
 	obs_data_set_string(result, "outputName", "");
 	obs_data_set_string(result, "outputKind", "");
@@ -1186,6 +1216,8 @@ obs_data_t *recording_status()
 	obs_data_set_int(result, "totalBytes", 0);
 	obs_data_set_int(result, "totalFrames", 0);
 	obs_data_set_string(result, "lastError", "");
+	obs_data_set_string(result, "outputState",
+			    active ? (g_recording_stop_requested.load() ? "finalizing" : "recording") : "idle");
 
 	auto *output = obs_frontend_get_recording_output();
 	if (output != nullptr) {
@@ -1198,16 +1230,41 @@ obs_data_t *recording_status()
 
 		set_bounded_string("outputName", obs_output_get_name(output), 256);
 		set_bounded_string("outputKind", obs_output_get_id(output), 256);
+		std::string output_path;
 		auto *settings = obs_output_get_settings(output);
 		if (settings != nullptr) {
-			set_bounded_string("outputPath", obs_data_get_string(settings, "path"), 4096);
+			const char *path = obs_data_get_string(settings, "path");
+			output_path = path != nullptr ? path : "";
+			set_bounded_string("outputPath", output_path.c_str(), 4096);
 			obs_data_release(settings);
 		}
 		const auto total_bytes = std::min<uint64_t>(obs_output_get_total_bytes(output),
 							    static_cast<uint64_t>(std::numeric_limits<int64_t>::max()));
 		obs_data_set_int(result, "totalBytes", static_cast<long long>(total_bytes));
 		obs_data_set_int(result, "totalFrames", std::max(0, obs_output_get_total_frames(output)));
-		set_bounded_string("lastError", obs_output_get_last_error(output), 4096);
+		const char *last_error_value = obs_output_get_last_error(output);
+		const std::string last_error = last_error_value != nullptr ? last_error_value : "";
+		set_bounded_string("lastError", last_error.c_str(), 4096);
+		if (!active && !output_path.empty()) {
+			QFileInfo file(QString::fromUtf8(output_path.c_str()));
+			QFileInfo stalled(QString::fromUtf8((output_path + ".stalled").c_str()));
+			if (stalled.exists() && (!file.exists() || file.size() == 0)) {
+				output_path += ".stalled";
+				file = stalled;
+				set_bounded_string("outputPath", output_path.c_str(), 4096);
+				obs_data_set_string(result, "outputState", "stalled");
+			} else if (file.exists() && file.size() == 0) {
+				obs_data_set_string(result, "outputState", "empty");
+			} else if (file.exists()) {
+				obs_data_set_string(result, "outputState", "complete");
+			} else if (!last_error.empty()) {
+				obs_data_set_string(result, "outputState", "failed");
+			} else {
+				obs_data_set_string(result, "outputState", "missing");
+			}
+			if (file.exists())
+				obs_data_set_int(result, "totalBytes", std::max<qint64>(0, file.size()));
+		}
 		obs_output_release(output);
 	}
 	return result;
@@ -2102,10 +2159,15 @@ void execute_ui_operation(void *private_data)
 			const bool recording_active = obs_frontend_recording_active();
 			if (!state->gate.claim_mutation(state->deadline)) {
 				set_error(result, "OBS_UI_TIMEOUT");
+			} else if (recording_active && !state->recording_output_directory.empty()) {
+				set_error(result, "OBS_OUTPUT_ACTIVE");
 			} else {
-				if (!recording_active)
-					obs_frontend_recording_start();
-				obs_data_set_bool(result, "accepted", true);
+				g_recording_stop_requested.store(false);
+				if (!recording_active &&
+				    !start_recording_in_directory(state->recording_output_directory))
+					set_error(result, "OBS_RECORDING_PATH_INVALID");
+				else
+					obs_data_set_bool(result, "accepted", true);
 			}
 			break;
 		}
@@ -2115,8 +2177,12 @@ void execute_ui_operation(void *private_data)
 			if (!state->gate.claim_mutation(state->deadline)) {
 				set_error(result, "OBS_UI_TIMEOUT");
 			} else {
-				if (recording_active)
+				if (recording_active) {
+					g_recording_stop_requested.store(true);
 					obs_frontend_recording_stop();
+				} else {
+					g_recording_stop_requested.store(false);
+				}
 				obs_data_set_bool(result, "accepted", true);
 			}
 			break;
@@ -2444,7 +2510,7 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, cons
 		      const std::string &overlay_anchor, int overlay_opacity, int overlay_margin,
 		      const dcc_mcp_obs::AgentInputActivity &agent_input_activity,
 		      const std::vector<dcc_mcp_obs::SceneRecordingSpec> &scene_recording_specs,
-		      const std::string &scene_recording_session_id,
+		      const std::string &scene_recording_session_id, const std::string &recording_output_directory,
 		      const dcc_mcp_obs::TypedSourceRequest &typed_source_request, uint64_t deadline_at_ms,
 		      obs_data_t *response)
 {
@@ -2464,6 +2530,7 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, cons
 	state->agent_input_activity = agent_input_activity;
 	state->scene_recording_specs = scene_recording_specs;
 	state->scene_recording_session_id = scene_recording_session_id;
+	state->recording_output_directory = recording_output_directory;
 	state->typed_source_request = typed_source_request;
 	state->window_executable_filter = window_executable_filter;
 	state->window_title_filter = window_title_filter;
@@ -2688,6 +2755,7 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 	dcc_mcp_obs::TypedSourceRequest typed_source_request;
 	std::vector<dcc_mcp_obs::SceneRecordingSpec> scene_recording_specs;
 	std::string scene_recording_session_id;
+	std::string recording_output_directory;
 	int64_t scene_item_id = 0;
 	bool enabled = true, studio_enabled = false, has_duration = false;
 	int duration_ms = 0;
@@ -2727,6 +2795,21 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 		}
 	}
 	const std::string request_name(request);
+	if (request_name == "StartRecording" && request_data != nullptr &&
+	    obs_data_has_user_value(request_data, "outputDirectory")) {
+		const char *value = obs_data_get_string(request_data, "outputDirectory");
+		recording_output_directory = value != nullptr ? value : "";
+		const QString directory = QString::fromUtf8(recording_output_directory.c_str());
+		const bool valid =
+			!recording_output_directory.empty() && recording_output_directory.size() <= 4096 &&
+			QDir::isAbsolutePath(directory) &&
+			std::all_of(recording_output_directory.begin(), recording_output_directory.end(),
+				    [](unsigned char character) { return character >= 32 && character != 127; });
+		if (!valid) {
+			set_error(response_data, "OBS_RECORDING_PATH_INVALID");
+			return;
+		}
+	}
 	if (dcc_mcp_obs::is_typed_source_request(request_name)) {
 		const char *error_code = nullptr;
 		if (!dcc_mcp_obs::parse_typed_source_request(request_name, request_data, typed_source_request,
@@ -3186,8 +3269,8 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 			 scene_item_id, enabled, studio_enabled, has_duration, duration_ms, has_pos, has_scale,
 			 has_rotation, pos_x, pos_y, scale_x, scale_y, rotation, window_capture,
 			 expected_window_capture, overlay_anchor, overlay_opacity, overlay_margin, agent_input_activity,
-			 scene_recording_specs, scene_recording_session_id, typed_source_request, deadline_at_ms,
-			 response_data);
+			 scene_recording_specs, scene_recording_session_id, recording_output_directory,
+			 typed_source_request, deadline_at_ms, response_data);
 	if (request_name == "RequestGracefulShutdown" && obs_data_get_bool(response_data, "shutdownScheduled"))
 		obs_queue_task(OBS_TASK_UI, request_frontend_exit, nullptr, false);
 }
@@ -3196,6 +3279,8 @@ void unregister_vendor_requests();
 
 void frontend_event(enum obs_frontend_event event, void *)
 {
+	if (event == OBS_FRONTEND_EVENT_RECORDING_STARTED || event == OBS_FRONTEND_EVENT_RECORDING_STOPPED)
+		g_recording_stop_requested.store(false);
 	if (event == OBS_FRONTEND_EVENT_EXIT) {
 		// obs-websocket can unload before this module. Its vendor handle is no
 		// longer safe once frontend shutdown advances to module teardown, so

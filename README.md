@@ -25,7 +25,7 @@ script or raw WebSocket tool.
 - A native top-level `DCC MCP` menu for status, overlay setup, Gateway Admin,
   and plugin information
 - Recording status
-- Start, stop, pause, and resume recording
+- Start, stop, pause, and resume recording with an optional per-run output directory
 - Typed streaming, replay-buffer, virtual-camera, and named-output controls
 - Reviewed source/input/property/filter contracts plus exact audio and media controls
 - A separate typed status readback after every mutation
@@ -144,6 +144,14 @@ game frame. `emit_agent_input_activity` displays the Agent identity and only an
 allowlisted shortcut, mouse button, wheel direction, or typing count. It never
 captures global input or accepts arbitrary text. See the
 [Agent input overlay contract](docs/agent-input-overlay.md).
+
+Normal Program recordings accept an optional absolute `output_directory` on
+`start_recording`; omitting it preserves the active OBS profile default.
+`stop_recording` waits up to two minutes for the muxer and returns
+`stopPending=true` with `outputState=finalizing` when bounded polling must
+continue. Status classifies terminal artifacts as `complete`, `stalled`,
+`empty`, `failed`, or `missing`, reports the actual `.stalled` path, and reads
+the final byte count from disk after the output closes.
 
 `start_scene_recordings` starts a private video-only output without switching
 the OBS program scene. Calls create separate sessions and may overlap up to

@@ -23,12 +23,20 @@ Recording mutations return only acceptance from the native plugin. The sidecar
 then performs bounded, separate `GetRecordingStatus` requests and verifies the
 requested state. This separation prevents command delivery from being
 misreported as an observed postcondition while allowing OBS frontend events to
-settle inside the enclosing Core job.
+settle inside the enclosing Core job. A normal recording may temporarily use
+an absolute per-run directory while OBS constructs the output; the profile's
+stored default is restored immediately and is used whenever the argument is
+omitted.
 
 `GetRecordingStatus` also reports bounded recording-output diagnostics from
 the authoritative libobs output: output name and kind, file path, total bytes
 and frames, and the last output error. This keeps failure diagnosis on the typed
 plugin route instead of requiring UI automation or unstructured log scraping.
+When the output becomes inactive, the plugin classifies the artifact as
+complete, stalled, empty, failed, or missing. A stalled artifact reports its
+actual `.stalled` path and final on-disk byte count. Long stop operations may
+return a successful `finalizing` state before the enclosing deadline so callers
+can continue bounded status polling without discarding the recording.
 
 The full product surface is partitioned into capability domains in
 `contracts/obs-capabilities-v1.json`. Follow-up slices add reviewed request and

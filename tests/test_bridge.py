@@ -72,6 +72,7 @@ def test_recording_status_accepts_bounded_output_diagnostics() -> None:
                 **IDENTITY,
                 "outputActive": True,
                 "outputPaused": False,
+                "outputState": "recording",
                 "outputName": "simple_file_output",
                 "outputKind": "mp4_output",
                 "outputPath": "C:/Videos/session.mp4",
@@ -92,6 +93,32 @@ def test_recording_status_accepts_bounded_output_diagnostics() -> None:
     assert result["lastError"] == ""
 
 
+def test_recording_status_preserves_stalled_actual_path_and_bytes() -> None:
+    stalled_path = "C:/Videos/session.mp4.stalled"
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {
+                **IDENTITY,
+                "outputActive": False,
+                "outputPaused": False,
+                "outputState": "stalled",
+                "outputPath": stalled_path,
+                "totalBytes": 153 * 1024 * 1024,
+                "totalFrames": 6630,
+                "lastError": "output interrupted",
+                "eventSequence": 9,
+            },
+        ]
+    )
+
+    result = ObsControlBridge(transport, expected_pid=4242).recording_status()
+
+    assert result["outputState"] == "stalled"
+    assert result["outputPath"] == stalled_path
+    assert result["totalBytes"] == 153 * 1024 * 1024
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -106,6 +133,7 @@ def test_recording_status_rejects_invalid_output_diagnostics(field: str, value: 
         **IDENTITY,
         "outputActive": True,
         "outputPaused": False,
+        "outputState": "recording",
         "outputName": "simple_file_output",
         "outputKind": "mp4_output",
         "outputPath": "C:/Videos/session.mp4",
@@ -127,7 +155,13 @@ def test_recording_start_requires_separate_verified_readback() -> None:
         [
             {**IDENTITY, "ready": True},
             {**IDENTITY, "accepted": True, "eventSequence": 8},
-            {**IDENTITY, "outputActive": True, "outputPaused": False, "eventSequence": 9},
+            {
+                **IDENTITY,
+                "outputActive": True,
+                "outputPaused": False,
+                "outputState": "recording",
+                "eventSequence": 9,
+            },
         ]
     )
     bridge = ObsControlBridge(transport, expected_pid=4242)
@@ -141,6 +175,41 @@ def test_recording_start_requires_separate_verified_readback() -> None:
         "StartRecording",
         "GetRecordingStatus",
     ]
+
+
+def test_recording_start_accepts_an_absolute_per_run_output_directory() -> None:
+    output_directory = "C:/Recordings/Wukong/run-42"
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {**IDENTITY, "accepted": True, "eventSequence": 8},
+            {
+                **IDENTITY,
+                "outputActive": True,
+                "outputPaused": False,
+                "outputState": "recording",
+                "outputPath": f"{output_directory}/episode.mp4",
+                "eventSequence": 9,
+            },
+        ]
+    )
+    bridge = ObsControlBridge(transport, expected_pid=4242)
+
+    result = bridge.start_recording(output_directory=output_directory)
+
+    assert result["verified"] is True
+    assert transport.requests[1][1] == {"outputDirectory": output_directory}
+
+
+@pytest.mark.parametrize("output_directory", ["relative/path", "", "C:/bad\npath", 42])
+def test_recording_start_rejects_invalid_output_directory(output_directory: object) -> None:
+    transport = FakeTransport([{**IDENTITY, "ready": True}])
+    bridge = ObsControlBridge(transport, expected_pid=4242)
+
+    with pytest.raises(BridgeError, match="OBS_RECORDING_PATH_INVALID"):
+        bridge.start_recording(output_directory=output_directory)  # type: ignore[arg-type]
+
+    assert len(transport.requests) == 1
 
 
 def test_graceful_shutdown_is_a_typed_terminal_submission() -> None:
@@ -434,7 +503,13 @@ def test_mutation_fails_closed_when_readback_does_not_prove_postcondition() -> N
         [
             {**IDENTITY, "ready": True},
             {**IDENTITY, "accepted": True, "eventSequence": 8},
-            {**IDENTITY, "outputActive": False, "outputPaused": False, "eventSequence": 9},
+            {
+                **IDENTITY,
+                "outputActive": False,
+                "outputPaused": False,
+                "outputState": "idle",
+                "eventSequence": 9,
+            },
         ]
     )
     bridge = ObsControlBridge(transport, expected_pid=4242, postcondition_attempts=1)
@@ -448,8 +523,20 @@ def test_recording_mutation_reconciles_bounded_delayed_postcondition() -> None:
         [
             {**IDENTITY, "ready": True},
             {**IDENTITY, "accepted": True, "eventSequence": 8},
-            {**IDENTITY, "outputActive": False, "outputPaused": False, "eventSequence": 9},
-            {**IDENTITY, "outputActive": True, "outputPaused": False, "eventSequence": 10},
+            {
+                **IDENTITY,
+                "outputActive": False,
+                "outputPaused": False,
+                "outputState": "idle",
+                "eventSequence": 9,
+            },
+            {
+                **IDENTITY,
+                "outputActive": True,
+                "outputPaused": False,
+                "outputState": "recording",
+                "eventSequence": 10,
+            },
         ]
     )
     bridge = ObsControlBridge(
@@ -477,11 +564,18 @@ def test_recording_stop_allows_bounded_obs_finalization_delay() -> None:
                     **IDENTITY,
                     "outputActive": True,
                     "outputPaused": False,
+                    "outputState": "recording",
                     "eventSequence": 9 + offset,
                 }
                 for offset in range(24)
             ],
-            {**IDENTITY, "outputActive": False, "outputPaused": False, "eventSequence": 33},
+            {
+                **IDENTITY,
+                "outputActive": False,
+                "outputPaused": False,
+                "outputState": "idle",
+                "eventSequence": 33,
+            },
         ]
     )
     bridge = ObsControlBridge(
@@ -497,6 +591,64 @@ def test_recording_stop_allows_bounded_obs_finalization_delay() -> None:
     assert [request for request, _data, _deadline in transport.requests].count(
         "GetRecordingStatus"
     ) == 25
+
+
+def test_recording_stop_returns_a_typed_pending_state_before_deadline() -> None:
+    clock = ManualClock()
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {**IDENTITY, "accepted": True, "eventSequence": 8},
+            {
+                **IDENTITY,
+                "outputActive": True,
+                "outputPaused": False,
+                "outputState": "finalizing",
+                "outputPath": "C:/Videos/session.mp4",
+                "totalBytes": 900_000_000,
+                "totalFrames": 36_000,
+                "lastError": "",
+                "eventSequence": 9,
+            },
+        ],
+        clock=clock,
+        advances=[0, 0, 4.1],
+    )
+    bridge = ObsControlBridge(
+        transport,
+        expected_pid=4242,
+        deadline=5,
+        clock=clock,
+        sleeper=clock.sleep,
+    )
+
+    result = bridge.stop_recording()
+
+    assert result["accepted"] is True
+    assert result["verified"] is False
+    assert result["stopPending"] is True
+    assert result["outputState"] == "finalizing"
+    assert result["outputPath"] == "C:/Videos/session.mp4"
+
+
+@pytest.mark.parametrize(
+    ("active", "state"),
+    [(True, "complete"), (False, "recording"), (False, "finalizing"), (True, "idle")],
+)
+def test_recording_status_rejects_inconsistent_output_state(active: bool, state: str) -> None:
+    response = {
+        **IDENTITY,
+        "outputActive": active,
+        "outputPaused": False,
+        "outputState": state,
+        "eventSequence": 9,
+    }
+    bridge = ObsControlBridge(
+        FakeTransport([{**IDENTITY, "ready": True}, response]), expected_pid=4242
+    )
+
+    with pytest.raises(BridgeError, match="OBS_RESPONSE_INVALID"):
+        bridge.recording_status()
 
 
 def test_cross_instance_drift_fails_before_following_call() -> None:
@@ -743,6 +895,7 @@ def test_list_scenes_response_has_strict_typed_schema(response: dict[str, object
                 **IDENTITY,
                 "outputActive": False,
                 "outputPaused": False,
+                "outputState": "idle",
                 "eventSequence": 8,
             },
         ),
@@ -768,6 +921,7 @@ def test_event_sequence_regression_fails_closed_before_verified_readback() -> No
                 **IDENTITY,
                 "outputActive": True,
                 "outputPaused": False,
+                "outputState": "recording",
                 "eventSequence": 0,
             },
         ]
@@ -802,6 +956,7 @@ def test_mutation_poll_must_strictly_advance_event_sequence() -> None:
                 **IDENTITY,
                 "outputActive": False,
                 "outputPaused": False,
+                "outputState": "idle",
                 "eventSequence": 8,
             },
         ]
@@ -896,7 +1051,13 @@ def test_one_mutation_deadline_stops_before_another_status_request() -> None:
         [
             {**IDENTITY, "ready": True},
             {**IDENTITY, "accepted": True, "eventSequence": 8},
-            {**IDENTITY, "outputActive": False, "outputPaused": False, "eventSequence": 9},
+            {
+                **IDENTITY,
+                "outputActive": False,
+                "outputPaused": False,
+                "outputState": "idle",
+                "eventSequence": 9,
+            },
         ],
         clock=clock,
         advances=[0, 0, 4],

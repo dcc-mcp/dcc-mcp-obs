@@ -293,6 +293,7 @@ def test_skill_outputs_publish_strict_typed_envelopes_with_context_parity() -> N
             "ok",
             "outputActive",
             "outputPaused",
+            "outputState",
             "outputName",
             "outputKind",
             "outputPath",
@@ -308,6 +309,8 @@ def test_skill_outputs_publish_strict_typed_envelopes_with_context_parity() -> N
         "totalBytes",
         "totalFrames",
         "lastError",
+        "accepted",
+        "stopPending",
     }
     mutation_context_keys = {
         "instanceId",
@@ -318,6 +321,7 @@ def test_skill_outputs_publish_strict_typed_envelopes_with_context_parity() -> N
         "ok",
         "outputActive",
         "outputPaused",
+        "outputState",
     }
     overlay_context_keys = {
         "instanceId",
@@ -364,33 +368,44 @@ def test_skill_outputs_publish_strict_typed_envelopes_with_context_parity() -> N
                 "accepted",
                 "shutdownScheduled",
             },
-            "get_streaming_status": mutation_context_keys - {"outputActive", "outputPaused"}
+            "get_streaming_status": mutation_context_keys
+            - {"outputActive", "outputPaused", "outputState"}
             | {"streamingActive"},
-            "start_streaming": mutation_context_keys - {"outputActive", "outputPaused"}
+            "start_streaming": mutation_context_keys
+            - {"outputActive", "outputPaused", "outputState"}
             | {"streamingActive"},
-            "stop_streaming": mutation_context_keys - {"outputActive", "outputPaused"}
+            "stop_streaming": mutation_context_keys
+            - {"outputActive", "outputPaused", "outputState"}
             | {"streamingActive"},
-            "get_replay_buffer_status": mutation_context_keys - {"outputActive", "outputPaused"}
+            "get_replay_buffer_status": mutation_context_keys
+            - {"outputActive", "outputPaused", "outputState"}
             | {"replayBufferActive"},
-            "start_replay_buffer": mutation_context_keys - {"outputActive", "outputPaused"}
+            "start_replay_buffer": mutation_context_keys
+            - {"outputActive", "outputPaused", "outputState"}
             | {"replayBufferActive"},
-            "stop_replay_buffer": mutation_context_keys - {"outputActive", "outputPaused"}
+            "stop_replay_buffer": mutation_context_keys
+            - {"outputActive", "outputPaused", "outputState"}
             | {"replayBufferActive"},
-            "save_replay_buffer": mutation_context_keys - {"outputActive", "outputPaused"}
+            "save_replay_buffer": mutation_context_keys
+            - {"outputActive", "outputPaused", "outputState"}
             | {"replayBufferActive", "accepted", "submitted"},
-            "get_virtual_camera_status": mutation_context_keys - {"outputActive", "outputPaused"}
+            "get_virtual_camera_status": mutation_context_keys
+            - {"outputActive", "outputPaused", "outputState"}
             | {"virtualCameraActive"},
-            "start_virtual_camera": mutation_context_keys - {"outputActive", "outputPaused"}
+            "start_virtual_camera": mutation_context_keys
+            - {"outputActive", "outputPaused", "outputState"}
             | {"virtualCameraActive"},
-            "stop_virtual_camera": mutation_context_keys - {"outputActive", "outputPaused"}
+            "stop_virtual_camera": mutation_context_keys
+            - {"outputActive", "outputPaused", "outputState"}
             | {"virtualCameraActive"},
-            "list_outputs": mutation_context_keys - {"outputActive", "outputPaused"}
+            "list_outputs": mutation_context_keys - {"outputActive", "outputPaused", "outputState"}
             | {"outputs", "truncated"},
-            "get_output_status": mutation_context_keys - {"outputActive", "outputPaused"}
+            "get_output_status": mutation_context_keys
+            - {"outputActive", "outputPaused", "outputState"}
             | {"outputName", "outputKind", "outputActive"},
-            "start_output": mutation_context_keys - {"outputActive", "outputPaused"}
+            "start_output": mutation_context_keys - {"outputActive", "outputPaused", "outputState"}
             | {"outputName", "outputKind", "outputActive"},
-            "stop_output": mutation_context_keys - {"outputActive", "outputPaused"}
+            "stop_output": mutation_context_keys - {"outputActive", "outputPaused", "outputState"}
             | {"outputName", "outputKind", "outputActive"},
         }
     )
@@ -532,11 +547,14 @@ def test_skill_outputs_publish_strict_typed_envelopes_with_context_parity() -> N
         required = {"success", "message", "error", "prompt", "context"}
         if tool["name"] in mutation_names:
             required.add("postcondition")
+            expected_verified = (
+                {"type": "boolean"} if tool["name"] == "stop_recording" else {"const": True}
+            )
             assert schema["properties"]["postcondition"] == {
                 "type": "object",
                 "additionalProperties": False,
                 "required": ["verified"],
-                "properties": {"verified": {"const": True}},
+                "properties": {"verified": expected_verified},
             }
         assert set(schema["required"]) == required
         assert set(schema["properties"]) == required
@@ -584,29 +602,34 @@ def test_every_skill_output_schema_accepts_the_real_core_success_envelope() -> N
             **identity,
             "outputActive": False,
             "outputPaused": False,
+            "outputState": "idle",
         },
         "start_recording": {
             **identity,
             "outputActive": True,
             "outputPaused": False,
+            "outputState": "recording",
             "verified": True,
         },
         "stop_recording": {
             **identity,
             "outputActive": False,
             "outputPaused": False,
+            "outputState": "idle",
             "verified": True,
         },
         "pause_recording": {
             **identity,
             "outputActive": True,
             "outputPaused": True,
+            "outputState": "recording",
             "verified": True,
         },
         "resume_recording": {
             **identity,
             "outputActive": True,
             "outputPaused": False,
+            "outputState": "recording",
             "verified": True,
         },
     }

@@ -17,6 +17,7 @@ from .__version__ import __version__
 from .deadline import current_deadline
 
 DEFAULT_OPERATION_TIMEOUT_SECONDS = 30.0
+STOP_RECORDING_RETURN_MARGIN_SECONDS = 1.0
 ALLOWLISTED_HOTKEYS = frozenset(
     {
         "start_recording",
@@ -49,6 +50,7 @@ PUBLIC_DOWNSTREAM_ERRORS = frozenset(
         "OBS_HANDSHAKE_INVALID",
         "OBS_INSTANCE_NOT_READY",
         "OBS_RECORDING_NOT_ACTIVE",
+        "OBS_RECORDING_PATH_INVALID",
         "OBS_REQUEST_FAILED",
         "OBS_REQUEST_INVALID",
         "OBS_RESPONSE_INVALID",
@@ -94,6 +96,9 @@ REVIEWED_FILTER_KINDS = frozenset({"gain_filter"})
 SOURCE_MONITOR_TYPES = frozenset({"none", "monitor_only", "monitor_and_output"})
 MEDIA_STATES = frozenset(
     {"none", "playing", "opening", "buffering", "paused", "stopped", "ended", "error"}
+)
+RECORDING_OUTPUT_STATES = frozenset(
+    {"idle", "recording", "finalizing", "complete", "stalled", "empty", "failed", "missing"}
 )
 SOURCE_VOLUME_READBACK_TOLERANCE = 1e-6
 MEDIA_SEEK_READBACK_TOLERANCE_MS = 250
@@ -1257,8 +1262,18 @@ class ObsControlBridge:
     def recording_status(self) -> dict[str, object]:
         return self._checked("GetRecordingStatus", deadline=self._operation_deadline())
 
-    def start_recording(self) -> dict[str, object]:
-        return self._recording_mutation("StartRecording", active=True, paused=False)
+    def start_recording(self, *, output_directory: str | None = None) -> dict[str, object]:
+        payload: dict[str, object] = {}
+        if output_directory is not None:
+            self._require_absolute_directory(output_directory)
+            payload["outputDirectory"] = output_directory
+        return self._recording_mutation(
+            "StartRecording",
+            active=True,
+            paused=False,
+            payload=payload,
+            output_directory=output_directory,
+        )
 
     def stop_recording(self) -> dict[str, object]:
         return self._recording_mutation("StopRecording", active=False, paused=False)
@@ -2341,27 +2356,73 @@ class ObsControlBridge:
         raise BridgeError("OBS_POSTCONDITION_FAILED")
 
     def _recording_mutation(
-        self, request_type: str, *, active: bool, paused: bool
+        self,
+        request_type: str,
+        *,
+        active: bool,
+        paused: bool,
+        payload: Mapping[str, object] | None = None,
+        output_directory: str | None = None,
     ) -> dict[str, object]:
         deadline = self._operation_deadline()
-        accepted = self._checked(request_type, deadline=deadline)
+        accepted = self._checked(request_type, payload, deadline=deadline)
         if accepted.get("accepted") is not True:
             raise BridgeError("OBS_MUTATION_REJECTED")
-        # OBS may need several seconds to drain the encoder and muxer before
-        # its authoritative recording state becomes inactive. Keep the same
-        # operation deadline, but allow denser bounded readback for this one
-        # asynchronous terminal transition.
-        attempts = self._postcondition_attempts * (5 if request_type == "StopRecording" else 1)
-        for attempt in range(attempts):
+        attempt = 0
+        while True:
             readback = self._checked("GetRecordingStatus", deadline=deadline)
-            if readback.get("outputActive") is active and readback.get("outputPaused") is paused:
-                return {**readback, "verified": True}
-            if attempt + 1 < attempts:
-                remaining = deadline - self._clock()
-                if remaining <= 0:
-                    raise BridgeError("OBS_TIMEOUT")
-                self._sleeper(min(self._postcondition_poll_seconds, remaining))
-        raise BridgeError("OBS_POSTCONDITION_FAILED")
+            state_matches = (
+                readback.get("outputActive") is active
+                and readback.get("outputPaused") is paused
+                and (
+                    output_directory is None
+                    or self._output_path_matches_directory(
+                        readback.get("outputPath"), output_directory
+                    )
+                )
+            )
+            if state_matches:
+                result = {**readback, "verified": True}
+                if request_type == "StopRecording":
+                    result["stopPending"] = False
+                return result
+            remaining = deadline - self._clock()
+            if (
+                request_type == "StopRecording"
+                and remaining <= STOP_RECORDING_RETURN_MARGIN_SECONDS
+            ):
+                return {
+                    **readback,
+                    "accepted": True,
+                    "verified": False,
+                    "stopPending": True,
+                    "outputState": "finalizing",
+                }
+            attempt += 1
+            if request_type != "StopRecording" and attempt >= self._postcondition_attempts:
+                raise BridgeError("OBS_POSTCONDITION_FAILED")
+            if remaining <= 0:
+                raise BridgeError("OBS_TIMEOUT")
+            self._sleeper(min(self._postcondition_poll_seconds, remaining))
+
+    @staticmethod
+    def _require_absolute_directory(value: object) -> str:
+        if (
+            type(value) is not str
+            or not 1 <= len(value) <= 4096
+            or any(ord(character) < 32 or ord(character) == 127 for character in value)
+            or not (PureWindowsPath(value).is_absolute() or PurePosixPath(value).is_absolute())
+        ):
+            raise BridgeError("OBS_RECORDING_PATH_INVALID")
+        return value
+
+    @staticmethod
+    def _output_path_matches_directory(path: object, directory: str) -> bool:
+        if not isinstance(path, str) or not path:
+            return False
+        if PureWindowsPath(directory).is_absolute():
+            return PureWindowsPath(path).parent == PureWindowsPath(directory)
+        return PurePosixPath(path).parent == PurePosixPath(directory)
 
     def _request(
         self,
@@ -3062,7 +3123,7 @@ class ObsControlBridge:
             diagnostic_integers = {"totalBytes", "totalFrames"}
             allowed = (
                 _IDENTITY_KEYS
-                | {"outputActive", "outputPaused"}
+                | {"outputActive", "outputPaused", "outputState"}
                 | set(diagnostic_strings)
                 | diagnostic_integers
             )
@@ -3070,6 +3131,15 @@ class ObsControlBridge:
                 set(response) - allowed
                 or type(response.get("outputActive")) is not bool
                 or type(response.get("outputPaused")) is not bool
+                or response.get("outputState") not in RECORDING_OUTPUT_STATES
+                or (
+                    response.get("outputActive") is True
+                    and response.get("outputState") not in {"recording", "finalizing"}
+                )
+                or (
+                    response.get("outputActive") is False
+                    and response.get("outputState") in {"recording", "finalizing"}
+                )
                 or any(
                     key in response
                     and (not isinstance(response[key], str) or len(response[key]) > max_length)
