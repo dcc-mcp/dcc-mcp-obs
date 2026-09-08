@@ -1680,6 +1680,153 @@ tools:
     annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
     call_examples: [{arguments: {scene_name: RL - Game 1}, note: Clear a stale cue before changing demo sections.}]
     next-tools: {on-success: [obs_control__get_agent_input_overlay], on-failure: [obs_control__get_status]}
+  - name: get_presentation_overlay
+    description: Read one scene-bound persistent DCC-MCP presentation overlay with bounded title, status rows, and optional local logo.
+    source_file: scripts/get_presentation_overlay.py
+    input_schema: &presentation_overlay_name_input
+      type: object
+      additionalProperties: false
+      required: [scene_name]
+      properties:
+        scene_name: {type: string, minLength: 1, maxLength: 256}
+        source_name: {type: string, minLength: 1, maxLength: 256, default: DCC-MCP Presentation}
+    output_schema: &presentation_overlay_status_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: &presentation_overlay_status_context
+          type: object
+          additionalProperties: false
+          required: [instanceId, pluginVersion, obsVersion, hostPid, eventSequence, ok, sceneName, sceneItemId, sourceName, sourceKind, theme, anchor, opacity, margin, width, visible, title, rows, logoPath]
+          properties:
+            instanceId: {type: string, minLength: 1, maxLength: 128}
+            pluginVersion: {type: string, minLength: 1}
+            obsVersion: {type: string, minLength: 1}
+            hostPid: {type: integer, minimum: 1}
+            eventSequence: {type: integer, minimum: 0}
+            ok: {const: true}
+            sceneName: {type: string, minLength: 1, maxLength: 256}
+            sceneItemId: {type: integer, minimum: 1}
+            sourceName: {type: string, minLength: 1, maxLength: 256}
+            sourceKind: {const: dcc_mcp_presentation_overlay}
+            theme: {const: dcc_mcp_dark}
+            anchor: {enum: [top_left, top_center, top_right, center_left, center_right, bottom_left, bottom_center, bottom_right, custom]}
+            opacity: {type: integer, minimum: 20, maximum: 100}
+            margin: {type: integer, minimum: 8, maximum: 160}
+            width: {type: integer, minimum: 360, maximum: 960}
+            visible: {type: boolean}
+            title: {type: string, maxLength: 128}
+            rows:
+              type: array
+              maxItems: 8
+              items:
+                type: object
+                additionalProperties: false
+                required: [label, value]
+                properties:
+                  label: {type: string, maxLength: 32}
+                  value: {type: string, maxLength: 64}
+            logoPath: {type: string, maxLength: 4096}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    annotations: {read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {scene_name: RL - Game 1}, note: Read the persistent presentation overlay.}]
+  - name: create_presentation_overlay
+    description: Create a persistent presentation overlay using a bounded native source, without Browser Source or remote content.
+    source_file: scripts/create_presentation_overlay.py
+    input_schema: &presentation_overlay_layout_input
+      type: object
+      additionalProperties: false
+      required: [scene_name]
+      properties:
+        scene_name: {type: string, minLength: 1, maxLength: 256}
+        source_name: {type: string, minLength: 1, maxLength: 256, default: DCC-MCP Presentation}
+        anchor: {enum: [top_left, top_center, top_right, center_left, center_right, bottom_left, bottom_center, bottom_right], default: top_right}
+        opacity: {type: integer, minimum: 20, maximum: 100, default: 88}
+        margin: {type: integer, minimum: 8, maximum: 160, default: 48}
+        width: {type: integer, minimum: 360, maximum: 960, default: 520}
+    output_schema: &presentation_overlay_mutation_output
+      type: object
+      additionalProperties: false
+      required: [success, message, error, prompt, context, postcondition]
+      properties:
+        success: {const: true}
+        message: {type: string}
+        error: {type: "null"}
+        prompt: {type: [string, "null"]}
+        context: *presentation_overlay_status_context
+        postcondition:
+          type: object
+          additionalProperties: false
+          required: [verified]
+          properties: {verified: {const: true}}
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {scene_name: RL - Game 1, anchor: top_right, opacity: 88, margin: 48, width: 520}, note: Create a bounded native status overlay.}]
+    next-tools: {on-success: [obs_control__update_presentation_overlay], on-failure: [obs_control__list_scenes, obs_control__get_status]}
+  - name: set_presentation_overlay_layout
+    description: Move and resize one native presentation overlay using bounded edge anchors, opacity, margin, and width.
+    source_file: scripts/set_presentation_overlay_layout.py
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [scene_name, anchor, opacity, margin, width]
+      properties:
+        scene_name: {type: string, minLength: 1, maxLength: 256}
+        source_name: {type: string, minLength: 1, maxLength: 256, default: DCC-MCP Presentation}
+        anchor: {enum: [top_left, top_center, top_right, center_left, center_right, bottom_left, bottom_center, bottom_right]}
+        opacity: {type: integer, minimum: 20, maximum: 100}
+        margin: {type: integer, minimum: 8, maximum: 160}
+        width: {type: integer, minimum: 360, maximum: 960}
+    output_schema: *presentation_overlay_mutation_output
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {scene_name: RL - Game 1, anchor: top_right, opacity: 88, margin: 48, width: 520}, note: Keep gameplay HUD areas unobscured.}]
+    next-tools: {on-success: [obs_control__get_presentation_overlay], on-failure: [obs_control__get_status]}
+  - name: update_presentation_overlay
+    description: Update bounded presentation metadata and an optional validated local raster logo; remote URLs and scripts are rejected.
+    source_file: scripts/update_presentation_overlay.py
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [scene_name, title, rows]
+      properties:
+        scene_name: {type: string, minLength: 1, maxLength: 256}
+        source_name: {type: string, minLength: 1, maxLength: 256, default: DCC-MCP Presentation}
+        title: {type: string, maxLength: 128}
+        rows:
+          type: array
+          maxItems: 8
+          items:
+            type: object
+            additionalProperties: false
+            required: [label, value]
+            properties:
+              label: {type: string, maxLength: 32}
+              value: {type: string, maxLength: 64}
+        logo_path: {type: string, maxLength: 4096, default: ""}
+        visible: {type: boolean, default: true}
+    output_schema: *presentation_overlay_mutation_output
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    annotations: {read_only_hint: false, destructive_hint: true, idempotent_hint: true, open_world_hint: false, deferred_hint: false}
+    call_examples: [{arguments: {scene_name: RL - Game 1, title: Boss Training, rows: [{label: Opponent, value: Guangzhi}, {label: Attempt, value: "7"}]}, note: Update bounded encounter metadata without remote content.}]
+    next-tools: {on-success: [obs_control__get_presentation_overlay], on-failure: [obs_control__get_status]}
   - name: get_source_identity
     description: Read bounded identity and dimensions for one exact OBS source.
     source_file: scripts/get_source_identity.py

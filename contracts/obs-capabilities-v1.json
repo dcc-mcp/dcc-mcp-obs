@@ -63,6 +63,15 @@
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
     },
     {
+      "domain": "presentation_overlay",
+      "status": "delivered",
+      "authority": "native_plugin",
+      "delivered_operations": ["get_presentation_overlay", "create_presentation_overlay", "set_presentation_overlay_layout", "update_presentation_overlay"],
+      "remaining_operations": [],
+      "dangerous_operations": ["create_presentation_overlay", "set_presentation_overlay_layout", "update_presentation_overlay"],
+      "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
+    },
+    {
       "domain": "properties",
       "status": "delivered",
       "authority": "native_plugin",

@@ -5,12 +5,13 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import json
 import math
 import threading
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from pathlib import PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Protocol
 
 from .__version__ import __version__
@@ -145,6 +146,12 @@ AGENT_INPUT_KEYS = frozenset(
 AGENT_INPUT_MOUSE_BUTTONS = frozenset({"none", "left", "right", "middle", "back", "forward"})
 AGENT_INPUT_WHEEL_DIRECTIONS = frozenset({"none", "up", "down", "left", "right"})
 DEFAULT_AGENT_INPUT_OVERLAY_SOURCE_NAME = "DCC-MCP Agent Input"
+PRESENTATION_OVERLAY_SOURCE_KIND = "dcc_mcp_presentation_overlay"
+PRESENTATION_OVERLAY_THEME = "dcc_mcp_dark"
+DEFAULT_PRESENTATION_OVERLAY_SOURCE_NAME = "DCC-MCP Presentation"
+PRESENTATION_OVERLAY_MIN_WIDTH = 360
+PRESENTATION_OVERLAY_MAX_WIDTH = 960
+PRESENTATION_OVERLAY_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 PROGRAM_FRAME_WIDTH = 320
 PROGRAM_FRAME_HEIGHT = 180
 MAX_PROGRAM_FRAME_BYTES = 400_000
@@ -1521,6 +1528,227 @@ class ObsControlBridge:
             raise BridgeError("OBS_POSTCONDITION_FAILED")
         return {**readback, "verified": True}
 
+    def get_presentation_overlay(
+        self,
+        *,
+        scene_name: str,
+        source_name: str = DEFAULT_PRESENTATION_OVERLAY_SOURCE_NAME,
+    ) -> dict[str, object]:
+        return self._get_presentation_overlay(
+            scene_name=self._require_name(scene_name),
+            source_name=self._require_name(source_name),
+            deadline=self._operation_deadline(),
+        )
+
+    def _get_presentation_overlay(
+        self, *, scene_name: str, source_name: str, deadline: float
+    ) -> dict[str, object]:
+        response = self._checked(
+            "GetPresentationOverlay",
+            {"sceneName": scene_name, "sourceName": source_name},
+            deadline=deadline,
+        )
+        if response.get("sceneName") != scene_name or response.get("sourceName") != source_name:
+            raise BridgeError("OBS_POSTCONDITION_FAILED")
+        try:
+            rows = json.loads(str(response.get("rowsJson", "[]")))
+        except json.JSONDecodeError as error:
+            raise BridgeError("OBS_RESPONSE_INVALID") from error
+        if not self._valid_presentation_rows(rows):
+            raise BridgeError("OBS_RESPONSE_INVALID")
+        public = {key: value for key, value in response.items() if key != "rowsJson"}
+        return {**public, "rows": rows}
+
+    @staticmethod
+    def _valid_presentation_text(value: object, maximum: int) -> bool:
+        return (
+            type(value) is str
+            and len(value) <= maximum
+            and all(ord(character) >= 32 and ord(character) != 127 for character in value)
+        )
+
+    @classmethod
+    def _valid_presentation_rows(cls, rows: object) -> bool:
+        return (
+            isinstance(rows, list)
+            and len(rows) <= 8
+            and all(
+                isinstance(row, dict)
+                and set(row) == {"label", "value"}
+                and cls._valid_presentation_text(row.get("label"), 32)
+                and cls._valid_presentation_text(row.get("value"), 64)
+                for row in rows
+            )
+        )
+
+    def create_presentation_overlay(
+        self,
+        *,
+        scene_name: str,
+        source_name: str = DEFAULT_PRESENTATION_OVERLAY_SOURCE_NAME,
+        anchor: str = "top_right",
+        opacity: int = 88,
+        margin: int = 48,
+        width: int = 520,
+    ) -> dict[str, object]:
+        scene_name = self._require_name(scene_name)
+        source_name = self._require_name(source_name)
+        self._validate_presentation_layout(anchor, opacity, margin, width)
+        self._select_exact_name(
+            self.list_scenes(),
+            "scenes",
+            "sceneName",
+            scene_name,
+            missing_code="OBS_SCENE_NOT_FOUND",
+        )
+        deadline = self._operation_deadline()
+        accepted = self._checked(
+            "CreatePresentationOverlay",
+            {
+                "sceneName": scene_name,
+                "sourceName": source_name,
+                "anchor": anchor,
+                "opacity": opacity,
+                "margin": margin,
+                "width": width,
+                "capability": "presentation_overlay",
+            },
+            deadline=deadline,
+        )
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        readback = self._get_presentation_overlay(
+            scene_name=scene_name, source_name=source_name, deadline=deadline
+        )
+        if any(
+            readback.get(key) != value
+            for key, value in {
+                "anchor": anchor,
+                "opacity": opacity,
+                "margin": margin,
+                "width": width,
+            }.items()
+        ):
+            raise BridgeError("OBS_POSTCONDITION_FAILED")
+        return {**readback, "verified": True}
+
+    @staticmethod
+    def _validate_presentation_layout(anchor: str, opacity: int, margin: int, width: int) -> None:
+        if (
+            anchor not in AGENT_INPUT_OVERLAY_ANCHORS
+            or type(opacity) is not int
+            or not AGENT_INPUT_OVERLAY_MIN_OPACITY <= opacity <= AGENT_INPUT_OVERLAY_MAX_OPACITY
+            or type(margin) is not int
+            or not AGENT_INPUT_OVERLAY_MIN_MARGIN <= margin <= AGENT_INPUT_OVERLAY_MAX_MARGIN
+            or type(width) is not int
+            or not PRESENTATION_OVERLAY_MIN_WIDTH <= width <= PRESENTATION_OVERLAY_MAX_WIDTH
+        ):
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+
+    def set_presentation_overlay_layout(
+        self,
+        *,
+        scene_name: str,
+        anchor: str,
+        opacity: int,
+        margin: int,
+        width: int,
+        source_name: str = DEFAULT_PRESENTATION_OVERLAY_SOURCE_NAME,
+    ) -> dict[str, object]:
+        scene_name = self._require_name(scene_name)
+        source_name = self._require_name(source_name)
+        self._validate_presentation_layout(anchor, opacity, margin, width)
+        deadline = self._operation_deadline()
+        accepted = self._checked(
+            "SetPresentationOverlayLayout",
+            {
+                "sceneName": scene_name,
+                "sourceName": source_name,
+                "anchor": anchor,
+                "opacity": opacity,
+                "margin": margin,
+                "width": width,
+                "capability": "presentation_overlay",
+            },
+            deadline=deadline,
+        )
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        readback = self._get_presentation_overlay(
+            scene_name=scene_name, source_name=source_name, deadline=deadline
+        )
+        if any(
+            readback.get(key) != value
+            for key, value in {
+                "anchor": anchor,
+                "opacity": opacity,
+                "margin": margin,
+                "width": width,
+            }.items()
+        ):
+            raise BridgeError("OBS_POSTCONDITION_FAILED")
+        return {**readback, "verified": True}
+
+    def update_presentation_overlay(
+        self,
+        *,
+        scene_name: str,
+        title: str,
+        rows: list[dict[str, str]],
+        logo_path: str = "",
+        visible: bool = True,
+        source_name: str = DEFAULT_PRESENTATION_OVERLAY_SOURCE_NAME,
+    ) -> dict[str, object]:
+        scene_name = self._require_name(scene_name)
+        source_name = self._require_name(source_name)
+        if not self._valid_presentation_text(title, 128) or not self._valid_presentation_rows(rows):
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        if type(visible) is not bool:
+            raise BridgeError("OBS_ARGUMENT_INVALID")
+        normalized_logo = ""
+        if logo_path:
+            try:
+                path = Path(logo_path).expanduser().resolve()
+                valid_logo = (
+                    path.is_absolute()
+                    and path.suffix.lower() in PRESENTATION_OVERLAY_IMAGE_SUFFIXES
+                    and path.is_file()
+                    and path.stat().st_size <= 16 * 1024 * 1024
+                )
+            except OSError:
+                valid_logo = False
+            if not valid_logo:
+                raise BridgeError("OBS_ARGUMENT_INVALID")
+            normalized_logo = str(path)
+        rows_json = json.dumps(rows, ensure_ascii=False, separators=(",", ":"))
+        deadline = self._operation_deadline()
+        accepted = self._checked(
+            "UpdatePresentationOverlay",
+            {
+                "sceneName": scene_name,
+                "sourceName": source_name,
+                "title": title,
+                "rowsJson": rows_json,
+                "logoPath": normalized_logo,
+                "visible": visible,
+                "capability": "presentation_overlay",
+            },
+            deadline=deadline,
+        )
+        if accepted.get("accepted") is not True:
+            raise BridgeError("OBS_MUTATION_REJECTED")
+        readback = self._get_presentation_overlay(
+            scene_name=scene_name, source_name=source_name, deadline=deadline
+        )
+        if (
+            readback.get("title") != title
+            or readback.get("rows") != rows
+            or readback.get("logoPath") != normalized_logo
+            or readback.get("visible") is not visible
+        ):
+            raise BridgeError("OBS_POSTCONDITION_FAILED")
+        return {**readback, "verified": True}
+
     def pause_recording(self) -> dict[str, object]:
         return self._recording_mutation("PauseRecording", active=True, paused=True)
 
@@ -2691,6 +2919,58 @@ class ObsControlBridge:
             ):
                 raise BridgeError("OBS_RESPONSE_INVALID")
             return
+        if request_type == "GetPresentationOverlay":
+            allowed = _IDENTITY_KEYS | {
+                "sceneName",
+                "sceneItemId",
+                "sourceName",
+                "sourceKind",
+                "theme",
+                "anchor",
+                "opacity",
+                "margin",
+                "width",
+                "visible",
+                "title",
+                "rowsJson",
+                "logoPath",
+            }
+            rows_json = response.get("rowsJson")
+            try:
+                rows = json.loads(rows_json) if isinstance(rows_json, str) else None
+            except json.JSONDecodeError:
+                rows = None
+            if (
+                set(response) != allowed
+                or not isinstance(response.get("sceneName"), str)
+                or not 1 <= len(response["sceneName"]) <= 256
+                or type(response.get("sceneItemId")) is not int
+                or response["sceneItemId"] <= 0
+                or not isinstance(response.get("sourceName"), str)
+                or not 1 <= len(response["sourceName"]) <= 256
+                or response.get("sourceKind") != PRESENTATION_OVERLAY_SOURCE_KIND
+                or response.get("theme") != PRESENTATION_OVERLAY_THEME
+                or response.get("anchor") not in AGENT_INPUT_OVERLAY_ANCHORS | {"custom"}
+                or type(response.get("opacity")) is not int
+                or not AGENT_INPUT_OVERLAY_MIN_OPACITY
+                <= response["opacity"]
+                <= AGENT_INPUT_OVERLAY_MAX_OPACITY
+                or type(response.get("margin")) is not int
+                or not AGENT_INPUT_OVERLAY_MIN_MARGIN
+                <= response["margin"]
+                <= AGENT_INPUT_OVERLAY_MAX_MARGIN
+                or type(response.get("width")) is not int
+                or not PRESENTATION_OVERLAY_MIN_WIDTH
+                <= response["width"]
+                <= PRESENTATION_OVERLAY_MAX_WIDTH
+                or type(response.get("visible")) is not bool
+                or not ObsControlBridge._valid_presentation_text(response.get("title"), 128)
+                or not ObsControlBridge._valid_presentation_rows(rows)
+                or not isinstance(response.get("logoPath"), str)
+                or len(response["logoPath"]) > 4096
+            ):
+                raise BridgeError("OBS_RESPONSE_INVALID")
+            return
         if request_type == "GetSceneRecordingSession":
             allowed = _IDENTITY_KEYS | {
                 "sessionId",
@@ -3347,6 +3627,9 @@ class ObsControlBridge:
             "SetAgentInputOverlayLayout",
             "EmitAgentInputActivity",
             "ClearAgentInputOverlay",
+            "CreatePresentationOverlay",
+            "SetPresentationOverlayLayout",
+            "UpdatePresentationOverlay",
             "StartSceneRecordings",
             "StopSceneRecordings",
             "CreateSource",

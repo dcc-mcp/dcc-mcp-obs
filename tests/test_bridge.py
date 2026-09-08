@@ -380,6 +380,74 @@ def test_agent_input_overlay_layout_rejects_unsafe_values(layout: dict[str, obje
         )
 
 
+def test_update_presentation_overlay_supports_local_logo_and_bounded_rows(tmp_path) -> None:
+    logo = tmp_path / "training-logo.png"
+    logo.write_bytes(b"\x89PNG\r\n\x1a\n")
+    rows = [
+        {"label": "Opponent", "value": "Guangzhi"},
+        {"label": "Attempt", "value": "7"},
+        {"label": "Level", "value": "8"},
+    ]
+    readback = {
+        **IDENTITY,
+        "sceneName": "RL - Game 1",
+        "sceneItemId": 43,
+        "sourceName": "DCC-MCP Presentation",
+        "sourceKind": "dcc_mcp_presentation_overlay",
+        "theme": "dcc_mcp_dark",
+        "anchor": "top_right",
+        "opacity": 88,
+        "margin": 48,
+        "width": 520,
+        "visible": True,
+        "title": "Boss Training",
+        "rowsJson": json.dumps(rows, ensure_ascii=False, separators=(",", ":")),
+        "logoPath": str(logo.resolve()),
+    }
+    transport = FakeTransport(
+        [
+            {**IDENTITY, "ready": True},
+            {**IDENTITY, "accepted": True, "eventSequence": 8},
+            {**readback, "eventSequence": 9},
+        ]
+    )
+    bridge = ObsControlBridge(transport, expected_pid=4242)
+
+    result = bridge.update_presentation_overlay(
+        scene_name="RL - Game 1",
+        title="Boss Training",
+        rows=rows,
+        logo_path=str(logo),
+        visible=True,
+    )
+
+    assert result["verified"] is True
+    assert result["rows"] == rows
+    assert transport.requests[1][0] == "UpdatePresentationOverlay"
+    assert transport.requests[1][1]["capability"] == "presentation_overlay"
+    assert transport.requests[1][1]["logoPath"] == str(logo.resolve())
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [{"label": "x", "value": "y"}] * 9,
+        [{"label": "x" * 33, "value": "y"}],
+        [{"label": "x", "value": "y" * 65}],
+        [{"label": "x", "value": "y", "unexpected": "z"}],
+    ],
+)
+def test_presentation_overlay_rejects_unbounded_rows(rows) -> None:
+    bridge = ObsControlBridge(FakeTransport([{**IDENTITY, "ready": True}]), expected_pid=4242)
+
+    with pytest.raises(BridgeError, match="OBS_ARGUMENT_INVALID"):
+        bridge.update_presentation_overlay(
+            scene_name="RL - Game 1",
+            title="Boss Training",
+            rows=rows,
+        )
+
+
 def test_emit_agent_shortcut_uses_semantic_keys_and_exact_activity_readback() -> None:
     transport = FakeTransport(
         [

@@ -39,6 +39,7 @@
 
 #include "obs-websocket-api.h"
 #include "agent-input-overlay.hpp"
+#include "presentation-overlay.hpp"
 #include "dcc-mcp-menu.hpp"
 #include "recording-timecode.hpp"
 #include "scene-recording-session.hpp"
@@ -265,6 +266,10 @@ enum class UiOperation {
 	SetAgentInputOverlayLayout,
 	EmitAgentInputActivity,
 	ClearAgentInputOverlay,
+	CreatePresentationOverlay,
+	GetPresentationOverlay,
+	SetPresentationOverlayLayout,
+	UpdatePresentationOverlay,
 	RequestGracefulShutdown,
 	RecordingStatus,
 	StartRecording,
@@ -349,6 +354,8 @@ struct UiState {
 	std::string overlay_anchor;
 	int overlay_opacity = 78;
 	int overlay_margin = 48;
+	dcc_mcp_obs::PresentationOverlayLayout presentation_overlay_layout;
+	dcc_mcp_obs::PresentationOverlayContent presentation_overlay_content;
 	dcc_mcp_obs::AgentInputActivity agent_input_activity;
 	dcc_mcp_obs::TypedSourceRequest typed_source_request;
 	std::vector<dcc_mcp_obs::SceneRecordingSpec> scene_recording_specs;
@@ -1413,6 +1420,9 @@ void execute_ui_operation(void *private_data)
 		state->operation == UiOperation::SetAgentInputOverlayLayout ||
 		state->operation == UiOperation::EmitAgentInputActivity ||
 		state->operation == UiOperation::ClearAgentInputOverlay ||
+		state->operation == UiOperation::CreatePresentationOverlay ||
+		state->operation == UiOperation::SetPresentationOverlayLayout ||
+		state->operation == UiOperation::UpdatePresentationOverlay ||
 		state->operation == UiOperation::RequestGracefulShutdown ||
 		state->operation == UiOperation::StartRecording || state->operation == UiOperation::StopRecording ||
 		state->operation == UiOperation::PauseRecording || state->operation == UiOperation::ResumeRecording ||
@@ -2142,6 +2152,36 @@ void execute_ui_operation(void *private_data)
 				result = dcc_mcp_obs::clear_agent_input_overlay(state->scene_name, state->source_name);
 			}
 			break;
+		case UiOperation::CreatePresentationOverlay:
+			if (!state->gate.claim_mutation(state->deadline)) {
+				result = obs_data_create();
+				set_error(result, "OBS_UI_TIMEOUT");
+			} else {
+				result = dcc_mcp_obs::create_presentation_overlay(state->scene_name, state->source_name,
+										  state->presentation_overlay_layout);
+			}
+			break;
+		case UiOperation::GetPresentationOverlay:
+			result = dcc_mcp_obs::get_presentation_overlay(state->scene_name, state->source_name);
+			break;
+		case UiOperation::SetPresentationOverlayLayout:
+			if (!state->gate.claim_mutation(state->deadline)) {
+				result = obs_data_create();
+				set_error(result, "OBS_UI_TIMEOUT");
+			} else {
+				result = dcc_mcp_obs::set_presentation_overlay_layout(
+					state->scene_name, state->source_name, state->presentation_overlay_layout);
+			}
+			break;
+		case UiOperation::UpdatePresentationOverlay:
+			if (!state->gate.claim_mutation(state->deadline)) {
+				result = obs_data_create();
+				set_error(result, "OBS_UI_TIMEOUT");
+			} else {
+				result = dcc_mcp_obs::update_presentation_overlay(state->scene_name, state->source_name,
+										  state->presentation_overlay_content);
+			}
+			break;
 		case UiOperation::RequestGracefulShutdown: {
 			result = obs_data_create();
 			const bool recording_active = obs_frontend_recording_active();
@@ -2522,6 +2562,8 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, cons
 		      const WindowCaptureBinding &window_capture, const WindowCaptureBinding &expected_window_capture,
 		      const std::string &overlay_anchor, int overlay_opacity, int overlay_margin,
 		      const dcc_mcp_obs::AgentInputActivity &agent_input_activity,
+		      const dcc_mcp_obs::PresentationOverlayLayout &presentation_overlay_layout,
+		      const dcc_mcp_obs::PresentationOverlayContent &presentation_overlay_content,
 		      const std::vector<dcc_mcp_obs::SceneRecordingSpec> &scene_recording_specs,
 		      const std::string &scene_recording_session_id, const std::string &recording_output_directory,
 		      const dcc_mcp_obs::TypedSourceRequest &typed_source_request, uint64_t deadline_at_ms,
@@ -2541,6 +2583,8 @@ bool run_ui_operation(UiOperation operation, const std::string &scene_name, cons
 	state->overlay_opacity = overlay_opacity;
 	state->overlay_margin = overlay_margin;
 	state->agent_input_activity = agent_input_activity;
+	state->presentation_overlay_layout = presentation_overlay_layout;
+	state->presentation_overlay_content = presentation_overlay_content;
 	state->scene_recording_specs = scene_recording_specs;
 	state->scene_recording_session_id = scene_recording_session_id;
 	state->recording_output_directory = recording_output_directory;
@@ -2671,6 +2715,14 @@ UiOperation operation_for(const std::string &request)
 		return UiOperation::EmitAgentInputActivity;
 	if (request == "ClearAgentInputOverlay")
 		return UiOperation::ClearAgentInputOverlay;
+	if (request == "CreatePresentationOverlay")
+		return UiOperation::CreatePresentationOverlay;
+	if (request == "GetPresentationOverlay")
+		return UiOperation::GetPresentationOverlay;
+	if (request == "SetPresentationOverlayLayout")
+		return UiOperation::SetPresentationOverlayLayout;
+	if (request == "UpdatePresentationOverlay")
+		return UiOperation::UpdatePresentationOverlay;
 	if (request == "RequestGracefulShutdown")
 		return UiOperation::RequestGracefulShutdown;
 	if (request == "GetRecordingStatus")
@@ -2765,6 +2817,8 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 	WindowCaptureBinding window_capture;
 	WindowCaptureBinding expected_window_capture;
 	dcc_mcp_obs::AgentInputActivity agent_input_activity;
+	dcc_mcp_obs::PresentationOverlayLayout presentation_overlay_layout;
+	dcc_mcp_obs::PresentationOverlayContent presentation_overlay_content;
 	dcc_mcp_obs::TypedSourceRequest typed_source_request;
 	std::vector<dcc_mcp_obs::SceneRecordingSpec> scene_recording_specs;
 	std::string scene_recording_session_id;
@@ -2973,7 +3027,9 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 		request_name == "TriggerTransition" || request_name == "SetCurrentPreviewScene" ||
 		request_name == "CreateAgentInputOverlay" || request_name == "GetAgentInputOverlay" ||
 		request_name == "SetAgentInputOverlayLayout" || request_name == "EmitAgentInputActivity" ||
-		request_name == "ClearAgentInputOverlay";
+		request_name == "ClearAgentInputOverlay" || request_name == "CreatePresentationOverlay" ||
+		request_name == "GetPresentationOverlay" || request_name == "SetPresentationOverlayLayout" ||
+		request_name == "UpdatePresentationOverlay";
 	if (scene_request && request_data != nullptr) {
 		const char *value = obs_data_get_string(request_data, "sceneName");
 		if (value != nullptr)
@@ -3092,6 +3148,55 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 	    (scene_name.empty() || source_name.empty() || scene_name.size() > 256 || source_name.size() > 256)) {
 		set_error(response_data, "OBS_ARGUMENT_INVALID");
 		return;
+	}
+	const bool presentation_overlay_request =
+		request_name == "CreatePresentationOverlay" || request_name == "GetPresentationOverlay" ||
+		request_name == "SetPresentationOverlayLayout" || request_name == "UpdatePresentationOverlay";
+	if (presentation_overlay_request &&
+	    (scene_name.empty() || source_name.empty() || scene_name.size() > 256 || source_name.size() > 256)) {
+		set_error(response_data, "OBS_ARGUMENT_INVALID");
+		return;
+	}
+	if (request_name == "CreatePresentationOverlay" || request_name == "SetPresentationOverlayLayout") {
+		const char *anchor = request_data != nullptr ? obs_data_get_string(request_data, "anchor") : nullptr;
+		presentation_overlay_layout.anchor = anchor != nullptr ? anchor : "";
+		presentation_overlay_layout.opacity =
+			request_data != nullptr ? static_cast<int>(obs_data_get_int(request_data, "opacity")) : 0;
+		presentation_overlay_layout.margin =
+			request_data != nullptr ? static_cast<int>(obs_data_get_int(request_data, "margin")) : 0;
+		presentation_overlay_layout.width =
+			request_data != nullptr ? static_cast<int>(obs_data_get_int(request_data, "width")) : 0;
+		const bool valid_anchor = presentation_overlay_layout.anchor == "top_left" ||
+					  presentation_overlay_layout.anchor == "top_center" ||
+					  presentation_overlay_layout.anchor == "top_right" ||
+					  presentation_overlay_layout.anchor == "center_left" ||
+					  presentation_overlay_layout.anchor == "center_right" ||
+					  presentation_overlay_layout.anchor == "bottom_left" ||
+					  presentation_overlay_layout.anchor == "bottom_center" ||
+					  presentation_overlay_layout.anchor == "bottom_right";
+		if (!valid_anchor || presentation_overlay_layout.opacity < 20 ||
+		    presentation_overlay_layout.opacity > 100 || presentation_overlay_layout.margin < 8 ||
+		    presentation_overlay_layout.margin > 160 || presentation_overlay_layout.width < 360 ||
+		    presentation_overlay_layout.width > 960) {
+			set_error(response_data, "OBS_ARGUMENT_INVALID");
+			return;
+		}
+	}
+	if (request_name == "UpdatePresentationOverlay") {
+		const char *title = request_data != nullptr ? obs_data_get_string(request_data, "title") : nullptr;
+		const char *rows_json = request_data != nullptr ? obs_data_get_string(request_data, "rowsJson")
+								: nullptr;
+		const char *logo_path = request_data != nullptr ? obs_data_get_string(request_data, "logoPath")
+								: nullptr;
+		presentation_overlay_content.title = title != nullptr ? title : "";
+		presentation_overlay_content.rows_json = rows_json != nullptr ? rows_json : "";
+		presentation_overlay_content.logo_path = logo_path != nullptr ? logo_path : "";
+		presentation_overlay_content.visible = request_data != nullptr &&
+						       obs_data_get_bool(request_data, "visible");
+		if (!dcc_mcp_obs::validate_presentation_overlay_content(presentation_overlay_content)) {
+			set_error(response_data, "OBS_ARGUMENT_INVALID");
+			return;
+		}
 	}
 	if (request_name == "CreateAgentInputOverlay" || request_name == "SetAgentInputOverlayLayout") {
 		const char *value = request_data != nullptr ? obs_data_get_string(request_data, "anchor") : nullptr;
@@ -3223,6 +3328,9 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 	else if (request_name == "CreateAgentInputOverlay" || request_name == "SetAgentInputOverlayLayout" ||
 		 request_name == "EmitAgentInputActivity" || request_name == "ClearAgentInputOverlay")
 		required_capability = "agent_input_overlay";
+	else if (request_name == "CreatePresentationOverlay" || request_name == "SetPresentationOverlayLayout" ||
+		 request_name == "UpdatePresentationOverlay")
+		required_capability = "presentation_overlay";
 	if (required_capability != nullptr) {
 		const char *capability = request_data != nullptr ? obs_data_get_string(request_data, "capability")
 								 : nullptr;
@@ -3282,8 +3390,9 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 			 scene_item_id, enabled, studio_enabled, has_duration, duration_ms, has_pos, has_scale,
 			 has_rotation, pos_x, pos_y, scale_x, scale_y, rotation, window_capture,
 			 expected_window_capture, overlay_anchor, overlay_opacity, overlay_margin, agent_input_activity,
-			 scene_recording_specs, scene_recording_session_id, recording_output_directory,
-			 typed_source_request, deadline_at_ms, response_data);
+			 presentation_overlay_layout, presentation_overlay_content, scene_recording_specs,
+			 scene_recording_session_id, recording_output_directory, typed_source_request, deadline_at_ms,
+			 response_data);
 	if (request_name == "RequestGracefulShutdown" && obs_data_get_bool(response_data, "shutdownScheduled"))
 		obs_queue_task(OBS_TASK_UI, request_frontend_exit, nullptr, false);
 }
@@ -3318,6 +3427,10 @@ constexpr const char *kRequests[] = {
 	"SetAgentInputOverlayLayout",
 	"EmitAgentInputActivity",
 	"ClearAgentInputOverlay",
+	"CreatePresentationOverlay",
+	"GetPresentationOverlay",
+	"SetPresentationOverlayLayout",
+	"UpdatePresentationOverlay",
 	"ListScenes",
 	"SetCurrentScene",
 	"GetCurrentScene",
@@ -3432,6 +3545,7 @@ bool obs_module_load(void)
 	g_instance_id = make_instance_id();
 	g_scene_recording_sessions = std::make_unique<dcc_mcp_obs::SceneRecordingSessionManager>();
 	dcc_mcp_obs::register_agent_input_overlay_source();
+	dcc_mcp_obs::register_presentation_overlay_source();
 	obs_frontend_add_event_callback(frontend_event, nullptr);
 	blog(LOG_INFO, "dcc-mcp-obs native plugin loaded");
 	return true;
