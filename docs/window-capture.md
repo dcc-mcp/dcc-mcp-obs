@@ -6,6 +6,8 @@ surface. It does not forward arbitrary OBS input settings.
 `create_window_capture_source` requires an exact scene name, source name,
 process ID, window handle, and current window title. It also accepts one typed
 capture method: `automatic`, `bitblt`, or `windows_graphics_capture`. The
+caller can also set the typed `capture_audio` boolean to capture audio from
+that exact application in normal OBS Program recordings. The
 native plugin then:
 
 1. verifies that the HWND is live, visible, and owned by the requested PID;
@@ -47,11 +49,19 @@ recording. It returns the current program scene as a fixed 320x180 in-memory
 PNG with byte length and SHA-256; it accepts no source name or filesystem path.
 Inspect that frame and fail closed on black or incorrect content.
 
-`set_window_capture_method` changes only the capture method on an existing
+`set_window_capture_method` changes typed capture settings on an existing
 exactly bound source. The plugin verifies the scene item, private binding
 metadata, live process object, HWND, title, class, executable, cursor setting,
 client-area setting, visibility, and current source kind before mutation. It
-then reads the source back; a failed postcondition rolls the method back.
+then reads the source back; a failed postcondition rolls both capture method
+and application-audio state back. `set_window_capture_audio` provides a clear
+entry point for toggling the same typed audio setting while requiring the
+caller's current capture method so the update cannot silently change modes.
+
+Window audio is part of the normal OBS source and mixer path. Private
+`start_scene_recordings` sessions remain video-only and continue to use their
+own silent AAC timing track; enabling `capture_audio` does not add audio to
+those independent outputs.
 
 OBS automatic mode chooses BitBlt for window classes outside its WGC allowlist.
 Use explicit `windows_graphics_capture` when a live game window produces a

@@ -131,6 +131,11 @@ contract is version `1.0`: `color_source_v3` exposes only bounded `width`,
 filter, audio, and media mutations use exact names and bounded reconciliation.
 See [typed source controls](docs/typed-source-controls.md).
 
+Windows `window_capture` sources expose a typed `capture_audio` boolean for
+normal Program recordings. Use `set_window_capture_audio` with the exact
+PID/HWND/title binding and current capture method; the plugin reads the setting
+back and rolls it back if verification fails.
+
 For recorded Agent demonstrations, `create_agent_input_overlay` attaches a
 built-in input source to each selected scene. Use a distinct source name per
 simultaneously operating Agent, then `set_agent_input_overlay_layout` can choose

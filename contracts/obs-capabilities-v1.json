@@ -39,18 +39,18 @@
       "domain": "sources",
       "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": ["list_sources", "get_source_identity", "create_source", "rename_source", "remove_source", "list_window_capture_candidates", "restore_window_capture_candidate", "create_window_capture_source", "get_window_capture_source", "rebind_window_capture_source"],
+      "delivered_operations": ["list_sources", "get_source_identity", "create_source", "rename_source", "remove_source", "list_window_capture_candidates", "restore_window_capture_candidate", "create_window_capture_source", "get_window_capture_source", "rebind_window_capture_source", "set_window_capture_method", "set_window_capture_audio"],
       "remaining_operations": [],
-      "dangerous_operations": ["restore_window_capture_candidate", "create_window_capture_source", "rebind_window_capture_source", "create_source", "rename_source", "remove_source"],
+      "dangerous_operations": ["restore_window_capture_candidate", "create_window_capture_source", "rebind_window_capture_source", "set_window_capture_method", "set_window_capture_audio", "create_source", "rename_source", "remove_source"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
     },
     {
       "domain": "inputs",
       "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": ["list_input_kinds", "get_input_settings", "set_input_settings", "list_window_capture_candidates", "restore_window_capture_candidate", "create_window_capture_source", "get_window_capture_source", "rebind_window_capture_source"],
+      "delivered_operations": ["list_input_kinds", "get_input_settings", "set_input_settings", "list_window_capture_candidates", "restore_window_capture_candidate", "create_window_capture_source", "get_window_capture_source", "rebind_window_capture_source", "set_window_capture_method", "set_window_capture_audio"],
       "remaining_operations": [],
-      "dangerous_operations": ["restore_window_capture_candidate", "create_window_capture_source", "rebind_window_capture_source", "set_input_settings"],
+      "dangerous_operations": ["restore_window_capture_candidate", "create_window_capture_source", "rebind_window_capture_source", "set_window_capture_method", "set_window_capture_audio", "set_input_settings"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
     },
     {
@@ -84,9 +84,9 @@
       "domain": "audio",
       "status": "delivered",
       "authority": "native_plugin",
-      "delivered_operations": ["get_source_volume", "set_source_volume", "get_source_mute", "set_source_mute", "get_source_monitor_type", "set_source_monitor_type"],
+      "delivered_operations": ["get_source_volume", "set_source_volume", "get_source_mute", "set_source_mute", "get_source_monitor_type", "set_source_monitor_type", "set_window_capture_audio"],
       "remaining_operations": [],
-      "dangerous_operations": ["set_source_volume", "set_source_mute", "set_source_monitor_type"],
+      "dangerous_operations": ["set_source_volume", "set_source_mute", "set_source_monitor_type", "set_window_capture_audio"],
       "tracking_issue": "https://github.com/dcc-mcp/dcc-mcp-obs/issues/5"
     },
     {

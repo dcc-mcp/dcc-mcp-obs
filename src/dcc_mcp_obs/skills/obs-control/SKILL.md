@@ -105,7 +105,11 @@ new identity; the native plugin owns the transaction and rolls back a failed
 postcondition. The optional `capture_method` is limited to `automatic`,
 `bitblt`, and `windows_graphics_capture`; use `set_window_capture_method` to
 change an existing exact source when automatic BitBlt produces a black or
-incorrect game frame. These tools never accept arbitrary OBS input settings.
+incorrect game frame. Set `capture_audio=true` when creating or rebinding a
+source to include that exact application's audio in normal Program recordings,
+or call `set_window_capture_audio` with the exact binding and current method.
+Independent scene recordings remain video-only. These tools never accept
+arbitrary OBS input settings.
 See [the window-capture reference](../../../docs/window-capture.md).
 
 Call `capture_program_frame` before every long recording and inspect the

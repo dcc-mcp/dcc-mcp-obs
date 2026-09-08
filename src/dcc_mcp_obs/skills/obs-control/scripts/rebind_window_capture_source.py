@@ -1,9 +1,9 @@
-from dcc_mcp_core.skill import skill_entry, skill_success
+from dcc_mcp_core.skill import skill_success
 
-from dcc_mcp_obs.skills.obs_control.scripts._client import obs_bridge
+from dcc_mcp_obs.skills.obs_control.scripts._client import obs_bridge, obs_skill_entry
 
 
-@skill_entry
+@obs_skill_entry
 def main(
     scene_name,
     source_name,
@@ -15,6 +15,7 @@ def main(
     window_title,
     capture_cursor=True,
     client_area=True,
+    capture_audio=False,
     capture_method="automatic",
     enabled=True,
     **_kwargs,
@@ -33,6 +34,7 @@ def main(
                 window_title=window_title,
                 capture_cursor=capture_cursor,
                 client_area=client_area,
+                capture_audio=capture_audio,
                 capture_method=capture_method,
                 enabled=enabled,
             ),

@@ -10,26 +10,26 @@ def main(
     process_id,
     window_handle,
     window_title,
+    capture_audio,
+    capture_method,
     capture_cursor=True,
     client_area=True,
-    capture_audio=False,
-    capture_method="automatic",
     enabled=True,
     **_kwargs,
 ):
     with obs_bridge() as bridge:
         return skill_success(
-            "Window capture source created and exact binding verified.",
-            **bridge.create_window_capture_source(
+            "Window capture audio updated and exact binding verified.",
+            **bridge.set_window_capture_audio(
                 scene_name=scene_name,
                 source_name=source_name,
                 process_id=process_id,
                 window_handle=window_handle,
                 window_title=window_title,
-                capture_cursor=capture_cursor,
-                client_area=client_area,
                 capture_audio=capture_audio,
                 capture_method=capture_method,
+                capture_cursor=capture_cursor,
+                client_area=client_area,
                 enabled=enabled,
             ),
         )

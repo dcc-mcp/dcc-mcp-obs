@@ -78,6 +78,7 @@ PUBLIC_DOWNSTREAM_ERRORS = frozenset(
         "OBS_WINDOW_NOT_FOUND",
         "OBS_SCHEMA_UNSUPPORTED",
         "OBS_SOURCE_KIND_UNSUPPORTED",
+        "OBS_SOURCE_ALREADY_EXISTS",
         "OBS_FILTER_KIND_UNSUPPORTED",
         "OBS_PROPERTY_NOT_FOUND",
         "OBS_MEDIA_NOT_CONTROLLABLE",
@@ -406,6 +407,7 @@ class ObsControlBridge:
         window_title: str,
         capture_cursor: bool = True,
         client_area: bool = True,
+        capture_audio: bool = False,
         capture_method: str = "automatic",
         enabled: bool = True,
     ) -> dict[str, object]:
@@ -417,6 +419,7 @@ class ObsControlBridge:
             window_title=window_title,
             capture_cursor=capture_cursor,
             client_area=client_area,
+            capture_audio=capture_audio,
             capture_method=capture_method,
             enabled=enabled,
         )
@@ -518,6 +521,7 @@ class ObsControlBridge:
         window_title: str,
         capture_cursor: bool = True,
         client_area: bool = True,
+        capture_audio: bool = False,
         capture_method: str = "automatic",
         enabled: bool = True,
     ) -> dict[str, object]:
@@ -529,6 +533,7 @@ class ObsControlBridge:
             window_title=window_title,
             capture_cursor=capture_cursor,
             client_area=client_area,
+            capture_audio=capture_audio,
             capture_method=capture_method,
             enabled=enabled,
         )
@@ -547,6 +552,7 @@ class ObsControlBridge:
         window_title: str,
         capture_cursor: bool = True,
         client_area: bool = True,
+        capture_audio: bool = False,
         capture_method: str = "automatic",
         enabled: bool = True,
     ) -> dict[str, object]:
@@ -558,6 +564,7 @@ class ObsControlBridge:
             window_title=expected_window_title,
             capture_cursor=capture_cursor,
             client_area=client_area,
+            capture_audio=capture_audio,
             capture_method=capture_method,
             enabled=enabled,
         )
@@ -569,6 +576,7 @@ class ObsControlBridge:
             window_title=window_title,
             capture_cursor=capture_cursor,
             client_area=client_area,
+            capture_audio=capture_audio,
             capture_method=capture_method,
             enabled=enabled,
         )
@@ -598,6 +606,7 @@ class ObsControlBridge:
         window_title: str,
         capture_cursor: bool = True,
         client_area: bool = True,
+        capture_audio: bool = False,
         capture_method: str,
         enabled: bool = True,
     ) -> dict[str, object]:
@@ -609,6 +618,7 @@ class ObsControlBridge:
             window_title=window_title,
             capture_cursor=capture_cursor,
             client_area=client_area,
+            capture_audio=capture_audio,
             capture_method=capture_method,
             enabled=enabled,
         )
@@ -617,6 +627,35 @@ class ObsControlBridge:
         if accepted.get("accepted") is not True:
             raise BridgeError("OBS_MUTATION_REJECTED")
         return self._readback_window_capture(payload, deadline=deadline)
+
+    def set_window_capture_audio(
+        self,
+        *,
+        scene_name: str,
+        source_name: str,
+        process_id: int,
+        window_handle: int,
+        window_title: str,
+        capture_audio: bool,
+        capture_method: str,
+        capture_cursor: bool = True,
+        client_area: bool = True,
+        enabled: bool = True,
+    ) -> dict[str, object]:
+        """Toggle application audio on one exact window-capture binding."""
+
+        return self.set_window_capture_method(
+            scene_name=scene_name,
+            source_name=source_name,
+            process_id=process_id,
+            window_handle=window_handle,
+            window_title=window_title,
+            capture_cursor=capture_cursor,
+            client_area=client_area,
+            capture_audio=capture_audio,
+            capture_method=capture_method,
+            enabled=enabled,
+        )
 
     def update_scene_item(
         self,
@@ -1003,6 +1042,7 @@ class ObsControlBridge:
         window_title: str,
         capture_cursor: bool,
         client_area: bool,
+        capture_audio: bool,
         capture_method: str,
         enabled: bool,
     ) -> dict[str, object]:
@@ -1013,7 +1053,10 @@ class ObsControlBridge:
             raise BridgeError("OBS_ARGUMENT_INVALID")
         if type(window_handle) is not int or not 1 <= window_handle < 2**63:
             raise BridgeError("OBS_ARGUMENT_INVALID")
-        if any(type(value) is not bool for value in (capture_cursor, client_area, enabled)):
+        if any(
+            type(value) is not bool
+            for value in (capture_cursor, client_area, capture_audio, enabled)
+        ):
             raise BridgeError("OBS_ARGUMENT_INVALID")
         if type(capture_method) is not str or capture_method not in WINDOW_CAPTURE_METHODS:
             raise BridgeError("OBS_ARGUMENT_INVALID")
@@ -1025,6 +1068,7 @@ class ObsControlBridge:
             "windowTitle": window_title,
             "captureCursor": capture_cursor,
             "clientArea": client_area,
+            "captureAudio": capture_audio,
             "captureMethod": capture_method,
             "enabled": enabled,
             "capability": "window_capture",
@@ -1048,6 +1092,7 @@ class ObsControlBridge:
                         ("windowTitle", "windowTitle"),
                         ("captureCursor", "captureCursor"),
                         ("clientArea", "clientArea"),
+                        ("captureAudio", "captureAudio"),
                         ("captureMethod", "captureMethod"),
                         ("enabled", "enabled"),
                     )
@@ -3301,6 +3346,7 @@ class ObsControlBridge:
                         "executable",
                         "captureCursor",
                         "clientArea",
+                        "captureAudio",
                         "captureMethod",
                         "bindingVerified",
                     }
@@ -3561,6 +3607,7 @@ class ObsControlBridge:
             "executable",
             "captureCursor",
             "clientArea",
+            "captureAudio",
             "captureMethod",
             "bindingVerified",
         }
@@ -3588,6 +3635,7 @@ class ObsControlBridge:
             )
             and type(source.get("captureCursor")) is bool
             and type(source.get("clientArea")) is bool
+            and type(source.get("captureAudio")) is bool
             and source.get("captureMethod") in WINDOW_CAPTURE_METHODS
             and source.get("bindingVerified") is True
             and (not mutation or source.get("accepted") is True)
