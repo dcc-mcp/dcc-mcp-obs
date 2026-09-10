@@ -122,7 +122,10 @@ For normal Program recording, pass an absolute `output_directory` to
 it to use the OBS profile default. After `stop_recording`, continue polling
 `get_recording_status` when `stopPending=true`. Accept an artifact as complete
 only when `outputState=complete`; preserve and recover `stalled` files, and
-reject `empty`, `failed`, or `missing` outcomes.
+reject `empty`, `failed`, or `missing` outcomes. While `outputActive=true`,
+treat a frozen `outputTimecode` and a non-growing `outputBytes` across
+successive `get_recording_status` polls as a stalled encoder/output rather than
+healthy recording, and do not rely on `outputActive` alone.
 
 For simultaneous Agent demonstrations, call `create_agent_input_overlay` once
 per game scene with a distinct source name. Inspect each game frame and use

@@ -40,6 +40,7 @@
 #include "obs-websocket-api.h"
 #include "agent-input-overlay.hpp"
 #include "dcc-mcp-menu.hpp"
+#include "recording-timecode.hpp"
 #include "scene-recording-session.hpp"
 #include "sidecar-launcher.hpp"
 #include "typed-source-control.hpp"
@@ -1215,6 +1216,9 @@ obs_data_t *recording_status()
 	obs_data_set_string(result, "outputPath", "");
 	obs_data_set_int(result, "totalBytes", 0);
 	obs_data_set_int(result, "totalFrames", 0);
+	obs_data_set_int(result, "outputBytes", 0);
+	obs_data_set_int(result, "outputDuration", 0);
+	obs_data_set_string(result, "outputTimecode", "00:00:00.000");
 	obs_data_set_string(result, "lastError", "");
 	obs_data_set_string(result, "outputState",
 			    active ? (g_recording_stop_requested.load() ? "finalizing" : "recording") : "idle");
@@ -1240,8 +1244,17 @@ obs_data_t *recording_status()
 		}
 		const auto total_bytes = std::min<uint64_t>(obs_output_get_total_bytes(output),
 							    static_cast<uint64_t>(std::numeric_limits<int64_t>::max()));
+		const auto total_frames = static_cast<uint64_t>(std::max(0, obs_output_get_total_frames(output)));
 		obs_data_set_int(result, "totalBytes", static_cast<long long>(total_bytes));
-		obs_data_set_int(result, "totalFrames", std::max(0, obs_output_get_total_frames(output)));
+		obs_data_set_int(result, "totalFrames", static_cast<long long>(total_frames));
+		obs_data_set_int(result, "outputBytes", static_cast<long long>(total_bytes));
+		obs_video_info video{};
+		const uint64_t output_duration_ms =
+			obs_get_video_info(&video)
+				? dcc_mcp_obs::duration_ms_from_frames(total_frames, video.fps_num, video.fps_den)
+				: 0;
+		obs_data_set_int(result, "outputDuration", static_cast<long long>(output_duration_ms));
+		obs_data_set_string(result, "outputTimecode", dcc_mcp_obs::format_timecode(output_duration_ms).c_str());
 		const char *last_error_value = obs_output_get_last_error(output);
 		const std::string last_error = last_error_value != nullptr ? last_error_value : "";
 		set_bounded_string("lastError", last_error.c_str(), 4096);
