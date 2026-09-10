@@ -71,6 +71,28 @@ jobs:
           "$RUNNER_TEMP/dcc-mcp-cli/dcc-mcp-cli" lint src/dcc_mcp_obs/skills/obs-control \
             --warnings-as-errors --output json
 
+  agent-quickstart-contract:
+    name: Agent quickstart contract
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: dcc-mcp/dcc-mcp-agent-plugins
+          ref: 54b9d46a9fcefab1ed3a6aafc18da6ab4198ad25
+          path: _agent_plugins
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        with:
+          python-version: "3.12"
+      - name: Verify generated Agent quickstart
+        run: >-
+          python _agent_plugins/scripts/sync_adapter_readme.py
+          --repository dcc-mcp-obs
+          --readme README.md
+          --registry _agent_plugins/.github/adapter-readme-quickstarts.json
+          --template _agent_plugins/templates/adapter-readme-agent-quickstart.md
+          --check
+
   python-package:
     name: Python package and installed-wheel smoke
     runs-on: ubuntu-24.04

@@ -13,6 +13,35 @@ OBS WebSocket is the authenticated transport. It is not used as an
 unrestricted request escape hatch, and this product exposes no arbitrary
 script or raw WebSocket tool.
 
+<!-- dcc-mcp-agent-quickstart:start -->
+## Use OBS Studio with AI agents
+
+Install the official DCC-MCP Agent Skill. Codex users can use the native plugin
+marketplace:
+
+```powershell
+codex plugin marketplace add dcc-mcp/dcc-mcp-agent-plugins
+codex plugin add dcc-mcp@dcc-mcp
+```
+
+For Claude Code, CodeBuddy, Cursor, Gemini CLI, and other supported agents, use
+the [official installation guide](https://github.com/dcc-mcp/dcc-mcp-agent-plugins#install). Start OBS Studio,
+enable this adapter, and verify that the running instance is registered:
+
+```powershell
+dcc-mcp-cli list
+```
+
+Then ask your agent:
+
+```text
+Use dcc-mcp to inspect the current OBS scene and streaming status.
+```
+
+The list must include `dcc_type=obs`. If it does not, follow the
+[connection troubleshooting guide](https://github.com/dcc-mcp/dcc-mcp-agent-plugins#adapter-connection-troubleshooting).
+<!-- dcc-mcp-agent-quickstart:end -->
+
 ## First slice
 
 - Exact native plugin, OBS version, PID, instance ID, readiness, and event sequence
