@@ -78,6 +78,9 @@ def test_recording_status_accepts_bounded_output_diagnostics() -> None:
                 "outputPath": "C:/Videos/session.mp4",
                 "totalBytes": 4_224_797_993,
                 "totalFrames": 161_602,
+                "outputBytes": 4_224_797_993,
+                "outputDuration": 2_693_366,
+                "outputTimecode": "00:44:53.366",
                 "lastError": "",
                 "eventSequence": 9,
             },
@@ -90,6 +93,9 @@ def test_recording_status_accepts_bounded_output_diagnostics() -> None:
     assert result["outputPath"] == "C:/Videos/session.mp4"
     assert result["totalBytes"] == 4_224_797_993
     assert result["totalFrames"] == 161_602
+    assert result["outputBytes"] == 4_224_797_993
+    assert result["outputDuration"] == 2_693_366
+    assert result["outputTimecode"] == "00:44:53.366"
     assert result["lastError"] == ""
 
 
@@ -124,8 +130,12 @@ def test_recording_status_preserves_stalled_actual_path_and_bytes() -> None:
     [
         ("outputPath", "x" * 4097),
         ("lastError", "x" * 4097),
+        ("outputTimecode", "x" * 33),
+        ("outputTimecode", 42),
         ("totalBytes", -1),
         ("totalFrames", True),
+        ("outputBytes", -1),
+        ("outputDuration", True),
     ],
 )
 def test_recording_status_rejects_invalid_output_diagnostics(field: str, value: object) -> None:
@@ -139,6 +149,9 @@ def test_recording_status_rejects_invalid_output_diagnostics(field: str, value: 
         "outputPath": "C:/Videos/session.mp4",
         "totalBytes": 1024,
         "totalFrames": 30,
+        "outputBytes": 1024,
+        "outputDuration": 500,
+        "outputTimecode": "00:00:00.500",
         "lastError": "",
         "eventSequence": 9,
     }

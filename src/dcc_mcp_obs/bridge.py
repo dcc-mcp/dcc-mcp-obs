@@ -3119,8 +3119,9 @@ class ObsControlBridge:
                 "outputKind": 256,
                 "outputPath": 4096,
                 "lastError": 4096,
+                "outputTimecode": 32,
             }
-            diagnostic_integers = {"totalBytes", "totalFrames"}
+            diagnostic_integers = {"totalBytes", "totalFrames", "outputBytes", "outputDuration"}
             allowed = (
                 _IDENTITY_KEYS
                 | {"outputActive", "outputPaused", "outputState"}
