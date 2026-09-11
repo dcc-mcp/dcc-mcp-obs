@@ -425,6 +425,7 @@ tools:
             properties:
               scene_name: {type: string, minLength: 1, maxLength: 256}
               file_name_prefix: {type: string, minLength: 1, maxLength: 96, pattern: '^[^<>:"/\\|?*]+[^<>:"/\\|?*. ]$|^[^<>:"/\\|?*. ]$'}
+              file_name: {type: string, minLength: 1, maxLength: 256, pattern: '^[^<>:"/\\|?*]+[^<>:"/\\|?*. ]$|^[^<>:"/\\|?*. ]$'}
               output_directory: {type: string, minLength: 1, maxLength: 4096}
               application_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.:-]+$'}
               run_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.:-]+$'}
