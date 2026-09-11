@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.0](https://github.com/dcc-mcp/dcc-mcp-obs/compare/v1.3.0...v1.4.0) (2026-09-11)
+
+
+### Features
+
+* add persistent training data overlays ([8920ee3](https://github.com/dcc-mcp/dcc-mcp-obs/commit/8920ee30883d2534c4ea3aed4b590b8c61d2ddad))
+
+
+### Bug Fixes
+
+* expose recording progress diagnostics for stalled-output detection ([ead9fbf](https://github.com/dcc-mcp/dcc-mcp-obs/commit/ead9fbfcff2bc0c0b9f73b2569586184a25d5b01))
+* remove unused overlay constants ([b82069c](https://github.com/dcc-mcp/dcc-mcp-obs/commit/b82069c2b69f1cbd627d018bbb9e6eff55eccac0))
+* satisfy macOS overlay build warnings ([8641b6d](https://github.com/dcc-mcp/dcc-mcp-obs/commit/8641b6d67a7db4d5c5544afdbd580be11a318360))
+* support verified cross-version plugin upgrades ([0b2b1bb](https://github.com/dcc-mcp/dcc-mcp-obs/commit/0b2b1bb6aa72401bd7f5a53ce14cc6c7eec27d8a))
+
 ## [1.3.0](https://github.com/dcc-mcp/dcc-mcp-obs/compare/v1.2.0...v1.3.0) (2026-09-08)
 
 

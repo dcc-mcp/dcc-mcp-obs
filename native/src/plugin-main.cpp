@@ -53,7 +53,7 @@ OBS_MODULE_USE_DEFAULT_LOCALE("dcc-mcp-obs", "en-US")
 namespace {
 
 constexpr char kVendorName[] = "dcc-mcp-obs";
-constexpr char kPluginVersion[] = "1.3.0"; // x-release-please-version
+constexpr char kPluginVersion[] = "1.4.0"; // x-release-please-version
 constexpr auto kUiTimeout = std::chrono::seconds(5);
 constexpr size_t kMaxScenes = 256;
 constexpr size_t kMaxTransitions = 128;
