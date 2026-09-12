@@ -1,5 +1,15 @@
 # Installation and lifecycle
 
+## Shared runtime deployment
+
+The preferred deployment installs one signed `dcc-mcp-runtime` per machine and
+places the versioned `dcc-mcp-obs` wheel in its adapter bundle. Use
+`dcc-mcp-obs-runtime` (or `python -m dcc_mcp_obs.runtime_entry`) to start the
+sidecar. The entry point requires a successful `obs` capability handshake and
+sets `DCC_MCP_PYTHON_EXECUTABLE` only for that process. Install and upgrade the
+native OBS plugin separately through the existing Install SOP; do not inject a
+second Python interpreter into OBS.
+
 ## Security model
 
 The recommended standalone archive contains the sidecar's private Python
