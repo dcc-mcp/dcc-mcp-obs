@@ -1968,7 +1968,11 @@ class ObsControlBridge:
             file_name = item.get("file_name", "")
             if (type(file_name) is not str or len(file_name) > 256 or
                 (file_name and (file_name != file_name.strip() or file_name.endswith("."))) or
-                any(character in invalid_filename_characters or ord(character) < 32 for character in file_name)):
+                any(
+                    character in invalid_filename_characters or ord(character) < 32
+                    for character in file_name
+                )
+            ):
                 raise BridgeError("OBS_ARGUMENT_INVALID")
             output_directory = item.get("output_directory", "")
             if (

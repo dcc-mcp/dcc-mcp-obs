@@ -2922,11 +2922,15 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 			const std::string invalid = "<>:\"/\\|?*";
 			valid = !spec.scene_name.empty() && spec.scene_name.size() <= 256 &&
 				spec.file_name.size() <= 256 &&
-				(spec.file_name.empty() || (spec.file_name.front() != ' ' && spec.file_name.back() != ' ' &&
-				 spec.file_name.back() != '.' &&
-				 std::none_of(spec.file_name.begin(), spec.file_name.end(), [&](unsigned char character) {
-					 return character < 32 || character == 127 || invalid.find(static_cast<char>(character)) != std::string::npos;
-				 })) ) &&
+				(spec.file_name.empty() ||
+				 (spec.file_name.front() != ' ' && spec.file_name.back() != ' ' &&
+				  spec.file_name.back() != '.' &&
+				  std::none_of(spec.file_name.begin(), spec.file_name.end(),
+					       [&](unsigned char character) {
+						       return character < 32 || character == 127 ||
+							      invalid.find(static_cast<char>(character)) !=
+								      std::string::npos;
+					       }))) &&
 				!spec.file_name_prefix.empty() && spec.file_name_prefix.size() <= 96 &&
 				spec.file_name_prefix.front() != ' ' && spec.file_name_prefix.back() != ' ' &&
 				spec.file_name_prefix.back() != '.' &&
