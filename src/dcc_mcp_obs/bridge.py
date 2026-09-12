@@ -1968,7 +1968,7 @@ class ObsControlBridge:
             file_name = item.get("file_name", "")
             if (
                 type(file_name) is not str
-                or len(file_name) > 256
+                or len(file_name) > 160
                 or (file_name and (file_name != file_name.strip() or file_name.endswith(".")))
                 or any(
                     character in invalid_filename_characters or ord(character) < 32

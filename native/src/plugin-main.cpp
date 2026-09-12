@@ -2921,7 +2921,7 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 			});
 			const std::string invalid = "<>:\"/\\|?*";
 			valid = !spec.scene_name.empty() && spec.scene_name.size() <= 256 &&
-				spec.file_name.size() <= 256 &&
+				spec.file_name.size() <= 160 &&
 				(spec.file_name.empty() ||
 				 (spec.file_name.front() != ' ' && spec.file_name.back() != ' ' &&
 				  spec.file_name.back() != '.' &&
