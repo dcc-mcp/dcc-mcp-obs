@@ -37,9 +37,7 @@ def require_runtime() -> object:
     for environment_name, attribute_name in _RUNTIME_METADATA_ENV.items():
         value = getattr(handshake, attribute_name, None)
         if not isinstance(value, str) or not value:
-            raise RuntimeError(
-                f"DCC_MCP_RUNTIME_HANDSHAKE_INVALID: missing {attribute_name}"
-            )
+            raise RuntimeError(f"DCC_MCP_RUNTIME_HANDSHAKE_INVALID: missing {attribute_name}")
         os.environ[environment_name] = value
     return result
 
