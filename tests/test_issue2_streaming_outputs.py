@@ -378,6 +378,11 @@ def test_scene_recording_plan_carries_output_ownership_and_exact_window_binding(
             "file_name_prefix": "Game",
             "file_name": "x" * 161,
         },
+        {
+            "scene_name": "RL - Game",
+            "file_name_prefix": "Game",
+            "file_name": "capture.mov",
+        },
     ],
 )
 def test_scene_recording_plan_rejects_unbounded_output_or_partial_identity(recording):
