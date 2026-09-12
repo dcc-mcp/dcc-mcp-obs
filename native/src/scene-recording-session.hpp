@@ -12,6 +12,7 @@ namespace dcc_mcp_obs {
 struct SceneRecordingSpec {
 	std::string scene_name;
 	std::string file_name_prefix;
+	std::string file_name;
 	std::string output_directory;
 	std::string application_id;
 	std::string run_id;

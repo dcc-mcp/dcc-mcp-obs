@@ -509,9 +509,11 @@ obs_data_t *SceneRecordingSessionManager::start(const std::vector<SceneRecording
 		}
 		directory = QDir::cleanPath(directory);
 		recording.output_directory = QDir::toNativeSeparators(directory).toStdString();
-		recording.file_name = (QString::fromUtf8(spec.file_name_prefix.c_str()) + QStringLiteral(" ") +
-				       timestamp + QStringLiteral(".mp4"))
-					      .toStdString();
+		recording.file_name = spec.file_name.empty()
+					      ? (QString::fromUtf8(spec.file_name_prefix.c_str()) +
+						 QStringLiteral(" ") + timestamp + QStringLiteral(".mp4"))
+							.toStdString()
+					      : spec.file_name;
 		const QString output_path = QDir(directory).filePath(QString::fromUtf8(recording.file_name.c_str()));
 		if (QFileInfo::exists(output_path)) {
 			set_error(result, "OBS_OUTPUT_ACTIVE");

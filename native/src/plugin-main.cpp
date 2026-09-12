@@ -2896,6 +2896,7 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 			obs_data_t *item = obs_data_array_item(recordings, index);
 			const char *scene = item != nullptr ? obs_data_get_string(item, "sceneName") : nullptr;
 			const char *prefix = item != nullptr ? obs_data_get_string(item, "fileNamePrefix") : nullptr;
+			const char *file_name = item != nullptr ? obs_data_get_string(item, "fileName") : nullptr;
 			const char *output_directory = item != nullptr ? obs_data_get_string(item, "outputDirectory")
 								       : nullptr;
 			const char *application_id = item != nullptr ? obs_data_get_string(item, "applicationId")
@@ -2906,6 +2907,7 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 			const long long window_handle = item != nullptr ? obs_data_get_int(item, "windowHandle") : 0;
 			dcc_mcp_obs::SceneRecordingSpec spec{scene != nullptr ? scene : "",
 							     prefix != nullptr ? prefix : "",
+							     file_name != nullptr ? file_name : "",
 							     output_directory != nullptr ? output_directory : "",
 							     application_id != nullptr ? application_id : "",
 							     run_id != nullptr ? run_id : "",
@@ -2919,6 +2921,16 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 			});
 			const std::string invalid = "<>:\"/\\|?*";
 			valid = !spec.scene_name.empty() && spec.scene_name.size() <= 256 &&
+				spec.file_name.size() <= 256 &&
+				(spec.file_name.empty() ||
+				 (spec.file_name.front() != ' ' && spec.file_name.back() != ' ' &&
+				  spec.file_name.back() != '.' &&
+				  std::none_of(spec.file_name.begin(), spec.file_name.end(),
+					       [&](unsigned char character) {
+						       return character < 32 || character == 127 ||
+							      invalid.find(static_cast<char>(character)) !=
+								      std::string::npos;
+					       }))) &&
 				!spec.file_name_prefix.empty() && spec.file_name_prefix.size() <= 96 &&
 				spec.file_name_prefix.front() != ' ' && spec.file_name_prefix.back() != ' ' &&
 				spec.file_name_prefix.back() != '.' &&
