@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.0](https://github.com/dcc-mcp/dcc-mcp-obs/compare/v1.4.0...v1.5.0) (2026-09-12)
+
+
+### Features
+
+* support exact names for parallel recordings ([1145775](https://github.com/dcc-mcp/dcc-mcp-obs/commit/11457751b743abe8efe63bfdcf868c0e21a8b555))
+
+
+### Bug Fixes
+
+* address parallel recording review findings ([2dc690f](https://github.com/dcc-mcp/dcc-mcp-obs/commit/2dc690f16edebb18ccc9deeeb3e7245bf8d081d8))
+* bound exact recording file names ([5230fc2](https://github.com/dcc-mcp/dcc-mcp-obs/commit/5230fc2e085db4ab14abec610ec6cf29a285317d))
+
 ## [1.4.0](https://github.com/dcc-mcp/dcc-mcp-obs/compare/v1.3.0...v1.4.0) (2026-09-11)
 
 
