@@ -1,6 +1,8 @@
 """Console entry point used by dcc-mcp-runtime adapter bundles."""
 
-from .shared_runtime import main
+from .shared_runtime import main, require_runtime
+
+__all__ = ["main", "require_runtime"]
 
 if __name__ == "__main__":  # pragma: no cover
     main()
