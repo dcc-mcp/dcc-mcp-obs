@@ -54,6 +54,22 @@ bool valid_prefix(const std::string &value)
 	       });
 }
 
+bool valid_file_name(const std::string &value)
+{
+	if (value.empty() || value.size() > 160 || value.front() == ' ' || value.back() == ' ' || value.back() == '.')
+		return false;
+	const std::string invalid = "<>:\"/\\|?*";
+	if (std::any_of(value.begin(), value.end(), [&](unsigned char character) {
+		    return character < 32 || character == 127 ||
+			   invalid.find(static_cast<char>(character)) != std::string::npos;
+	    }))
+		return false;
+	return value.size() >= 4 && std::equal(value.end() - 4, value.end(), ".mp4", [](char left, char right) {
+		       return std::tolower(static_cast<unsigned char>(left)) ==
+			      std::tolower(static_cast<unsigned char>(right));
+	       });
+}
+
 bool valid_optional_id(const std::string &value)
 {
 	return value.empty() ||
@@ -453,6 +469,7 @@ obs_data_t *SceneRecordingSessionManager::start(const std::vector<SceneRecording
 	}
 	std::set<std::string> scenes;
 	std::set<std::string> prefixes;
+	std::set<std::string> output_paths;
 	for (const auto &spec : specs) {
 		std::string folded = spec.file_name_prefix;
 		std::transform(folded.begin(), folded.end(), folded.begin(),
@@ -462,6 +479,7 @@ obs_data_t *SceneRecordingSessionManager::start(const std::vector<SceneRecording
 		const bool has_exact_binding = valid_name(spec.source_name, 256) && spec.process_id != 0 &&
 					       spec.window_handle != 0;
 		if (!valid_name(spec.scene_name, 256) || !valid_prefix(spec.file_name_prefix) ||
+		    (!spec.file_name.empty() && !valid_file_name(spec.file_name)) ||
 		    !valid_optional_id(spec.application_id) || !valid_optional_id(spec.run_id) ||
 		    !valid_optional_path(spec.output_directory) || (has_any_binding && !has_exact_binding) ||
 		    !scenes.insert(spec.scene_name).second || !prefixes.insert(folded).second) {
@@ -515,12 +533,12 @@ obs_data_t *SceneRecordingSessionManager::start(const std::vector<SceneRecording
 							.toStdString()
 					      : spec.file_name;
 		const QString output_path = QDir(directory).filePath(QString::fromUtf8(recording.file_name.c_str()));
-		if (QFileInfo::exists(output_path)) {
+		recording.output_path = QDir::toNativeSeparators(output_path).toStdString();
+		if (QFileInfo::exists(output_path) || !output_paths.insert(recording.output_path).second) {
 			set_error(result, "OBS_OUTPUT_ACTIVE");
 			session.shutdown();
 			return result;
 		}
-		recording.output_path = QDir::toNativeSeparators(output_path).toStdString();
 		recording.scene = obs_get_source_by_name(spec.scene_name.c_str());
 		if (recording.scene == nullptr || obs_source_get_type(recording.scene) != OBS_SOURCE_TYPE_SCENE) {
 			if (recording.scene != nullptr)

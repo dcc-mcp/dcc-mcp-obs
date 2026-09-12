@@ -2920,8 +2920,21 @@ void vendor_request(obs_data_t *request_data, obs_data_t *response_data, void *p
 				return static_cast<char>(std::tolower(character));
 			});
 			const std::string invalid = "<>:\"/\\|?*";
-			valid = !spec.scene_name.empty() && spec.scene_name.size() <= 256 &&
-				spec.file_name.size() <= 160 &&
+			const bool valid_file_name =
+				spec.file_name.empty() ||
+				(spec.file_name.size() <= 160 && spec.file_name.size() >= 4 &&
+				 spec.file_name.back() != ' ' && spec.file_name.back() != '.' &&
+				 std::equal(spec.file_name.end() - 4, spec.file_name.end(), ".mp4",
+					    [](char left, char right) {
+						    return std::tolower(static_cast<unsigned char>(left)) ==
+							   std::tolower(static_cast<unsigned char>(right));
+					    }) &&
+				 std::none_of(
+					 spec.file_name.begin(), spec.file_name.end(), [&](unsigned char character) {
+						 return character < 32 || character == 127 ||
+							invalid.find(static_cast<char>(character)) != std::string::npos;
+					 }));
+			valid = !spec.scene_name.empty() && spec.scene_name.size() <= 256 && valid_file_name &&
 				(spec.file_name.empty() ||
 				 (spec.file_name.front() != ' ' && spec.file_name.back() != ' ' &&
 				  spec.file_name.back() != '.' &&
