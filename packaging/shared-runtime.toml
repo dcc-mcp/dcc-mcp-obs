@@ -1,0 +1,3 @@
+# Release asset consumed by the OBS shared-runtime bundle job.
+runtime_repository = "dcc-mcp/dcc-mcp-runtime"
+runtime_version = "0.1.0"
