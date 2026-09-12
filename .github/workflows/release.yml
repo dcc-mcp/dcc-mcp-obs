@@ -125,8 +125,8 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
-  standalone-artifacts:
-    needs: [identity, native-artifacts]
+  shared-runtime-artifacts:
+    needs: [identity, python-artifacts, native-artifacts]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -134,13 +134,10 @@ jobs:
         include:
           - os: windows-2022
             platform: windows
-            executable: dist/standalone/dcc-mcp-obs.exe
           - os: macos-15
             platform: macos
-            executable: dist/standalone/dcc-mcp-obs
           - os: ubuntu-24.04
             platform: linux
-            executable: dist/standalone/dcc-mcp-obs
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -153,34 +150,54 @@ jobs:
         with:
           name: native-${{ matrix.platform }}
           path: native-artifact
-      - name: Build self-contained distribution
-        shell: bash
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: python-dist
+          path: python-artifact
+      - name: Download shared runtime release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUNTIME_VERSION: 0.1.0
         run: |
-          python -m pip install --disable-pip-version-check pyoxidizer==0.24.0
-          rustc --version
+          mkdir -p runtime-artifact
+          gh release download "v${RUNTIME_VERSION}" \
+            --repo dcc-mcp/dcc-mcp-runtime \
+            --pattern "dcc_mcp_runtime-${RUNTIME_VERSION}-py3-none-any.whl" \
+            --pattern manifest.json \
+            --pattern obs.json \
+            --dir runtime-artifact
+          test -f "runtime-artifact/dcc_mcp_runtime-${RUNTIME_VERSION}-py3-none-any.whl"
+          test -f runtime-artifact/manifest.json
+          test -f runtime-artifact/obs.json
+      - name: Build shared runtime bundle
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.identity.outputs.tag }}
+        run: |
+          version="${RELEASE_TAG#v}"
           plugin_archive=$(find native-artifact -type f -name '*.zip')
           test "$(printf '%s\n' "$plugin_archive" | sed '/^$/d' | wc -l)" -eq 1
-          python tools/build_standalone.py \
+          adapter_wheel=$(find python-artifact -type f -name 'dcc_mcp_obs-*.whl')
+          test "$(printf '%s\n' "$adapter_wheel" | sed '/^$/d' | wc -l)" -eq 1
+          python tools/build_shared_runtime.py \
+            --output "dist/dcc-mcp-obs-${version}-${{ matrix.platform }}-runtime.zip" \
+            --version "$version" \
             --platform '${{ matrix.platform }}' \
-            --plugin-archive "$plugin_archive"
-      - name: Smoke bundled installer and sidecar
-        shell: bash
-        run: |
-          '${{ matrix.executable }}' --version
-          '${{ matrix.executable }}' install --help
-          test "$('${{ matrix.executable }}' tools/standalone_skill_smoke.py \
-            --message standalone)" = '{"message":"standalone"}'
-          '${{ matrix.executable }}' install-bundled --dry-run \
-            --plugin-dir "$RUNNER_TEMP/dcc-mcp-obs-plugin"
+            --runtime-version 0.1.0 \
+            --runtime-wheel "runtime-artifact/dcc_mcp_runtime-0.1.0-py3-none-any.whl" \
+            --runtime-manifest runtime-artifact/manifest.json \
+            --adapter-manifest runtime-artifact/obs.json \
+            --adapter-wheel "$adapter_wheel" \
+            --native-plugin "$plugin_archive"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: standalone-${{ matrix.platform }}
-          path: dist/dcc-mcp-obs-*-standalone.*
+          name: shared-runtime-${{ matrix.platform }}
+          path: dist/dcc-mcp-obs-*-runtime.zip
           if-no-files-found: error
           retention-days: 3
 
   publish:
-    needs: [identity, python-artifacts, native-artifacts, standalone-artifacts]
+    needs: [identity, python-artifacts, native-artifacts, shared-runtime-artifacts]
     env:
       RELEASE_TAG: ${{ needs.identity.outputs.tag }}
       RELEASE_SHA: ${{ needs.identity.outputs.sha }}

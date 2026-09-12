@@ -6,8 +6,8 @@ This product is an OBS plugin plus a DCC-MCP sidecar. The C++ plugin runs
 inside the exact OBS process, owns host lifecycle and UI-thread dispatch, and
 registers bounded vendor requests through the official OBS WebSocket 5.x API.
 The out-of-process sidecar exposes those contracts through MCP, the Gateway,
-an Install SOP v1 CLI, and a bundled Agent skill. Release standalone bundles
-carry a private Python runtime; they do not require a system Python install.
+an Install SOP v1 CLI, and a bundled Agent skill. Release runtime bundles carry
+the shared `dcc-mcp-runtime` and adapter wheels alongside the native plugin.
 
 OBS WebSocket is the authenticated transport. It is not used as an
 unrestricted request escape hatch, and this product exposes no arbitrary
@@ -80,20 +80,21 @@ shipped tools only after their typed contracts land.
 ## Requirements
 
 - OBS Studio 28 or newer with OBS WebSocket 5.x enabled
-- A matching Windows, macOS, or Linux standalone release bundle
+- A matching Windows, macOS, or Linux shared-runtime release bundle
 
-Python 3.10+ and `dcc-mcp-core>=0.20.14,<1.0.0` are required only for the
-optional PyPI/source installation path. pip resolves Core automatically.
+Python 3.10+ and `dcc-mcp-core>=0.20.14,<1.0.0` are resolved by the adapter
+wheel; the shared runtime owns the process environment.
 
 ## Install
 
-Download and extract the matching `*-standalone` archive from the GitHub
-Release. It contains the sidecar, its private runtime, and the exact native
-plugin bundle. Close OBS, then run:
+Download and extract the matching `*-runtime` archive from the GitHub Release.
+It contains the shared runtime and adapter wheels, manifests, and the exact
+native plugin bundle. Set the runtime root, install both wheels, and run:
 
 ```console
-dcc-mcp-obs.exe install-bundled
-dcc-mcp-obs.exe --host-pid <obs-pid>
+$env:DCC_MCP_RUNTIME_ROOT = (Resolve-Path .).Path
+python -m pip install wheels/dcc_mcp_runtime-*.whl wheels/dcc_mcp_obs-*.whl
+python -m dcc_mcp_obs.runtime_entry --host-pid <obs-pid>
 ```
 
 On macOS and Linux, use `./dcc-mcp-obs` instead of the `.exe` name. For
@@ -136,11 +137,10 @@ defaults to `dual`, keeping the independent control endpoint and the
 obs-websocket compatibility path available together; set it to `websocket` for
 compatibility-only deployments.
 
-Run the sidecar against one exact OBS process. Use the standalone executable
-shown above, or this command for a PyPI installation:
+Run the sidecar against one exact OBS process:
 
 ```console
-dcc-mcp-obs --host-pid <obs-pid>
+dcc-mcp-obs-runtime --host-pid <obs-pid>
 ```
 
 ## Agent discovery

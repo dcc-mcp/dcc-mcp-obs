@@ -136,27 +136,24 @@ def test_standalone_archive_preserves_full_semantic_version(tmp_path: Path, monk
     assert archive.name == "dcc-mcp-obs-1.1.0-windows-standalone.zip"
 
 
-def test_ci_and_release_build_all_standalone_platforms() -> None:
+def test_ci_and_release_use_shared_runtime_bundles() -> None:
     ci = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
     release = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8"))
 
-    ci_job = ci["jobs"]["standalone"]
-    release_job = release["jobs"]["standalone-artifacts"]
-    for job in (ci_job, release_job):
-        platforms = {entry["platform"] for entry in job["strategy"]["matrix"]["include"]}
-        assert platforms == {"windows", "macos", "linux"}
-        scripts = "\n".join(str(step.get("run", "")) for step in job["steps"])
-        assert "tools/build_standalone.py" in scripts
-        assert "--version" in scripts
-        assert "install --help" in scripts
-        assert "tools/standalone_skill_smoke.py" in scripts
-
-    assert release_job["needs"] == ["identity", "native-artifacts"]
+    assert "shared-runtime" in ci["jobs"]
+    release_job = release["jobs"]["shared-runtime-artifacts"]
+    platforms = {entry["platform"] for entry in release_job["strategy"]["matrix"]["include"]}
+    assert platforms == {"windows", "macos", "linux"}
+    scripts = "\n".join(str(step.get("run", "")) for step in release_job["steps"])
+    assert "tools/build_shared_runtime.py" in scripts
+    assert "dcc-mcp-runtime" in scripts
+    assert "pyoxidizer" not in scripts
+    assert release_job["needs"] == ["identity", "python-artifacts", "native-artifacts"]
     assert release["jobs"]["publish"]["needs"] == [
         "identity",
         "python-artifacts",
         "native-artifacts",
-        "standalone-artifacts",
+        "shared-runtime-artifacts",
     ]
 
 
@@ -166,9 +163,9 @@ def test_cli_install_runbook_selects_the_bundled_runtime_and_environment_overrid
 
     for text in (runbook, detailed):
         assert "dcc-mcp-cli install --dcc-type obs" in text
-        assert "DCC_MCP_OBS_EXECUTABLE" in text
+        assert "DCC_MCP_RUNTIME_ROOT" in text
         assert "DCC_MCP_PYTHON_EXECUTABLE" in text
-        assert "install-bundled" in text
+        assert "dcc-mcp-obs-runtime" in text
         assert "dcc-mcp-cli wait-ready --dcc-type obs" in text
 
-    assert "Python 3.10+ remains optional" in runbook
+    assert "shared runtime" in runbook

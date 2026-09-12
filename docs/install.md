@@ -1,13 +1,25 @@
 # Installation and lifecycle
 
+## Shared runtime deployment
+
+The preferred deployment installs one signed `dcc-mcp-runtime` per machine and
+places the versioned `dcc-mcp-obs` wheel in its adapter bundle. Use
+`dcc-mcp-obs-runtime` (or `python -m dcc_mcp_obs.runtime_entry`) to start the
+sidecar. The entry point requires a successful `obs` capability handshake and
+sets `DCC_MCP_PYTHON_EXECUTABLE` only for that process. Install and upgrade the
+native OBS plugin separately through the existing Install SOP; do not inject a
+second Python interpreter into OBS.
+
+Set `DCC_MCP_RUNTIME_ROOT` to the extracted shared-runtime directory when the
+launcher is not adjacent to the runtime manifests.
+
 ## Security model
 
-The recommended standalone archive contains the sidecar's private Python
-runtime and the exact native plugin release artifact. Its manifest binds the
-product, version, platform, every file path, size, and SHA-256. The release
-publisher also verifies that the nested native plugin is byte-identical to the
-separately published native artifact. No system Python or separately installed
-`dcc-mcp-core` is required.
+The shared-runtime archive contains the signed runtime and adapter wheels,
+runtime/adapter manifests, and the exact native plugin release artifact. Its
+manifest binds the product, version, platform, every file path, size, and
+SHA-256. The release publisher also verifies that the nested adapter and native
+payloads are byte-identical to their separately published release artifacts.
 
 The installer rejects path traversal, links, multi-link receipts, mismatched
 platforms, member drift, and non-portable Windows aliases. The receipt records
@@ -26,11 +38,10 @@ next step and does not silently modify the OBS plugin directory:
 dcc-mcp-cli install --dcc-type obs
 ```
 
-Standalone release bundle:
+Shared runtime release bundle:
 
 ```console
-dcc-mcp-obs install-bundled
-dcc-mcp-obs upgrade-bundled
+python tools/build_shared_runtime.py --help
 ```
 
 The same standalone archive contains the executable, private runtime, manifest,
