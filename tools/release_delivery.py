@@ -245,27 +245,94 @@ def _validate_standalone_archive(
     _validate_native_archive(bundled_plugin, version, platform)
 
 
+def _validate_shared_runtime_archive(
+    path: Path,
+    data: bytes,
+    version: str,
+    platform: str,
+    runtime_version: str,
+    adapter_archive: bytes,
+    native_archive: bytes,
+) -> None:
+    """Validate the runtime/adapter/native bundle without executing it."""
+    contents = _standalone_contents(path, data)
+    manifest = json.loads(contents["dcc-mcp-obs-runtime.json"])
+    require(
+        manifest.get("schema_version") == 1
+        and manifest.get("product") == "dcc-mcp-obs-runtime"
+        and manifest.get("version") == version
+        and manifest.get("platform") == platform
+        and manifest.get("runtime_version") == runtime_version,
+        "shared runtime identity drift",
+    )
+    entries = manifest.get("files")
+    require(isinstance(entries, list) and entries, "shared runtime manifest is empty")
+    names = [entry.get("path") for entry in entries]
+    require(
+        all(isinstance(name, str) for name in names)
+        and len(names) == len(set(names))
+        and set(contents) == {"dcc-mcp-obs-runtime.json", *names},
+        "shared runtime inventory drift",
+    )
+    adapter_name = f"wheels/dcc_mcp_obs-{version}-py3-none-any.whl"
+    native_name = "native/dcc-mcp-obs-plugin.zip"
+    require(
+        adapter_name in names
+        and native_name in names
+        and "runtime/manifest.json" in names
+        and "runtime/manifests/obs.json" in names,
+        "shared runtime payload incomplete",
+    )
+    for entry in entries:
+        payload = contents[entry["path"]]
+        require(
+            entry.get("size") == len(payload)
+            and entry.get("sha256") == hashlib.sha256(payload).hexdigest(),
+            "shared runtime digest drift",
+        )
+    require(contents[adapter_name] == adapter_archive, "adapter wheel differs from release asset")
+    require(contents[native_name] == native_archive, "native plugin differs from release asset")
+    adapter_metadata = json.loads(contents["runtime/manifests/obs.json"])
+    require(
+        adapter_metadata.get("adapter_id") == "obs"
+        and adapter_metadata.get("version") == version
+        and adapter_metadata.get("wheel_sha256") == hashlib.sha256(adapter_archive).hexdigest(),
+        "shared runtime adapter manifest drift",
+    )
+    _validate_native_archive(contents[native_name], version, platform)
+
+
 def artifact_paths(root: Path, version: str) -> dict[Path, tuple[int, str]]:
     """Freeze the digest of the same bytes used for archive and manifest validation."""
     directory = root / "release-artifacts"
-    standalone_config = tomllib.loads(
-        (root / "packaging" / "standalone.toml").read_text(encoding="utf-8")
-    )
-    core_version = standalone_config["core_version"]
-    expected = {
+    expected_python_native = {
         f"python-dist/dcc_mcp_obs-{version}-py3-none-any.whl",
         f"python-dist/dcc_mcp_obs-{version}.tar.gz",
         *(
             f"native-{platform}/dcc-mcp-obs-{version}-{platform}.zip"
             for platform in ("linux", "macos", "windows")
         ),
-        *(
+    }
+    files = sorted(path for path in directory.rglob("*") if path.is_file())
+    shared = sorted(path for path in files if path.parent.name.startswith("shared-runtime-"))
+    if shared:
+        runtime_version = tomllib.loads(
+            (root / "packaging" / "shared-runtime.toml").read_text(encoding="utf-8")
+        )["runtime_version"]
+        expected = expected_python_native | {
+            f"shared-runtime-{platform}/dcc-mcp-obs-{version}-{platform}-runtime.zip"
+            for platform in ("linux", "macos", "windows")
+        }
+    else:
+        standalone_config = tomllib.loads(
+            (root / "packaging" / "standalone.toml").read_text(encoding="utf-8")
+        )
+        core_version = standalone_config["core_version"]
+        expected = expected_python_native | {
             f"standalone-{platform}/dcc-mcp-obs-{version}-{platform}-standalone."
             f"{'zip' if platform == 'windows' else 'tar.gz'}"
             for platform in ("linux", "macos", "windows")
-        ),
-    }
-    files = sorted(path for path in directory.rglob("*") if path.is_file())
+        }
     require(
         {path.relative_to(directory).as_posix() for path in files} == expected,
         "release artifact set is not exact",
@@ -279,6 +346,13 @@ def artifact_paths(root: Path, version: str) -> dict[Path, tuple[int, str]]:
         snapshots[path] = content_digest(data)
         if path.parent.name.startswith("native-"):
             _validate_native_archive(data, version, path.parent.name.removeprefix("native-"))
+        elif path.parent.name.startswith("shared-runtime-"):
+            platform = path.parent.name.removeprefix("shared-runtime-")
+            adapter = artifact_data[f"python-dist/dcc_mcp_obs-{version}-py3-none-any.whl"]
+            native = artifact_data[f"native-{platform}/dcc-mcp-obs-{version}-{platform}.zip"]
+            _validate_shared_runtime_archive(
+                path, data, version, platform, runtime_version, adapter, native
+            )
         elif path.parent.name.startswith("standalone-"):
             platform = path.parent.name.removeprefix("standalone-")
             native = artifact_data[f"native-{platform}/dcc-mcp-obs-{version}-{platform}.zip"]

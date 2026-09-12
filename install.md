@@ -1,9 +1,9 @@
 # Install DCC-MCP OBS
 
 This is the adapter-maintained runbook consumed by `dcc-mcp-cli`. The
-recommended release archive contains the standalone sidecar, its private
-Python runtime, an exact `dcc-mcp-core`, and the matching native OBS plugin.
-Python 3.10+ remains optional for the separate PyPI/source path.
+recommended release archive contains the shared runtime and adapter wheels,
+runtime manifests, and the matching native OBS plugin. Python 3.10+ remains
+optional for the separate PyPI/source path.
 
 ## Agent quick path
 
@@ -13,28 +13,28 @@ Resolve the official adapter and read this runbook without mutating the host:
 dcc-mcp-cli install --dcc-type obs
 ```
 
-For the no-system-Python path, download and extract one immutable
-`dcc-mcp-obs-<version>-<platform>-standalone` release archive. Keep its files
-together, close OBS, then install the adjacent checksummed native plugin:
+Download and extract one immutable
+`dcc-mcp-obs-<version>-<platform>-runtime` release archive. Keep its files
+together, set `DCC_MCP_RUNTIME_ROOT`, and install the adapter wheels:
 
 ```powershell
-.\dcc-mcp-obs.exe install-bundled
-$obsExe = (Resolve-Path .\dcc-mcp-obs.exe).Path
-$env:DCC_MCP_OBS_EXECUTABLE = $obsExe
-[Environment]::SetEnvironmentVariable("DCC_MCP_OBS_EXECUTABLE", $obsExe, "User")
+$env:DCC_MCP_RUNTIME_ROOT = (Resolve-Path .).Path
+python -m pip install .\wheels\dcc_mcp_runtime-*.whl .\wheels\dcc_mcp_obs-*.whl
+python -m dcc_mcp_obs.runtime_entry --host-pid <OBS_PID>
+# Equivalent console entry point: dcc-mcp-obs-runtime --host-pid <OBS_PID>
 ```
 
 ```bash
-./dcc-mcp-obs install-bundled
-export DCC_MCP_OBS_EXECUTABLE="$(pwd -P)/dcc-mcp-obs"
+export DCC_MCP_RUNTIME_ROOT="$(pwd -P)"
+python -m pip install wheels/dcc_mcp_runtime-*.whl wheels/dcc_mcp_obs-*.whl
+python -m dcc_mcp_obs.runtime_entry --host-pid <OBS_PID>
 ```
 
-`DCC_MCP_OBS_EXECUTABLE` is the only native-plugin autostart override. It must
-name an absolute executable file. The plugin passes only `--host-pid` for the
-current OBS process and never invokes a shell. If the variable is absent, no
-process is launched and the sidecar can still be started manually.
+The native plugin is installed through the adapter-owned lifecycle and only
+starts the explicitly configured shared-runtime entry point. If the runtime
+root or manifest is absent, startup fails closed and no process is launched.
 
-The standalone process sets `DCC_MCP_PYTHON_EXECUTABLE` to its own executable
+The shared runtime process sets `DCC_MCP_PYTHON_EXECUTABLE` to its own executable
 for Core-managed skill scripts. Do not persist that generic variable globally
 on a mixed-DCC workstation. `dcc-mcp-cli` calls should route through the live
 OBS instance instead.
@@ -59,8 +59,7 @@ lifecycle command documented in [docs/install.md](docs/install.md).
 
 ## Internal deployment
 
-Studios may unpack the complete standalone archive into an immutable managed
-directory and set `DCC_MCP_OBS_EXECUTABLE` to that release's absolute launcher.
-Roll out the executable, its `lib` directory/runtime libraries, manifest, and
-`dcc-mcp-obs-plugin.zip` as one versioned unit. Never point the variable at a
-mutable download, wrapper script, or unverified binary.
+Studios should unpack the complete runtime archive into an immutable managed
+directory and roll out the runtime wheel, adapter wheel, manifests, and native
+plugin archive as one versioned unit. Never point `DCC_MCP_RUNTIME_ROOT` at a
+mutable download or unverified directory.
