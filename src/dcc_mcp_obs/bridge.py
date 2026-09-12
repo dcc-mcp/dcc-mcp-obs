@@ -1966,9 +1966,11 @@ class ObsControlBridge:
             scenes.add(scene_name)
             prefixes.add(prefix.casefold())
             file_name = item.get("file_name", "")
-            if (type(file_name) is not str or len(file_name) > 256 or
-                (file_name and (file_name != file_name.strip() or file_name.endswith("."))) or
-                any(
+            if (
+                type(file_name) is not str
+                or len(file_name) > 256
+                or (file_name and (file_name != file_name.strip() or file_name.endswith(".")))
+                or any(
                     character in invalid_filename_characters or ord(character) < 32
                     for character in file_name
                 )
@@ -2004,15 +2006,15 @@ class ObsControlBridge:
             ):
                 raise BridgeError("OBS_ARGUMENT_INVALID")
             normalized_item = {
-                    "sceneName": scene_name,
-                    "fileNamePrefix": prefix,
-                    "outputDirectory": output_directory,
-                    "applicationId": application_id,
-                    "runId": run_id,
-                    "sourceName": source_name,
-                    "processId": process_id,
-                    "windowHandle": window_handle,
-                }
+                "sceneName": scene_name,
+                "fileNamePrefix": prefix,
+                "outputDirectory": output_directory,
+                "applicationId": application_id,
+                "runId": run_id,
+                "sourceName": source_name,
+                "processId": process_id,
+                "windowHandle": window_handle,
+            }
             if file_name:
                 normalized_item["fileName"] = file_name
             normalized.append(normalized_item)
