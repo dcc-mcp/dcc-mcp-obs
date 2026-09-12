@@ -372,7 +372,7 @@ def test_handoff_outputs_and_permission_graph_are_exact() -> None:
         "identity",
         "python-artifacts",
         "native-artifacts",
-        "standalone-artifacts",
+        "shared-runtime-artifacts",
         "publish",
     }
     assert caller["permissions"] == {"contents": "read"}
@@ -383,16 +383,20 @@ def test_handoff_outputs_and_permission_graph_are_exact() -> None:
     for name in ("python-artifacts", "native-artifacts"):
         assert jobs[name]["needs"] == "identity"
         assert "if" not in jobs[name]
-    assert jobs["standalone-artifacts"]["needs"] == ["identity", "native-artifacts"]
-    assert "if" not in jobs["standalone-artifacts"]
+    assert jobs["shared-runtime-artifacts"]["needs"] == [
+        "identity",
+        "python-artifacts",
+        "native-artifacts",
+    ]
+    assert "if" not in jobs["shared-runtime-artifacts"]
     assert jobs["publish"]["needs"] == [
         "identity",
         "python-artifacts",
         "native-artifacts",
-        "standalone-artifacts",
+        "shared-runtime-artifacts",
     ]
     assert "if" not in jobs["publish"]  # default success() propagates a skipped/failed identity job
-    for name in ("identity", "python-artifacts", "native-artifacts", "standalone-artifacts"):
+    for name in ("identity", "python-artifacts", "native-artifacts", "shared-runtime-artifacts"):
         assert jobs[name].get("permissions", caller["permissions"]) == {"contents": "read"}
     assert jobs["publish"]["permissions"] == {"contents": "write", "id-token": "write"}
     assert jobs["publish"]["environment"] == "pypi"
@@ -400,7 +404,7 @@ def test_handoff_outputs_and_permission_graph_are_exact() -> None:
         "identity",
         "python-artifacts",
         "native-artifacts",
-        "standalone-artifacts",
+        "shared-runtime-artifacts",
         "publish",
     ):
         owner = "release-please" if name == "identity" else "identity"
@@ -436,7 +440,7 @@ def test_no_release_cannot_reach_publisher_or_oidc(created: str) -> None:
     # Interpret the frozen comparison and default success dependencies, not string truthiness.
     states = {"release-please": "success"}
     states["identity"] = "success" if created == "true" else "skipped"
-    for name in ("python-artifacts", "native-artifacts", "standalone-artifacts", "publish"):
+    for name in ("python-artifacts", "native-artifacts", "shared-runtime-artifacts", "publish"):
         needs = jobs[name]["needs"]
         needs = [needs] if isinstance(needs, str) else needs
         states[name] = (

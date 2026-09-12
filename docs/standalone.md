@@ -9,9 +9,9 @@ manifest handshake before opening the MCP endpoint and keeps the native OBS
 plugin/WebSocket boundary inside OBS. Set `DCC_MCP_RUNTIME_ROOT` to the
 side-by-side runtime root when the launcher is not adjacent to it.
 
-The legacy self-contained PyOxidizer archive remains available for rollback
-while shared-runtime rollout is staged; it is not used by the shared entry
-point and is not a fallback for a failed handshake.
+The legacy self-contained PyOxidizer source is retained only for historical
+compatibility. It is no longer built or published by CI, and it is not a
+fallback for a failed handshake.
 
 This bundle contains the OBS sidecar and its private Python runtime. End users
 do not need to install Python or `dcc-mcp-core`.
