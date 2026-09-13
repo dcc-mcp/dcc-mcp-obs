@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.0](https://github.com/dcc-mcp/dcc-mcp-obs/compare/v1.4.0...v1.5.0) (2026-09-13)
+
+
+### Features
+
+* adopt shared runtime for OBS releases ([4a1a392](https://github.com/dcc-mcp/dcc-mcp-obs/commit/4a1a39299a88da8194ec9d282e0adfbed1314b96))
+* support exact names for parallel recordings ([1145775](https://github.com/dcc-mcp/dcc-mcp-obs/commit/11457751b743abe8efe63bfdcf868c0e21a8b555))
+
+
+### Bug Fixes
+
+* address parallel recording review findings ([2dc690f](https://github.com/dcc-mcp/dcc-mcp-obs/commit/2dc690f16edebb18ccc9deeeb3e7245bf8d081d8))
+* bound exact recording file names ([5230fc2](https://github.com/dcc-mcp/dcc-mcp-obs/commit/5230fc2e085db4ab14abec610ec6cf29a285317d))
+* close installer review gaps ([358c0ba](https://github.com/dcc-mcp/dcc-mcp-obs/commit/358c0baf71527cac5886d3eed6d3026bd5e1d7a7))
+* harden shared runtime deployment ([25b1f1c](https://github.com/dcc-mcp/dcc-mcp-obs/commit/25b1f1c03e9bbbd22ffb8248dcac1776bb47542b))
+
 ## [1.4.0](https://github.com/dcc-mcp/dcc-mcp-obs/compare/v1.3.0...v1.4.0) (2026-09-11)
 
 
