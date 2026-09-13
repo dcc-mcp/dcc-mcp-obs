@@ -53,6 +53,13 @@ def _verify(root: Path) -> tuple[dict[str, Any], dict[str, bytes]]:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise InstallFailure("BUNDLE_MANIFEST_INVALID: cannot read release manifest") from exc
+    if not isinstance(manifest, dict):
+        raise InstallFailure("BUNDLE_MANIFEST_INVALID: release manifest is not an object")
+    if not all(
+        isinstance(manifest.get(field), str) and bool(manifest[field])
+        for field in ("version", "runtime_version")
+    ):
+        raise InstallFailure("BUNDLE_MANIFEST_INVALID: version fields are missing")
     if (
         manifest.get("schema_version") != 1
         or manifest.get("product") != "dcc-mcp-obs-runtime"
@@ -154,7 +161,15 @@ def install(argv: list[str] | None = None) -> dict[str, Any]:
         staged_adapter.write_bytes(adapter_wheel[1])
         staged_plugin.write_bytes(plugin_payload)
         _run(
-            [sys.executable, "-m", "pip", "install", str(staged_runtime), str(staged_adapter)],
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--force-reinstall",
+                str(staged_runtime),
+                str(staged_adapter),
+            ],
             cwd=safe_cwd,
         )
         plugin_command = [

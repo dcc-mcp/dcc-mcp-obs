@@ -143,6 +143,67 @@ def test_extracted_bundle_rejects_tampered_wheel_before_install(tmp_path: Path) 
     assert json.loads(result.stdout)["error"].startswith("BUNDLE_DIGEST_MISMATCH:")
 
 
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        [],
+        {
+            "schema_version": 1,
+            "product": "dcc-mcp-obs-runtime",
+            "platform": _platform(),
+            "files": [],
+        },
+    ],
+)
+def test_extracted_bundle_rejects_non_object_or_incomplete_manifest(
+    tmp_path: Path, manifest: object
+) -> None:
+    archive_path = _build(tmp_path, "invalid-manifest.zip")
+    extracted = tmp_path / "invalid-manifest"
+    with zipfile.ZipFile(archive_path) as archive:
+        archive.extractall(extracted)
+    (extracted / "dcc-mcp-obs-runtime.json").write_text(json.dumps(manifest))
+
+    result = subprocess.run(
+        [sys.executable, str(extracted / "install.py"), "--dry-run"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    report = json.loads(result.stdout)
+    assert report["status"] == "failed"
+    assert report["error"].startswith("BUNDLE_MANIFEST_INVALID:")
+
+
+def test_installer_force_reinstalls_verified_staged_wheels(tmp_path: Path) -> None:
+    archive_path = _build(tmp_path, "force-reinstall.zip")
+    extracted = tmp_path / "force-reinstall"
+    with zipfile.ZipFile(archive_path) as archive:
+        archive.extractall(extracted)
+    installer_spec = importlib.util.spec_from_file_location(
+        "shared_runtime_bundle_installer", extracted / "install.py"
+    )
+    assert installer_spec is not None and installer_spec.loader is not None
+    installer = importlib.util.module_from_spec(installer_spec)
+    installer_spec.loader.exec_module(installer)
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        stdout = "" if len(commands) == 1 else '{"status":"requires_restart"}'
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    installer._run = fake_run
+    report = installer.install(["--yes", "--plugin-dir", str(tmp_path / "plugin")])
+
+    assert report["status"] == "installed"
+    assert commands[0][0:5] == [sys.executable, "-m", "pip", "install", "--force-reinstall"]
+    assert Path(commands[0][5]).name.startswith("dcc_mcp_runtime-")
+    assert Path(commands[0][6]).name.startswith("dcc_mcp_obs-")
+
+
 def test_release_validator_accepts_complete_bundle(tmp_path: Path) -> None:
     archive_path = _build(tmp_path, "complete.zip")
 

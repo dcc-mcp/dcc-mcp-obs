@@ -41,7 +41,8 @@ dcc-mcp-cli install --dcc-type obs
 After extracting the platform runtime archive, install its exact wheels and
 native plugin as one versioned unit. The release-level `SHA256SUMS` must be
 verified before extraction; the bundled installer then verifies every nested
-file against the archive manifest before any installation command:
+file against the archive manifest before any installation command. The bundled
+wrappers currently require Python 3.10+ as a bootstrap interpreter:
 
 ```powershell
 .\install.ps1 -DryRun
@@ -52,6 +53,10 @@ file against the archive manifest before any installation command:
 bash install.sh --dry-run
 bash install.sh --yes
 ```
+
+After a wrapper successfully starts Python, the installer emits exactly one
+JSON report. Shell-level failures that happen before Python starts are reported
+by the wrapper itself and cannot satisfy this JSON contract.
 
 The runtime entry sets `DCC_MCP_PYTHON_EXECUTABLE` to its own interpreter for
 Core-managed Agent skills. Do not persist that generic variable globally on a
