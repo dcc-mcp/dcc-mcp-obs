@@ -102,11 +102,12 @@ bash install.sh --dry-run
 bash install.sh --yes
 ```
 
-The installer emits one JSON report and returns the exact runtime environment
-and launch command. It requires Python 3.10+ only as the bootstrap interpreter
-until the shared runtime publishes native launchers. For developers and users
-who intentionally prefer the Python package, the existing installation path
-remains supported:
+After the wrapper successfully starts Python, the installer emits one JSON
+report and returns the exact runtime environment and launch command. It
+requires Python 3.10+ only as the bootstrap interpreter until the shared
+runtime publishes native launchers. Shell-level wrapper failures before Python
+starts are not JSON reports. For developers and users who intentionally prefer
+the Python package, the existing installation path remains supported:
 
 ```console
 python -m pip install dcc-mcp-obs

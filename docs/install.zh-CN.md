@@ -35,8 +35,10 @@ bash install.sh --dry-run
 bash install.sh --yes
 ```
 
-安装器会先验证包内所有文件，再安装精确的 runtime/adapter wheel 和原生插件，最后
-输出单个 JSON 报告，其中包含 `DCC_MCP_RUNTIME_ROOT` 与精确启动命令。运行时进程会把
+安装器会先验证包内所有文件，再安装精确的 runtime/adapter wheel 和原生插件。只有
+包装脚本成功启动 Python 后，安装器才承诺输出单个 JSON 报告，其中包含
+`DCC_MCP_RUNTIME_ROOT` 与精确启动命令；Python 启动前的 shell 级错误由包装脚本直接报告。
+运行时进程会把
 `DCC_MCP_PYTHON_EXECUTABLE` 设置为自己的解释器；多 DCC 工作站不要全局持久化这个
 通用变量。
 

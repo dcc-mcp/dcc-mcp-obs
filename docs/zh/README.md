@@ -64,8 +64,9 @@ bash install.sh --dry-run
 bash install.sh --yes
 ```
 
-安装器会校验包内 manifest，安装 runtime/adapter wheel 与精确原生插件，并输出包含
-运行时根目录和启动命令的单个 JSON 报告。当前版本需要 Python 3.10+ 作为 bootstrap
+安装器会校验包内 manifest，安装 runtime/adapter wheel 与精确原生插件。只有包装脚本
+成功启动 Python 后，安装器才输出包含运行时根目录和启动命令的单个 JSON 报告；Python
+启动前的 shell 级错误由包装脚本直接报告。当前版本需要 Python 3.10+ 作为 bootstrap
 解释器；原生 shared-runtime launcher 发布前不会宣称无需系统 Python。开发者或明确
 希望使用 Python 包的用户仍可走：
 

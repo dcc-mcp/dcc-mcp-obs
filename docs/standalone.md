@@ -17,5 +17,7 @@ failed shared-runtime handshake.
 Keep the shared runtime wheel, adapter wheel, runtime manifests, and native
 plugin archive together. Verify `SHA256SUMS` before deployment, install the
 native plugin through the Install SOP, and start the adapter with
-`dcc-mcp-obs-runtime --host-pid <pid>`. Python 3.10+ remains supported only for
-developers and users who intentionally choose the separate PyPI path.
+`dcc-mcp-obs-runtime --host-pid <pid>`. The bundled `install.ps1` and
+`install.sh` currently require Python 3.10+ as a bootstrap interpreter; this is
+distinct from the optional PyPI/source path and its package dependencies. A
+future native shared-runtime launcher can remove the bootstrap requirement.
