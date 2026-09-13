@@ -2,8 +2,9 @@
 
 This is the adapter-maintained runbook consumed by `dcc-mcp-cli`. The
 recommended release archive contains the shared runtime and adapter wheels,
-runtime manifests, and the matching native OBS plugin. Python 3.10+ remains
-optional for the separate PyPI/source path.
+runtime manifests, and the matching native OBS plugin. Its wrappers currently
+require Python 3.10+ as a bootstrap interpreter. The separate PyPI/source path
+has its own Python and `dcc-mcp-core` dependency requirements.
 
 ## Agent quick path
 
@@ -28,10 +29,11 @@ bash install.sh --dry-run
 bash install.sh --yes
 ```
 
-Both commands emit one JSON report. The successful report includes the exact
-`DCC_MCP_RUNTIME_ROOT` value and `dcc-mcp-obs-runtime --host-pid <OBS_PID>`
-launch command. Python 3.10+ is currently required only to bootstrap the shared
-runtime wheels; a missing interpreter fails without modifying the host.
+After the wrapper successfully starts Python, the installer emits one JSON
+report. The successful report includes the exact `DCC_MCP_RUNTIME_ROOT` value
+and `dcc-mcp-obs-runtime --host-pid <OBS_PID>` launch command. A missing or
+unusable interpreter fails before this JSON contract begins and without
+modifying the host.
 
 The native plugin is installed through the adapter-owned lifecycle and only
 starts the explicitly configured shared-runtime entry point. If the runtime
