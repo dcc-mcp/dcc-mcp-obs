@@ -88,18 +88,25 @@ wheel; the shared runtime owns the process environment.
 ## Install
 
 Download and extract the matching `*-runtime` archive from the GitHub Release.
-It contains the shared runtime and adapter wheels, manifests, and the exact
-native plugin bundle. Set the runtime root, install both wheels, and run:
+It contains the shared runtime and adapter wheels, manifests, the exact native
+plugin bundle, and a manifest-verifying installer. Agents can inspect a
+zero-mutation plan, then perform the complete package and native-plugin install:
 
-```console
-$env:DCC_MCP_RUNTIME_ROOT = (Resolve-Path .).Path
-python -m pip install wheels/dcc_mcp_runtime-*.whl wheels/dcc_mcp_obs-*.whl
-python -m dcc_mcp_obs.runtime_entry --host-pid <obs-pid>
+```powershell
+.\install.ps1 -DryRun
+.\install.ps1 -Yes
 ```
 
-On macOS and Linux, use `./dcc-mcp-obs` instead of the `.exe` name. For
-developers and users who intentionally prefer the Python package, the existing
-installation path remains supported:
+```bash
+bash install.sh --dry-run
+bash install.sh --yes
+```
+
+The installer emits one JSON report and returns the exact runtime environment
+and launch command. It requires Python 3.10+ only as the bootstrap interpreter
+until the shared runtime publishes native launchers. For developers and users
+who intentionally prefer the Python package, the existing installation path
+remains supported:
 
 ```console
 python -m pip install dcc-mcp-obs

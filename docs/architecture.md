@@ -7,8 +7,8 @@ Agent -> DCC-MCP Core/Gateway -> out-of-process OBS sidecar
       -> libobs / OBS frontend API -> event + typed readback
 ```
 
-Release standalone bundles embed a private Python 3.10 runtime, the adapter,
-and one exact `dcc-mcp-core` version in that sidecar process. The OBS process
+Release bundles pair the shared DCC-MCP runtime, the adapter,
+and one compatible `dcc-mcp-core` version in that sidecar process. The OBS process
 still loads only the native plugin; Python is never embedded into OBS. A
 PyPI/source installation is an optional development and integration path with
 the same process boundary.

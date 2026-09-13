@@ -1,3 +1,6 @@
-# Release asset consumed by the OBS shared-runtime bundle job.
+# Code-reviewed trust pins for the runtime release consumed by the bundle job.
 runtime_repository = "dcc-mcp/dcc-mcp-runtime"
 runtime_version = "0.1.0"
+runtime_wheel_sha256 = "81a8e0ec6a75e94cee63a8592a81a10f66d4474d7b5c299240b67f888b3b6a03"
+runtime_manifest_sha256 = "170d84d4e42636512f673e37db8f2b86e93150280a9d1ecf1bf93f30974918f7"
+adapter_manifest_sha256 = "bff0fc71d034f7b6434ab58f8b51b6cf024154429d216dd83519b29bd95ce255"

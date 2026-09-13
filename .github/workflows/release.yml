@@ -154,25 +154,57 @@ jobs:
         with:
           name: python-dist
           path: python-artifact
-      - name: Download shared runtime release
+      - name: Load shared runtime release config
+        id: runtime
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+
+          config = tomllib.loads(Path("packaging/shared-runtime.toml").read_text(encoding="utf-8"))
+          keys = (
+              "runtime_repository",
+              "runtime_version",
+              "runtime_wheel_sha256",
+              "runtime_manifest_sha256",
+              "adapter_manifest_sha256",
+          )
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              for key in keys:
+                  value = config[key]
+                  if not isinstance(value, str) or "\n" in value or "\r" in value:
+                      raise ValueError(f"invalid shared runtime configuration: {key}")
+                  output.write(f"{key}={value}\n")
+          PY
+      - name: Download and verify shared runtime release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RUNTIME_VERSION: 0.1.0
+          RUNTIME_REPOSITORY: ${{ steps.runtime.outputs.runtime_repository }}
+          RUNTIME_VERSION: ${{ steps.runtime.outputs.runtime_version }}
+          RUNTIME_WHEEL_SHA256: ${{ steps.runtime.outputs.runtime_wheel_sha256 }}
+          RUNTIME_MANIFEST_SHA256: ${{ steps.runtime.outputs.runtime_manifest_sha256 }}
+          ADAPTER_MANIFEST_SHA256: ${{ steps.runtime.outputs.adapter_manifest_sha256 }}
         run: |
           mkdir -p runtime-artifact
           gh release download "v${RUNTIME_VERSION}" \
-            --repo dcc-mcp/dcc-mcp-runtime \
+            --repo "${RUNTIME_REPOSITORY}" \
             --pattern "dcc_mcp_runtime-${RUNTIME_VERSION}-py3-none-any.whl" \
             --pattern manifest.json \
             --pattern obs.json \
             --dir runtime-artifact
-          test -f "runtime-artifact/dcc_mcp_runtime-${RUNTIME_VERSION}-py3-none-any.whl"
-          test -f runtime-artifact/manifest.json
-          test -f runtime-artifact/obs.json
+          printf '%s  %s\n' \
+            "${RUNTIME_WHEEL_SHA256}" "runtime-artifact/dcc_mcp_runtime-${RUNTIME_VERSION}-py3-none-any.whl" \
+            "${RUNTIME_MANIFEST_SHA256}" runtime-artifact/manifest.json \
+            "${ADAPTER_MANIFEST_SHA256}" runtime-artifact/obs.json \
+            | sha256sum --check --strict
       - name: Build shared runtime bundle
         shell: bash
         env:
           RELEASE_TAG: ${{ needs.identity.outputs.tag }}
+          RUNTIME_VERSION: ${{ steps.runtime.outputs.runtime_version }}
         run: |
           version="${RELEASE_TAG#v}"
           plugin_archive=$(find native-artifact -type f -name '*.zip')
@@ -183,8 +215,8 @@ jobs:
             --output "dist/dcc-mcp-obs-${version}-${{ matrix.platform }}-runtime.zip" \
             --version "$version" \
             --platform '${{ matrix.platform }}' \
-            --runtime-version 0.1.0 \
-            --runtime-wheel "runtime-artifact/dcc_mcp_runtime-0.1.0-py3-none-any.whl" \
+            --runtime-version "${RUNTIME_VERSION}" \
+            --runtime-wheel "runtime-artifact/dcc_mcp_runtime-${RUNTIME_VERSION}-py3-none-any.whl" \
             --runtime-manifest runtime-artifact/manifest.json \
             --adapter-manifest runtime-artifact/obs.json \
             --adapter-wheel "$adapter_wheel" \

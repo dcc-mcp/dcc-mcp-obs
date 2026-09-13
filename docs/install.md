@@ -2,7 +2,7 @@
 
 ## Shared runtime deployment
 
-The preferred deployment installs one signed `dcc-mcp-runtime` per machine and
+The preferred deployment installs one digest-pinned `dcc-mcp-runtime` per machine and
 places the versioned `dcc-mcp-obs` wheel in its adapter bundle. Use
 `dcc-mcp-obs-runtime` (or `python -m dcc_mcp_obs.runtime_entry`) to start the
 sidecar. The entry point requires a successful `obs` capability handshake and
@@ -15,7 +15,7 @@ launcher is not adjacent to the runtime manifests.
 
 ## Security model
 
-The shared-runtime archive contains the signed runtime and adapter wheels,
+The shared-runtime archive contains verified runtime and adapter wheels,
 runtime/adapter manifests, and the exact native plugin release artifact. Its
 manifest binds the product, version, platform, every file path, size, and
 SHA-256. The release publisher also verifies that the nested adapter and native
@@ -38,28 +38,25 @@ next step and does not silently modify the OBS plugin directory:
 dcc-mcp-cli install --dcc-type obs
 ```
 
-Shared runtime release bundle:
-
-```console
-python tools/build_shared_runtime.py --help
-```
-
-The same standalone archive contains the executable, private runtime, manifest,
-and matching `dcc-mcp-obs-plugin.zip`. After extracting it to a stable location,
-set `DCC_MCP_OBS_EXECUTABLE` to the launcher's absolute path. The native plugin
-uses that explicit value to start the sidecar with the current OBS PID; it does
-not search `PATH`, invoke a shell, or launch anything when the variable is
-absent. On Windows, a user-level deployment can persist the value as follows:
+After extracting the platform runtime archive, install its exact wheels and
+native plugin as one versioned unit. The release-level `SHA256SUMS` must be
+verified before extraction; the bundled installer then verifies every nested
+file against the archive manifest before any installation command:
 
 ```powershell
-$obsExe = (Resolve-Path .\dcc-mcp-obs.exe).Path
-$env:DCC_MCP_OBS_EXECUTABLE = $obsExe
-[Environment]::SetEnvironmentVariable("DCC_MCP_OBS_EXECUTABLE", $obsExe, "User")
+.\install.ps1 -DryRun
+.\install.ps1 -Yes
 ```
 
-Inside the standalone process, `DCC_MCP_PYTHON_EXECUTABLE` is set to the same
-executable so Core can run the bundled Agent skill without a system Python.
-Do not persist that generic variable globally on a mixed-DCC workstation.
+```bash
+bash install.sh --dry-run
+bash install.sh --yes
+```
+
+The runtime entry sets `DCC_MCP_PYTHON_EXECUTABLE` to its own interpreter for
+Core-managed Agent skills. Do not persist that generic variable globally on a
+mixed-DCC workstation. A missing runtime root, manifest, or compatible adapter
+handshake fails closed before the OBS sidecar starts.
 
 Optional PyPI/source installation:
 
@@ -80,9 +77,10 @@ File installation returns `requires_restart`; file-only status/verify returns
 `LIVE_OBS_VERIFICATION_REQUIRED` until an exact live OBS plugin session is
 observed through the sidecar.
 
-`install-bundled` and `upgrade-bundled` resolve the adjacent, release-bound
-`dcc-mcp-obs-plugin.zip` and pass its manifest digest into the same Install SOP
-implementation. They do not introduce a second installation mechanism.
+The shared-runtime installer resolves the release-bound
+`native/dcc-mcp-obs-plugin.zip` and passes its verified digest into the same
+Install SOP implementation. It does not introduce a second installation
+mechanism.
 
 The default plugin directory follows the OBS platform layout. On Windows it is
 `%PROGRAMDATA%\obs-studio\plugins\dcc-mcp-obs`; on macOS and Linux it remains

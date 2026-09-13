@@ -146,7 +146,7 @@ def test_ci_and_release_use_shared_runtime_bundles() -> None:
     assert platforms == {"windows", "macos", "linux"}
     scripts = "\n".join(str(step.get("run", "")) for step in release_job["steps"])
     assert "tools/build_shared_runtime.py" in scripts
-    assert "dcc-mcp-runtime" in scripts
+    assert "dcc_mcp_runtime-${RUNTIME_VERSION}" in scripts
     assert "pyoxidizer" not in scripts
     assert release_job["needs"] == ["identity", "python-artifacts", "native-artifacts"]
     assert release["jobs"]["publish"]["needs"] == [
@@ -155,6 +155,34 @@ def test_ci_and_release_use_shared_runtime_bundles() -> None:
         "native-artifacts",
         "shared-runtime-artifacts",
     ]
+
+    config = tomllib.loads((ROOT / "packaging/shared-runtime.toml").read_text(encoding="utf-8"))
+    steps = release_job["steps"]
+    load = next(step for step in steps if step.get("id") == "runtime")
+    download = next(
+        step for step in steps if step.get("name", "").startswith("Download and verify")
+    )
+    build = next(step for step in steps if step.get("name") == "Build shared runtime bundle")
+    assert load["shell"] == download["shell"] == build["shell"] == "bash"
+    assert "packaging/shared-runtime.toml" in load["run"]
+    assert (
+        download["env"]["RUNTIME_REPOSITORY"] == "${{ steps.runtime.outputs.runtime_repository }}"
+    )
+    assert download["env"]["RUNTIME_VERSION"] == "${{ steps.runtime.outputs.runtime_version }}"
+    assert "sha256sum --check --strict" in download["run"]
+    assert config["runtime_repository"] not in download["run"]
+    assert config["runtime_version"] not in download["run"]
+    for key in (
+        "runtime_wheel_sha256",
+        "runtime_manifest_sha256",
+        "adapter_manifest_sha256",
+    ):
+        assert len(config[key]) == 64
+    builder = (ROOT / "tools/build_shared_runtime.py").read_text(encoding="utf-8")
+    validator = (ROOT / "tools/release_delivery.py").read_text(encoding="utf-8")
+    for installer in ("install.py", "install.ps1", "install.sh"):
+        assert installer in builder
+        assert installer in validator
 
 
 def test_cli_install_runbook_selects_the_bundled_runtime_and_environment_override() -> None:
@@ -169,3 +197,5 @@ def test_cli_install_runbook_selects_the_bundled_runtime_and_environment_overrid
         assert "dcc-mcp-cli wait-ready --dcc-type obs" in text
 
     assert "shared runtime" in runbook
+    assert "install.ps1 -Yes" in runbook
+    assert "install.sh --yes" in runbook
