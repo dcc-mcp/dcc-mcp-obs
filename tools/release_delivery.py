@@ -33,6 +33,7 @@ WINDOWS_RESERVED_NAMES = {
 
 
 def require(condition: bool, message: str) -> None:
+    """Fail the release transaction when one frozen invariant is false."""
     if not condition:
         raise ValueError(message)
 
@@ -41,6 +42,7 @@ class GitHub:
     """The only network boundary; GET and create-only asset POST, never edit/delete."""
 
     def get(self, endpoint: str) -> object:
+        """Read one repository-relative GitHub API endpoint."""
         result = subprocess.run(
             ["gh", "api", f"repos/{REPOSITORY}/{endpoint}"],
             check=True,
@@ -49,6 +51,7 @@ class GitHub:
         return json.loads(result.stdout)
 
     def upload(self, release_id: str, path: Path) -> None:
+        """Create one asset on an exact numeric release without overwrite."""
         url = (
             f"https://uploads.github.com/repos/{REPOSITORY}/releases/{release_id}/assets"
             f"?name={quote(path.name, safe='')}"
@@ -71,6 +74,7 @@ class GitHub:
 
 
 def handoff(root: Path, env: dict[str, str]) -> tuple[str, str, str, str]:
+    """Validate release-please identity and return the frozen release tuple."""
     tag, sha, release_id = (
         env.get(key, "") for key in ("RELEASE_TAG", "RELEASE_SHA", "RELEASE_ID")
     )
@@ -89,6 +93,7 @@ def handoff(root: Path, env: dict[str, str]) -> tuple[str, str, str, str]:
 
 
 def verify_release(api: GitHub, tag: str, sha: str, release_id: str) -> dict:
+    """Verify release ownership, tag identity, commit, and asset inventory."""
     release = api.get(f"releases/{release_id}")
     require(isinstance(release, dict), "missing release")
     require(type(release.get("id")) is int and str(release["id"]) == release_id, "release ID drift")
@@ -121,10 +126,12 @@ def verify_release(api: GitHub, tag: str, sha: str, release_id: str) -> dict:
 
 
 def content_digest(data: bytes) -> tuple[int, str]:
+    """Return the size and GitHub-style SHA-256 identity of immutable bytes."""
     return len(data), f"sha256:{hashlib.sha256(data).hexdigest()}"
 
 
 def _validate_native_archive(data: bytes, version: str, platform: str) -> None:
+    """Validate native plugin identity, inventory, and member digests."""
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         manifest = json.loads(archive.read("dcc-mcp-obs-plugin.json"))
         require(
@@ -149,6 +156,7 @@ def _validate_native_archive(data: bytes, version: str, platform: str) -> None:
 
 
 def _standalone_contents(path: Path, data: bytes) -> dict[str, bytes]:
+    """Read a ZIP or tar release only after link and path safety checks."""
     if path.suffix == ".zip":
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             members = archive.infolist()
@@ -176,6 +184,7 @@ def _standalone_contents(path: Path, data: bytes) -> dict[str, bytes]:
 
 
 def _require_portable_standalone_names(names: list[str]) -> None:
+    """Reject duplicate, traversing, or non-portable archive member names."""
     require(
         names
         and len(names) == len(set(names))
@@ -210,6 +219,7 @@ def _validate_standalone_archive(
     core_version: str,
     native_archive: bytes,
 ) -> None:
+    """Validate a retired standalone artifact for legacy release fixtures."""
     contents = _standalone_contents(path, data)
     manifest = json.loads(contents["dcc-mcp-obs-standalone.json"])
     require(
@@ -274,11 +284,16 @@ def _validate_shared_runtime_archive(
         and set(contents) == {"dcc-mcp-obs-runtime.json", *names},
         "shared runtime inventory drift",
     )
+    runtime_name = f"wheels/dcc_mcp_runtime-{runtime_version}-py3-none-any.whl"
     adapter_name = f"wheels/dcc_mcp_obs-{version}-py3-none-any.whl"
     native_name = "native/dcc-mcp-obs-plugin.zip"
     require(
-        adapter_name in names
+        runtime_name in names
+        and adapter_name in names
         and native_name in names
+        and "install.py" in names
+        and "install.ps1" in names
+        and "install.sh" in names
         and "runtime/manifest.json" in names
         and "runtime/manifests/obs.json" in names,
         "shared runtime payload incomplete",
@@ -386,6 +401,7 @@ def artifact_paths(root: Path, version: str) -> dict[Path, tuple[int, str]]:
 
 
 def deliver(mode: str, root: Path, env: dict[str, str], api: GitHub) -> None:
+    """Check or create release assets while preserving frozen byte identity."""
     tag, sha, release_id, version = handoff(root, env)
     release = verify_release(api, tag, sha, release_id)
     require(release["assets"] == [], "release already has assets; refusing to clobber")
@@ -409,6 +425,7 @@ def deliver(mode: str, root: Path, env: dict[str, str], api: GitHub) -> None:
 
 
 def asset_digests(assets: list[dict]) -> dict:
+    """Normalize an uploaded GitHub asset inventory for exact comparison."""
     result = {}
     for asset in assets:
         name = asset.get("name")
@@ -421,6 +438,7 @@ def asset_digests(assets: list[dict]) -> dict:
 
 
 def main() -> None:
+    """Run the release transaction in check-only or create-only upload mode."""
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=("check", "upload"))
     args = parser.parse_args()

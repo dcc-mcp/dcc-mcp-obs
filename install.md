@@ -15,20 +15,23 @@ dcc-mcp-cli install --dcc-type obs
 
 Download and extract one immutable
 `dcc-mcp-obs-<version>-<platform>-runtime` release archive. Keep its files
-together, set `DCC_MCP_RUNTIME_ROOT`, and install the adapter wheels:
+together. The bundled installer verifies every manifest-bound file before
+installing both wheels and the exact native plugin:
 
 ```powershell
-$env:DCC_MCP_RUNTIME_ROOT = (Resolve-Path .).Path
-python -m pip install .\wheels\dcc_mcp_runtime-*.whl .\wheels\dcc_mcp_obs-*.whl
-python -m dcc_mcp_obs.runtime_entry --host-pid <OBS_PID>
-# Equivalent console entry point: dcc-mcp-obs-runtime --host-pid <OBS_PID>
+.\install.ps1 -DryRun
+.\install.ps1 -Yes
 ```
 
 ```bash
-export DCC_MCP_RUNTIME_ROOT="$(pwd -P)"
-python -m pip install wheels/dcc_mcp_runtime-*.whl wheels/dcc_mcp_obs-*.whl
-python -m dcc_mcp_obs.runtime_entry --host-pid <OBS_PID>
+bash install.sh --dry-run
+bash install.sh --yes
 ```
+
+Both commands emit one JSON report. The successful report includes the exact
+`DCC_MCP_RUNTIME_ROOT` value and `dcc-mcp-obs-runtime --host-pid <OBS_PID>`
+launch command. Python 3.10+ is currently required only to bootstrap the shared
+runtime wheels; a missing interpreter fails without modifying the host.
 
 The native plugin is installed through the adapter-owned lifecycle and only
 starts the explicitly configured shared-runtime entry point. If the runtime

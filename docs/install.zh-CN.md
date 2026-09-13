@@ -2,10 +2,11 @@
 
 ## 安全模型
 
-推荐的 standalone 包同时包含 sidecar 私有 Python 运行时和精确匹配的原生插件
-Release artifact。manifest 会绑定产品、版本、平台、每个文件路径、大小和 SHA-256；
-发布器还会验证内嵌原生插件与单独发布的原生 artifact 字节完全一致。用户无需安装
-系统 Python，也无需单独安装 `dcc-mcp-core`。
+推荐的 shared-runtime 包同时包含 runtime 与 adapter wheel、运行时 manifests、
+精确匹配的原生插件和跨平台安装入口。manifest 会绑定产品、版本、平台、每个文件
+路径、大小和 SHA-256；发布器还会验证内嵌原生插件与单独发布的原生 artifact 字节
+完全一致。当前版本需要 Python 3.10+ 作为一次性 bootstrap 解释器；真正的原生 runtime
+launcher 发布前不会宣称“无需系统 Python”。
 
 安装器拒绝路径穿越、链接、多链接 receipt、平台不匹配、成员漂移和 Windows
 非可移植别名。receipt 会记录精确的受管理文件路径；verify 忽略无关条目，但任何
@@ -22,27 +23,22 @@ Release artifact。manifest 会绑定产品、版本、平台、每个文件路�
 dcc-mcp-cli install --dcc-type obs
 ```
 
-standalone Release 包：
-
-```console
-dcc-mcp-obs install-bundled
-dcc-mcp-obs upgrade-bundled
-```
-
-同一个 standalone 包内包含 EXE、私有运行时、manifest 和精确匹配的
-`dcc-mcp-obs-plugin.zip`。把整包解压到稳定目录后，将
-`DCC_MCP_OBS_EXECUTABLE` 设为 launcher 的绝对路径。原生插件只使用这条显式配置，
-并仅附加当前 OBS PID 启动 sidecar；不会搜索 `PATH`、不会调用 shell，变量未设置时
-也不会启动任何进程。Windows 用户级部署可持久化该变量：
+解压对应平台的 `*-runtime.zip` 后，先查看零修改计划，再显式批准安装：
 
 ```powershell
-$obsExe = (Resolve-Path .\dcc-mcp-obs.exe).Path
-$env:DCC_MCP_OBS_EXECUTABLE = $obsExe
-[Environment]::SetEnvironmentVariable("DCC_MCP_OBS_EXECUTABLE", $obsExe, "User")
+.\install.ps1 -DryRun
+.\install.ps1 -Yes
 ```
 
-standalone 进程内部会把 `DCC_MCP_PYTHON_EXECUTABLE` 设置为自身 EXE，使 Core 无需
-系统 Python 也能运行内置 Agent Skill。多 DCC 工作站不要全局持久化这个通用变量。
+```bash
+bash install.sh --dry-run
+bash install.sh --yes
+```
+
+安装器会先验证包内所有文件，再安装精确的 runtime/adapter wheel 和原生插件，最后
+输出单个 JSON 报告，其中包含 `DCC_MCP_RUNTIME_ROOT` 与精确启动命令。运行时进程会把
+`DCC_MCP_PYTHON_EXECUTABLE` 设置为自己的解释器；多 DCC 工作站不要全局持久化这个
+通用变量。
 
 可选的 PyPI/源码安装：
 
@@ -61,9 +57,8 @@ dcc-mcp-obs-install uninstall
 在 sidecar 观察到精确的真实 OBS 插件会话前，两者都保持
 `verify.directly_usable=false` 和 `LIVE_OBS_VERIFICATION_REQUIRED`。
 
-`install-bundled` 与 `upgrade-bundled` 会读取同目录、由 Release 绑定的
-`dcc-mcp-obs-plugin.zip`，再把 manifest 中的 digest 传给同一份 Install SOP
-实现，不会形成第二套安装逻辑。
+shared-runtime 安装器会读取包内由 Release 绑定的 `native/dcc-mcp-obs-plugin.zip`，
+把验证过的 digest 传给同一份 Install SOP 实现，不会形成第二套安装逻辑。
 
 默认插件目录遵循 OBS 的平台布局。Windows 使用
 `%PROGRAMDATA%\obs-studio\plugins\dcc-mcp-obs`；macOS 与 Linux 仍使用当前用户的
