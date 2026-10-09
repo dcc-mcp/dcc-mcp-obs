@@ -59,13 +59,41 @@ def test_windows_default_plugin_directory_uses_program_data(
     assert install_cli.default_plugin_dir() == (tmp_path / "obs-studio" / "plugins" / "dcc-mcp-obs")
 
 
+@pytest.mark.parametrize("command", ["install", "upgrade"])
+@pytest.mark.parametrize("legacy_version", [__version__, "1.1.0"])
 def test_windows_default_install_reconciles_verified_legacy_user_plugin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    legacy_version: str,
 ) -> None:
     canonical_target = tmp_path / "program-data" / "obs-studio" / "plugins" / "dcc-mcp-obs"
     legacy_target = tmp_path / "app-data" / "obs-studio" / "plugins" / "dcc-mcp-obs"
     monkeypatch.setattr(install_cli, "default_plugin_dir", lambda: canonical_target)
     monkeypatch.setattr(install_cli, "_legacy_windows_user_plugin_dir", lambda: legacy_target)
+    if command == "upgrade":
+        previous_archive, previous_digest, _previous_payload = _bundle(
+            tmp_path,
+            target="bin/64bit/dcc-mcp-obs.dll",
+            payload=b"previous-plugin-binary",
+            name="previous-plugin.zip",
+        )
+        assert (
+            run(
+                [
+                    "install",
+                    "--plugin-archive",
+                    str(previous_archive),
+                    "--sha256",
+                    previous_digest,
+                ]
+            )[0]
+            == 0
+        )
+        previous_receipt_path = canonical_target / RECEIPT_NAME
+        previous_receipt = json.loads(previous_receipt_path.read_text(encoding="utf-8"))
+        previous_receipt["version"] = "1.3.0"
+        previous_receipt_path.write_text(json.dumps(previous_receipt), encoding="utf-8")
     legacy_archive, legacy_digest, _legacy_payload = _bundle(
         tmp_path,
         target="bin/64bit/dcc-mcp-obs.dll",
@@ -84,6 +112,10 @@ def test_windows_default_install_reconciles_verified_legacy_user_plugin(
         ]
     )
     assert code == 0
+    legacy_receipt_path = legacy_target / RECEIPT_NAME
+    legacy_receipt = json.loads(legacy_receipt_path.read_text(encoding="utf-8"))
+    legacy_receipt["version"] = legacy_version
+    legacy_receipt_path.write_text(json.dumps(legacy_receipt), encoding="utf-8")
     unmanaged = legacy_target / "operator-owned.txt"
     unmanaged.write_text("preserve", encoding="utf-8")
 
@@ -95,7 +127,7 @@ def test_windows_default_install_reconciles_verified_legacy_user_plugin(
     )
     code, report = run(
         [
-            "install",
+            command,
             "--plugin-archive",
             str(archive),
             "--sha256",
@@ -103,21 +135,59 @@ def test_windows_default_install_reconciles_verified_legacy_user_plugin(
         ]
     )
 
-    assert code == 0 and report["status"] == "requires_restart"
+    assert code == 0 and report["status"] == "requires_restart", report
     assert (canonical_target / "bin" / "64bit" / "dcc-mcp-obs.dll").read_bytes() == payload
     assert not (legacy_target / "bin" / "64bit" / "dcc-mcp-obs.dll").exists()
     assert not (legacy_target / RECEIPT_NAME).exists()
     assert unmanaged.read_text(encoding="utf-8") == "preserve"
 
 
-def test_windows_default_install_rejects_unmanaged_legacy_user_plugin_before_mutation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("legacy_state", "failure_reason"),
+    [
+        ("unmanaged", "OBS_PLUGIN_DRIFT"),
+        ("older-file-drift", "OBS_PLUGIN_DRIFT"),
+        ("future-version", "OBS_RECEIPT_INVALID"),
+    ],
+)
+def test_windows_default_install_rejects_invalid_legacy_user_plugin_before_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    legacy_state: str,
+    failure_reason: str,
 ) -> None:
     canonical_target = tmp_path / "program-data" / "obs-studio" / "plugins" / "dcc-mcp-obs"
     legacy_target = tmp_path / "app-data" / "obs-studio" / "plugins" / "dcc-mcp-obs"
     monkeypatch.setattr(install_cli, "default_plugin_dir", lambda: canonical_target)
     monkeypatch.setattr(install_cli, "_legacy_windows_user_plugin_dir", lambda: legacy_target)
-    legacy_target.mkdir(parents=True)
+    if legacy_state == "unmanaged":
+        legacy_target.mkdir(parents=True)
+    else:
+        legacy_archive, legacy_digest, _legacy_payload = _bundle(
+            tmp_path,
+            target="bin/64bit/dcc-mcp-obs.dll",
+            name="legacy-plugin.zip",
+        )
+        assert (
+            run(
+                [
+                    "install",
+                    "--plugin-archive",
+                    str(legacy_archive),
+                    "--sha256",
+                    legacy_digest,
+                    "--plugin-dir",
+                    str(legacy_target),
+                ]
+            )[0]
+            == 0
+        )
+        receipt_path = legacy_target / RECEIPT_NAME
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        receipt["version"] = "999.0.0" if legacy_state == "future-version" else "1.1.0"
+        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+        if legacy_state == "older-file-drift":
+            (legacy_target / "bin" / "64bit" / "dcc-mcp-obs.dll").write_bytes(b"changed")
     unmanaged = legacy_target / "operator-owned.txt"
     unmanaged.write_text("preserve", encoding="utf-8")
     archive, digest, _payload = _bundle(
@@ -137,7 +207,7 @@ def test_windows_default_install_rejects_unmanaged_legacy_user_plugin_before_mut
     )
 
     assert code == 40
-    assert report["verify"]["failure_reason"] == "OBS_PLUGIN_DRIFT"
+    assert report["verify"]["failure_reason"] == failure_reason
     assert unmanaged.read_text(encoding="utf-8") == "preserve"
     assert not canonical_target.exists()
 
@@ -471,6 +541,37 @@ def test_upgrade_collision_restores_previous_owned_files_and_preserves_unmanaged
     assert unmanaged.read_bytes() == b"operator-owned"
     assert run(["status", "--plugin-dir", str(target)])[0] == 0
     assert not target.with_name(f".{target.name}.backup").exists()
+
+
+def test_uninstall_rejects_verified_receipt_from_older_adapter_version(tmp_path: Path) -> None:
+    archive, digest, payload = _bundle(tmp_path)
+    target = tmp_path / "installed"
+    assert (
+        run(
+            [
+                "install",
+                "--plugin-archive",
+                str(archive),
+                "--sha256",
+                digest,
+                "--plugin-dir",
+                str(target),
+            ]
+        )[0]
+        == 0
+    )
+    receipt_path = target / RECEIPT_NAME
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt["version"] = "1.1.0"
+    receipt_bytes = json.dumps(receipt).encode("utf-8")
+    receipt_path.write_bytes(receipt_bytes)
+
+    code, report = run(["uninstall", "--plugin-dir", str(target)])
+
+    assert code == 40
+    assert report["verify"]["failure_reason"] == "OBS_RECEIPT_INVALID"
+    assert receipt_path.read_bytes() == receipt_bytes
+    assert (target / "bin" / "dcc-mcp-obs.plugin").read_bytes() == payload
 
 
 def test_uninstall_removes_only_owned_files_and_preserves_unmanaged_extras(
