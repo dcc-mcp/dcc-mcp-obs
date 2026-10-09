@@ -557,8 +557,20 @@ def tag_remote(tmp_path: Path) -> dict[str, str]:
     subprocess.run(
         ["git", "tag", "v1.5.1"], cwd=work, check=True, capture_output=True
     )  # Lightweight
+    # An annotated tag needs a committer identity; CI runners have no global git config.
     subprocess.run(
-        ["git", "tag", "-a", "-m", "annotated", "v2.45.0"],
+        [
+            "git",
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "tag",
+            "-a",
+            "-m",
+            "annotated",
+            "v2.45.0",
+        ],
         cwd=work,
         check=True,
         capture_output=True,
