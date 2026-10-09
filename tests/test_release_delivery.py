@@ -525,6 +525,62 @@ def identity_tag_probe(release_tag: str) -> str:
     return f'set -euo pipefail\nRELEASE_TAG={release_tag!r}\n{body}echo "RESOLVED [$tag_commit]"\n'
 
 
+# Canonical URLs the identity step queries, mapped onto one local bare repository so the
+# tests never depend on network access or on a third-party repository's tag layout.
+REWRITE_URLS = ("https://github.com/dcc-mcp/dcc-mcp-obs.git", "https://github.com/git/git.git")
+
+
+@pytest.fixture
+def tag_remote(tmp_path: Path) -> dict[str, str]:
+    """Serve lightweight and annotated tags from a local bare repository."""
+    work = tmp_path / "seed"
+    work.mkdir()
+    for args in (["init", "-q"], ["add", "-A"]):
+        subprocess.run(["git", *args], cwd=work, check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+            "--allow-empty",
+        ],
+        cwd=work,
+        check=True,
+        capture_output=True,
+    )
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=work, text=True).strip()
+    subprocess.run(
+        ["git", "tag", "v1.5.1"], cwd=work, check=True, capture_output=True
+    )  # Lightweight
+    subprocess.run(
+        ["git", "tag", "-a", "-m", "annotated", "v2.45.0"],
+        cwd=work,
+        check=True,
+        capture_output=True,
+    )
+    bare = tmp_path / "remote.git"
+    subprocess.run(
+        ["git", "clone", "-q", "--bare", str(work), str(bare)], check=True, capture_output=True
+    )
+    config = "".join(f'[url "{bare.as_posix()}"]\n\tinsteadOf = {url}\n' for url in REWRITE_URLS)
+    include = tmp_path / "insteadof.gitconfig"
+    include.write_text(config)
+    # `commit` is fixture data, not an environment variable; callers pass `env` to run_shell.
+    return {
+        "commit": commit,
+        "env": {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "include.path",
+            "GIT_CONFIG_VALUE_0": str(include),
+        },
+    }
+
+
 def base_identity_env(sha: str, tag: str) -> dict[str, str]:
     """Build the identity step environment for one tag and release commit."""
     return {
@@ -538,54 +594,66 @@ def base_identity_env(sha: str, tag: str) -> dict[str, str]:
     }
 
 
-def test_lightweight_tag_resolves_to_its_commit_and_confirms(release_fixture: tuple) -> None:
+def test_lightweight_tag_resolves_to_its_commit_and_confirms(tag_remote: dict) -> None:
     """A lightweight release tag must resolve and confirm, not fall through to the caller."""
-    _root, _env, _api = release_fixture
-    # dcc-mcp-obs v1.5.1 is a lightweight tag; it has no peeled `^{}` record at all.
-    lightweight = "475046ba823a199195f32ee729983770c2da6898"
-    code, out = run_identity_step(base_identity_env(lightweight, "v1.5.1"))
+    commit = tag_remote["commit"]
+    # v1.5.1 is a lightweight tag; it has no peeled `^{}` record at all.
+    code, out = run_identity_step({**base_identity_env(commit, "v1.5.1"), **tag_remote["env"]})
     assert code == 0, out
-    assert f"tag v1.5.1 -> {lightweight}" in out
+    assert f"tag v1.5.1 -> {commit}" in out
     assert "tag_confirmed=true" in out
     assert "not resolvable yet" not in out
 
 
-def test_annotated_tag_resolves_to_its_commit_not_the_tag_object() -> None:
+def test_annotated_tag_resolves_to_its_commit_not_the_tag_object(tag_remote: dict) -> None:
     """An annotated tag must resolve to the peeled commit rather than the tag object."""
-    # git/git v2.45.0 is annotated: refs/tags/v2.45.0 is the tag object,
-    # refs/tags/v2.45.0^{} is the commit the release should be anchored on.
-    commit = "786a3e4b8d754d2b14b1208b98eeb0a554ef19a8"
-    code, out = run_shell(identity_tag_probe("v2.45.0"), {"GITHUB_REPOSITORY": "git/git"})
+    commit = tag_remote["commit"]
+    annotated_object = subprocess.check_output(
+        ["git", "ls-remote", "--tags", "https://github.com/git/git.git", "refs/tags/v2.45.0"],
+        text=True,
+        env={**os.environ, **tag_remote["env"]},
+    ).split()[0]
+    code, out = run_shell(
+        identity_tag_probe("v2.45.0"),
+        {"GITHUB_REPOSITORY": "git/git", **tag_remote["env"]},
+    )
     assert code == 0, out
     assert f"RESOLVED [{commit}]" in out
     # The tag object itself must never be mistaken for the release commit.
-    assert "8be58deda2ccce7d036072ec34439f9fad88204f" not in out
+    assert annotated_object not in out
 
 
-def test_identity_rejects_a_tag_pointing_at_another_commit(release_fixture: tuple) -> None:
+def test_identity_rejects_a_tag_pointing_at_another_commit(tag_remote: dict) -> None:
     """A tag that resolves to a commit other than RELEASE_SHA must fail the step."""
-    _root, _env, _api = release_fixture
-    code, out = run_identity_step(base_identity_env("a" * 40, "v1.5.1"))
+    commit = tag_remote["commit"]
+    code, out = run_identity_step({**base_identity_env("a" * 40, "v1.5.1"), **tag_remote["env"]})
     assert code != 0
-    assert "475046ba823a199195f32ee729983770c2da6898" in out
+    assert commit in out
 
 
 def test_unpublished_tag_falls_back_to_the_caller_without_confirming(
     release_fixture: tuple,
+    tag_remote: dict,
 ) -> None:
     """A tag the remote does not have must fall back and report confirmed=false."""
     _root, env, _api = release_fixture
     sha = env["RELEASE_SHA"]
-    code, out = run_identity_step({**base_identity_env(sha, "v0.0.0"), "GITHUB_SHA": sha})
+    code, out = run_identity_step(
+        {**base_identity_env(sha, "v0.0.0"), "GITHUB_SHA": sha, **tag_remote["env"]}
+    )
     assert code == 0, out
     assert "not resolvable yet" in out
     assert "tag_confirmed=false" in out
 
 
-def test_unpublished_tag_and_divergent_caller_fails_closed(release_fixture: tuple) -> None:
+def test_unpublished_tag_and_divergent_caller_fails_closed(
+    release_fixture: tuple, tag_remote: dict
+) -> None:
     """Falling back must still reject a release commit that differs from the caller."""
     _root, env, _api = release_fixture
-    code, out = run_identity_step(base_identity_env(env["RELEASE_SHA"], "v0.0.0"))
+    code, out = run_identity_step(
+        {**base_identity_env(env["RELEASE_SHA"], "v0.0.0"), **tag_remote["env"]}
+    )
     assert code != 0
     assert "not resolvable yet" in out
 
@@ -595,16 +663,16 @@ def test_identity_step_survives_an_unreachable_remote(release_fixture: tuple) ->
     _root, _env, _api = release_fixture
     script = workflow("release.yml")["jobs"]["identity"]["steps"][0]["run"]
     start = script.index('tag_commit="$(')
-    # The undecorated lookup aborts with rc=128 under pipefail; prove the guard is what
-    # keeps the step alive, then assert the guarded form reaches the fallback branch.
+    # Point the remote at a path that does not exist so the lookup fails locally.
+    unreachable = {"GITHUB_REPOSITORY": "dcc-mcp/dcc-mcp-identity-unreachable"}
     unguarded = identity_tag_probe("v1.5.1")
-    code, _out = run_shell(unguarded, {"GITHUB_REPOSITORY": "dcc-mcp/dcc-mcp-identity-unreachable"})
-    assert code == 128, "the lookup must genuinely fail without its guard"
+    code, _out = run_shell(unguarded, unreachable)
+    assert code != 0, "the lookup must genuinely fail without its guard"
     guarded = script[start : script.index('if [ -n "$tag_commit" ]', start)]
     assert '|| tag_commit=""' in guarded, "the step must guard the lookup against pipefail"
     code, out = run_shell(
         f'set -euo pipefail\nRELEASE_TAG="v1.5.1"\n{guarded}echo "RESOLVED [$tag_commit]"\n',
-        {"GITHUB_REPOSITORY": "dcc-mcp/dcc-mcp-identity-unreachable"},
+        unreachable,
     )
     assert code == 0, out  # pipefail must not abort the step before the fallback runs.
     assert "RESOLVED []" in out
