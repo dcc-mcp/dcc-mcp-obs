@@ -423,7 +423,7 @@ def _verified_legacy_windows_user_plugin(target: Path) -> Path | None:
         return None
     _require_safe_target_path(legacy_target)
     _release_active_result_lease(legacy_target)
-    _verify(legacy_target)
+    _verify(legacy_target, expected_version=None)
     return legacy_target
 
 
@@ -432,7 +432,7 @@ def _remove_legacy_windows_user_plugin(
 ) -> None:
     if legacy_target is None:
         return
-    _uninstall(legacy_target)
+    _uninstall(legacy_target, expected_version=None)
     steps.append({"id": "legacy-user-plugin", "status": "ok"})
 
 
@@ -1474,8 +1474,8 @@ def _prune_empty_owned_directories(target: Path, relatives: Sequence[str]) -> No
             directory.rmdir()
 
 
-def _uninstall(target: Path) -> None:
-    receipt = _verify(target)
+def _uninstall(target: Path, *, expected_version: str | None = __version__) -> None:
+    receipt = _verify(target, expected_version=expected_version)
     relatives = _receipt_relatives(receipt)
     expected = dict(receipt.ownership_identity)
     snapshot = _snapshot_owned_files(target, [*relatives, RECEIPT_NAME], expected)
