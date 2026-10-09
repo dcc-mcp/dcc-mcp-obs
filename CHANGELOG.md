@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.1](https://github.com/dcc-mcp/dcc-mcp-obs/compare/v1.5.0...v1.5.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **ci:** verify runtime digests with portable Python ([#71](https://github.com/dcc-mcp/dcc-mcp-obs/issues/71)) ([84a0b6b](https://github.com/dcc-mcp/dcc-mcp-obs/commit/84a0b6bb15e77db927e6a763283d9b63a3f9c51d))
+
 ## [1.5.0](https://github.com/dcc-mcp/dcc-mcp-obs/compare/v1.4.0...v1.5.0) (2026-10-09)
 
 
