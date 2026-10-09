@@ -88,7 +88,7 @@ def handoff(root: Path, env: dict[str, str]) -> tuple[str, str, str, str]:
     # while this run is in flight legitimately tags a later commit. Trusting the tag
     # over the caller keeps that release publishable instead of stranding it with no
     # assets, and verify_release still proves the tag names this exact commit.
-    if not env.get("RELEASE_TAG_CONFIRMED"):
+    if env.get("RELEASE_TAG_CONFIRMED") != "true":
         require(sha == env.get("GITHUB_SHA"), "release commit differs from caller")
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
     require(head == sha, "checkout differs from release commit")

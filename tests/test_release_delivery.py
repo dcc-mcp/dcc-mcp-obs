@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 import zipfile
 from pathlib import Path
 from urllib.parse import quote
@@ -465,6 +466,12 @@ def test_real_precheckout_shell_gate(
     root, env, _api = release_fixture
     if key is not None:
         env[key] = value
+    if key != "RELEASE_TAG":
+        # Point the step at a tag that cannot exist on the real remote. The identity
+        # step queries the live repository, and v1.0.0 now genuinely resolves there to
+        # the published commit; binding it to a fresh local SHA would fail on tag
+        # identity rather than exercising the caller fallback these cases cover.
+        env["RELEASE_TAG"] = "v0.0.0"
     step = workflow("release.yml")["jobs"]["identity"]["steps"][0]
     assert step["name"] == "Validate caller before checkout"
     bash = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else shutil.which("bash")
@@ -476,6 +483,154 @@ def test_real_precheckout_shell_gate(
         capture_output=True,
     )
     assert (result.returncode == 0) is (key is None)
+
+
+def run_identity_step(env: dict[str, str]) -> tuple[int, str]:
+    """Execute the real pre-checkout identity step and return its status and output."""
+    step = workflow("release.yml")["jobs"]["identity"]["steps"][0]
+    return run_shell(step["run"], env)
+
+
+def run_shell(script: str, env: dict[str, str]) -> tuple[int, str]:
+    """Run one workflow script under the same flags GitHub uses, capturing all output."""
+    bash = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else shutil.which("bash")
+    assert bash is not None
+    output = Path(tempfile.mkdtemp()) / "github_output"
+    result = subprocess.run(
+        [bash, "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", script],
+        env={**os.environ, "GITHUB_OUTPUT": str(output), **env},
+        capture_output=True,
+        text=True,
+    )
+    body = output.read_text() if output.is_file() else ""
+    shutil.rmtree(output.parent, ignore_errors=True)
+    return result.returncode, result.stdout + result.stderr + body
+
+
+def identity_tag_probe(release_tag: str) -> str:
+    """Return the tag-resolution pipeline of the identity step as a standalone script.
+
+    The step's first assertion pins GITHUB_REPOSITORY to this repository, so foreign
+    remotes and annotated tags can only be exercised by running this pipeline alone.
+    The step's own source is the subject under test, so it is located by markers
+    rather than copied: a copy would keep passing after the step regressed.
+    """
+    script = workflow("release.yml")["jobs"]["identity"]["steps"][0]["run"]
+    start = script.index('tag_commit="$(')
+    end = script.index('if [ -n "$tag_commit" ]', start)
+    body = script[start:end]
+    # Drop the `|| tag_commit=""` guard: this probe asserts the pipeline's own behaviour,
+    # and keeping the guard would hide an abort that the real step depends on surviving.
+    body = body.replace('|| tag_commit=""', "")
+    return f'set -euo pipefail\nRELEASE_TAG={release_tag!r}\n{body}echo "RESOLVED [$tag_commit]"\n'
+
+
+def base_identity_env(sha: str, tag: str) -> dict[str, str]:
+    """Build the identity step environment for one tag and release commit."""
+    return {
+        "RELEASE_TAG": tag,
+        "RELEASE_SHA": sha,
+        "RELEASE_ID": "123",
+        "GITHUB_SHA": "b" * 40,
+        "GITHUB_REPOSITORY": "dcc-mcp/dcc-mcp-obs",
+        "GITHUB_EVENT_NAME": "push",
+        "GITHUB_REF": "refs/heads/main",
+    }
+
+
+def test_lightweight_tag_resolves_to_its_commit_and_confirms(release_fixture: tuple) -> None:
+    """A lightweight release tag must resolve and confirm, not fall through to the caller."""
+    _root, _env, _api = release_fixture
+    # dcc-mcp-obs v1.5.1 is a lightweight tag; it has no peeled `^{}` record at all.
+    lightweight = "475046ba823a199195f32ee729983770c2da6898"
+    code, out = run_identity_step(base_identity_env(lightweight, "v1.5.1"))
+    assert code == 0, out
+    assert f"tag v1.5.1 -> {lightweight}" in out
+    assert "tag_confirmed=true" in out
+    assert "not resolvable yet" not in out
+
+
+def test_annotated_tag_resolves_to_its_commit_not_the_tag_object() -> None:
+    """An annotated tag must resolve to the peeled commit rather than the tag object."""
+    # git/git v2.45.0 is annotated: refs/tags/v2.45.0 is the tag object,
+    # refs/tags/v2.45.0^{} is the commit the release should be anchored on.
+    commit = "786a3e4b8d754d2b14b1208b98eeb0a554ef19a8"
+    code, out = run_shell(identity_tag_probe("v2.45.0"), {"GITHUB_REPOSITORY": "git/git"})
+    assert code == 0, out
+    assert f"RESOLVED [{commit}]" in out
+    # The tag object itself must never be mistaken for the release commit.
+    assert "8be58deda2ccce7d036072ec34439f9fad88204f" not in out
+
+
+def test_identity_rejects_a_tag_pointing_at_another_commit(release_fixture: tuple) -> None:
+    """A tag that resolves to a commit other than RELEASE_SHA must fail the step."""
+    _root, _env, _api = release_fixture
+    code, out = run_identity_step(base_identity_env("a" * 40, "v1.5.1"))
+    assert code != 0
+    assert "475046ba823a199195f32ee729983770c2da6898" in out
+
+
+def test_unpublished_tag_falls_back_to_the_caller_without_confirming(
+    release_fixture: tuple,
+) -> None:
+    """A tag the remote does not have must fall back and report confirmed=false."""
+    _root, env, _api = release_fixture
+    sha = env["RELEASE_SHA"]
+    code, out = run_identity_step({**base_identity_env(sha, "v0.0.0"), "GITHUB_SHA": sha})
+    assert code == 0, out
+    assert "not resolvable yet" in out
+    assert "tag_confirmed=false" in out
+
+
+def test_unpublished_tag_and_divergent_caller_fails_closed(release_fixture: tuple) -> None:
+    """Falling back must still reject a release commit that differs from the caller."""
+    _root, env, _api = release_fixture
+    code, out = run_identity_step(base_identity_env(env["RELEASE_SHA"], "v0.0.0"))
+    assert code != 0
+    assert "not resolvable yet" in out
+
+
+def test_identity_step_survives_an_unreachable_remote(release_fixture: tuple) -> None:
+    """A failing ls-remote must leave the fallback reachable instead of aborting the step."""
+    _root, _env, _api = release_fixture
+    script = workflow("release.yml")["jobs"]["identity"]["steps"][0]["run"]
+    start = script.index('tag_commit="$(')
+    # The undecorated lookup aborts with rc=128 under pipefail; prove the guard is what
+    # keeps the step alive, then assert the guarded form reaches the fallback branch.
+    unguarded = identity_tag_probe("v1.5.1")
+    code, _out = run_shell(unguarded, {"GITHUB_REPOSITORY": "dcc-mcp/dcc-mcp-identity-unreachable"})
+    assert code == 128, "the lookup must genuinely fail without its guard"
+    guarded = script[start : script.index('if [ -n "$tag_commit" ]', start)]
+    assert '|| tag_commit=""' in guarded, "the step must guard the lookup against pipefail"
+    code, out = run_shell(
+        f'set -euo pipefail\nRELEASE_TAG="v1.5.1"\n{guarded}echo "RESOLVED [$tag_commit]"\n',
+        {"GITHUB_REPOSITORY": "dcc-mcp/dcc-mcp-identity-unreachable"},
+    )
+    assert code == 0, out  # pipefail must not abort the step before the fallback runs.
+    assert "RESOLVED []" in out
+
+
+def test_handoff_enforces_caller_check_when_tag_is_unconfirmed(release_fixture: tuple) -> None:
+    """handoff must compare with the caller whenever the tag was not confirmed."""
+    root, env, api = release_fixture
+    for unconfirmed in ("false", "FALSE", "no", "", None):
+        candidate = dict(env)
+        candidate["GITHUB_SHA"] = "b" * 40
+        if unconfirmed is None:
+            candidate.pop("RELEASE_TAG_CONFIRMED", None)
+        else:
+            candidate["RELEASE_TAG_CONFIRMED"] = unconfirmed
+        with pytest.raises(ValueError, match="differs from caller"):
+            delivery.handoff(root, candidate)
+        assert api.writes == []
+
+
+def test_handoff_accepts_a_confirmed_tag_without_the_caller(release_fixture: tuple) -> None:
+    """A confirmed tag must release handoff from the caller comparison."""
+    root, env, _api = release_fixture
+    env["GITHUB_SHA"] = "b" * 40
+    env["RELEASE_TAG_CONFIRMED"] = "true"
+    assert delivery.handoff(root, env)[1] == env["RELEASE_SHA"]
 
 
 def test_upload_conflict_never_overwrites_or_retries(

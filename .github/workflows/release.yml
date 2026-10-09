@@ -53,7 +53,22 @@ jobs:
           # before checkout: the tag has to be read from the canonical URL, and if it
           # has not propagated yet we still have the caller to compare against rather
           # than blocking a real release on tag visibility.
-          tag_commit="$(git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${RELEASE_TAG}^{}" 2>/dev/null | awk 'NR==1{print $1}')"
+          #
+          # Query both the plain and the peeled ref: release-please creates lightweight
+          # tags, which never produce a `^{}` record, so asking only for the peeled ref
+          # silently yields an empty result and drops every run into the caller branch.
+          # Prefer the peeled line when present so an annotated tag resolves to its
+          # commit rather than to the tag object. `|| tag_commit=""` keeps the fallback
+          # reachable under `set -euo pipefail`, where a failing ls-remote would abort
+          # the step before the branch that handles it ever runs.
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          [[ "$RELEASE_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
+          tag_commit="$(git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}.git" \
+              "refs/tags/${RELEASE_TAG}" "refs/tags/${RELEASE_TAG}^{}" 2>/dev/null \
+            | awk -v t="refs/tags/${RELEASE_TAG}" '
+                $2 == t "^{}" { peeled = $1 }
+                $2 == t       { plain  = $1 }
+                END { print (peeled != "" ? peeled : plain) }')" || tag_commit=""
           if [ -n "$tag_commit" ]; then
             echo "tag $RELEASE_TAG -> $tag_commit"
             test "$tag_commit" = "$RELEASE_SHA"
@@ -66,8 +81,6 @@ jobs:
           if [ -n "${GITHUB_OUTPUT:-}" ]; then
             printf 'tag_confirmed=%s\n' "$confirmed" >> "$GITHUB_OUTPUT"
           fi
-          [[ "$RELEASE_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ needs.release-please.outputs.sha }}
