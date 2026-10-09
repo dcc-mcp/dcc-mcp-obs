@@ -195,11 +195,27 @@ jobs:
             --pattern manifest.json \
             --pattern obs.json \
             --dir runtime-artifact
-          printf '%s  %s\n' \
-            "${RUNTIME_WHEEL_SHA256}" "runtime-artifact/dcc_mcp_runtime-${RUNTIME_VERSION}-py3-none-any.whl" \
-            "${RUNTIME_MANIFEST_SHA256}" runtime-artifact/manifest.json \
-            "${ADAPTER_MANIFEST_SHA256}" runtime-artifact/obs.json \
-            | sha256sum --check --strict
+          python - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+
+          expected = (
+              (f"dcc_mcp_runtime-{os.environ['RUNTIME_VERSION']}-py3-none-any.whl", "RUNTIME_WHEEL_SHA256"),
+              ("manifest.json", "RUNTIME_MANIFEST_SHA256"),
+              ("obs.json", "ADAPTER_MANIFEST_SHA256"),
+          )
+          for filename, variable in expected:
+              digest = os.environ[variable]
+              if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest.lower()):
+                  raise SystemExit(f"Invalid SHA256 pin: {filename}")
+              path = Path("runtime-artifact") / filename
+              if not path.is_file():
+                  raise SystemExit(f"Missing pinned runtime file: {path}")
+              if hashlib.sha256(path.read_bytes()).hexdigest() != digest.lower():
+                  raise SystemExit(f"SHA256 mismatch: {path}")
+              print(f"{path}: OK")
+          PY
       - name: Build shared runtime bundle
         shell: bash
         env:
