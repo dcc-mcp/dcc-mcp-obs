@@ -199,7 +199,7 @@ jobs:
             "${RUNTIME_WHEEL_SHA256}" "runtime-artifact/dcc_mcp_runtime-${RUNTIME_VERSION}-py3-none-any.whl" \
             "${RUNTIME_MANIFEST_SHA256}" runtime-artifact/manifest.json \
             "${ADAPTER_MANIFEST_SHA256}" runtime-artifact/obs.json \
-            | sha256sum --check --strict
+            | sha256sum -c -
       - name: Build shared runtime bundle
         shell: bash
         env:

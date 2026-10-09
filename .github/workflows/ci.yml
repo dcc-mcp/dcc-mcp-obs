@@ -66,7 +66,7 @@ jobs:
           curl --fail --location --proto '=https' --tlsv1.2 \
             --output "$RUNNER_TEMP/dcc-mcp-cli.zip" \
             https://github.com/dcc-mcp/dcc-mcp-core/releases/download/v0.20.21/dcc-mcp-cli-0.20.21-linux-x86_64.zip
-          echo "ada852953c71df7682dc9a3d5ddabf351d421d58d00ed1ee40acb63b49949afe  $RUNNER_TEMP/dcc-mcp-cli.zip" | sha256sum --check --strict
+          echo "ada852953c71df7682dc9a3d5ddabf351d421d58d00ed1ee40acb63b49949afe  $RUNNER_TEMP/dcc-mcp-cli.zip" | sha256sum -c -
           unzip -q "$RUNNER_TEMP/dcc-mcp-cli.zip" -d "$RUNNER_TEMP/dcc-mcp-cli"
           "$RUNNER_TEMP/dcc-mcp-cli/dcc-mcp-cli" lint src/dcc_mcp_obs/skills/obs-control \
             --warnings-as-errors --output json

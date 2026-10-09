@@ -169,7 +169,9 @@ def test_ci_and_release_use_shared_runtime_bundles() -> None:
         download["env"]["RUNTIME_REPOSITORY"] == "${{ steps.runtime.outputs.runtime_repository }}"
     )
     assert download["env"]["RUNTIME_VERSION"] == "${{ steps.runtime.outputs.runtime_version }}"
-    assert "sha256sum --check --strict" in download["run"]
+    assert "sha256sum -c -" in download["run"]
+    for gnu_only_flag in ("--check", "--strict", "--quiet", "--ignore-missing", "--status"):
+        assert gnu_only_flag not in download["run"]
     assert config["runtime_repository"] not in download["run"]
     assert config["runtime_version"] not in download["run"]
     for key in (
@@ -183,6 +185,30 @@ def test_ci_and_release_use_shared_runtime_bundles() -> None:
     for installer in ("install.py", "install.ps1", "install.sh"):
         assert installer in builder
         assert installer in validator
+
+
+def test_workflow_shell_scripts_avoid_gnu_only_checksum_flags() -> None:
+    """Checksum checks must run on macOS (BSD) coresutils, not just GNU coreutils."""
+    workflows = sorted((ROOT / ".github" / "workflows").glob("*.y*ml"))
+    assert workflows, "no workflow files found"
+
+    # Flags accepted by GNU sha*sum --check but rejected by the BSD build on macOS.
+    gnu_only = ("--check", "--strict", "--quiet", "--ignore-missing", "--status", "--binary")
+    offenders: list[str] = []
+
+    for path in workflows:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        jobs = (document or {}).get("jobs") or {}
+        for job_name, job in jobs.items():
+            for step in job.get("steps") or []:
+                script = str(step.get("run", ""))
+                if not any(tool in script for tool in ("sha256sum", "sha1sum", "md5sum")):
+                    continue
+                for flag in gnu_only:
+                    if flag in script:
+                        offenders.append(f"{path.name}:{job_name}:{flag}")
+
+    assert offenders == [], f"GNU-only checksum flags would break macOS lanes: {offenders}"
 
 
 def test_cli_install_runbook_selects_the_bundled_runtime_and_environment_override() -> None:
