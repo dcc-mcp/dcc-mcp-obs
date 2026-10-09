@@ -30,8 +30,10 @@ jobs:
       tag: ${{ needs.release-please.outputs.tag }}
       sha: ${{ needs.release-please.outputs.sha }}
       release_id: ${{ needs.release-please.outputs.release_id }}
+      tag_confirmed: ${{ steps.identity.outputs.tag_confirmed }}
     steps:
       - name: Validate caller before checkout
+        id: identity
         shell: bash
         run: |
           set -euo pipefail
@@ -40,30 +42,30 @@ jobs:
           test "$GITHUB_REF" = "refs/heads/main"
           [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
           # Anchor identity on the commit the release TAG resolves to, never on
-          # github.sha. The release PR can be merged while this run's `checks` job is
-          # still in flight; release-please then tags that later merge commit, so
-          # release-please's `sha` output legitimately differs from the commit that
-          # started this run. Asserting RELEASE_SHA == GITHUB_SHA made artifact jobs
+          # github.sha alone. The release PR can be merged while this run's `checks`
+          # job is still in flight; release-please then tags that later merge commit,
+          # so release-please's `sha` output legitimately differs from the commit that
+          # started this run. Requiring RELEASE_SHA == GITHUB_SHA made artifact jobs
           # fail in exactly that case, and the next push skipped them (created != true),
           # so the release shipped with no artifacts and could never self-heal.
-          git init --quiet release-identity
-          cd release-identity
-          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
-          tag_commit=""
-          for _ in $(seq 1 12); do
-            if git fetch --depth=1 origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG" 2>/dev/null; then
-              tag_commit="$(git rev-list -n 1 "$RELEASE_TAG")"
-              [ -n "$tag_commit" ] && break
-            fi
-            echo "waiting for $RELEASE_TAG to become visible on origin"
-            sleep 5
-          done
-          if [ -z "$tag_commit" ]; then
-            echo "::error::release tag $RELEASE_TAG is not resolvable on origin"
-            exit 1
+          #
+          # Prefer the tag and fall back to the caller check, because this step runs
+          # before checkout: the tag has to be read from the canonical URL, and if it
+          # has not propagated yet we still have the caller to compare against rather
+          # than blocking a real release on tag visibility.
+          tag_commit="$(git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${RELEASE_TAG}^{}" 2>/dev/null | awk 'NR==1{print $1}')"
+          if [ -n "$tag_commit" ]; then
+            echo "tag $RELEASE_TAG -> $tag_commit"
+            test "$tag_commit" = "$RELEASE_SHA"
+            confirmed=true
+          else
+            echo "release tag $RELEASE_TAG is not resolvable yet; comparing with the caller"
+            test "$RELEASE_SHA" = "$GITHUB_SHA"
+            confirmed=false
           fi
-          echo "tag $RELEASE_TAG -> $tag_commit"
-          test "$tag_commit" = "$RELEASE_SHA"
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then
+            printf 'tag_confirmed=%s\n' "$confirmed" >> "$GITHUB_OUTPUT"
+          fi
           [[ "$RELEASE_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -76,6 +78,7 @@ jobs:
       - name: Verify Release Please handoff
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG_CONFIRMED: ${{ steps.identity.outputs.tag_confirmed }}
         run: python tools/release_delivery.py check
 
   python-artifacts:
@@ -275,6 +278,7 @@ jobs:
       RELEASE_TAG: ${{ needs.identity.outputs.tag }}
       RELEASE_SHA: ${{ needs.identity.outputs.sha }}
       RELEASE_ID: ${{ needs.identity.outputs.release_id }}
+      RELEASE_TAG_CONFIRMED: ${{ needs.identity.outputs.tag_confirmed }}
     runs-on: ubuntu-24.04
     environment: pypi
     permissions:

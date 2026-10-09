@@ -83,7 +83,13 @@ def handoff(root: Path, env: dict[str, str]) -> tuple[str, str, str, str]:
     require(env.get("GITHUB_REF") == "refs/heads/main", "not the main branch")
     require(re.fullmatch(r"[0-9a-f]{40}", sha) is not None, "invalid release commit")
     require(re.fullmatch(r"[1-9][0-9]*", release_id) is not None, "invalid release ID")
-    require(sha == env.get("GITHUB_SHA"), "release commit differs from caller")
+    # Compare with the caller only as a fallback. release-please resolves its own sha
+    # from the branch HEAD when it creates the release, so a release PR that merges
+    # while this run is in flight legitimately tags a later commit. Trusting the tag
+    # over the caller keeps that release publishable instead of stranding it with no
+    # assets, and verify_release still proves the tag names this exact commit.
+    if not env.get("RELEASE_TAG_CONFIRMED"):
+        require(sha == env.get("GITHUB_SHA"), "release commit differs from caller")
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
     require(head == sha, "checkout differs from release commit")
     version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
