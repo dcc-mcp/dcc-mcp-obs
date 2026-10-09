@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import runpy
+import subprocess
 import sys
 from importlib import metadata
 from pathlib import Path
 
+import pytest
 import yaml
 from tools import build_standalone
 
@@ -169,7 +172,7 @@ def test_ci_and_release_use_shared_runtime_bundles() -> None:
         download["env"]["RUNTIME_REPOSITORY"] == "${{ steps.runtime.outputs.runtime_repository }}"
     )
     assert download["env"]["RUNTIME_VERSION"] == "${{ steps.runtime.outputs.runtime_version }}"
-    assert "sha256sum --check --strict" in download["run"]
+    assert "python - <<'PY'" in download["run"]
     assert config["runtime_repository"] not in download["run"]
     assert config["runtime_version"] not in download["run"]
     for key in (
@@ -178,11 +181,100 @@ def test_ci_and_release_use_shared_runtime_bundles() -> None:
         "adapter_manifest_sha256",
     ):
         assert len(config[key]) == 64
+        assert download["env"][key.upper()] == "${{ steps.runtime.outputs." + key + " }}"
     builder = (ROOT / "tools/build_shared_runtime.py").read_text(encoding="utf-8")
     validator = (ROOT / "tools/release_delivery.py").read_text(encoding="utf-8")
     for installer in ("install.py", "install.ps1", "install.sh"):
         assert installer in builder
         assert installer in validator
+
+
+def _run_runtime_checksum(
+    tmp_path: Path,
+    *,
+    changed: str | None = None,
+    missing: str | None = None,
+    invalid_pin: tuple[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    release = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8"))
+    download = next(
+        step
+        for step in release["jobs"]["shared-runtime-artifacts"]["steps"]
+        if step.get("name", "").startswith("Download and verify")
+    )
+    _, marker, verification = download["run"].partition("python - <<'PY'\n")
+    script, closing, _ = verification.partition("\nPY")
+    assert marker and closing, "shared runtime checksum must use a portable Python verifier"
+    artifact_root = tmp_path / "runtime-artifact"
+    artifact_root.mkdir()
+    environment = dict(os.environ, RUNTIME_VERSION="0.1.0")
+    artifacts = {
+        "dcc_mcp_runtime-0.1.0-py3-none-any.whl": "RUNTIME_WHEEL_SHA256",
+        "manifest.json": "RUNTIME_MANIFEST_SHA256",
+        "obs.json": "ADAPTER_MANIFEST_SHA256",
+    }
+    for name, variable in artifacts.items():
+        payload = f"publisher-owned {name}".encode()
+        (artifact_root / name).write_bytes(payload)
+        environment[variable] = hashlib.sha256(payload).hexdigest()
+    if changed is not None:
+        (artifact_root / changed).write_bytes(b"changed bytes")
+    if missing is not None:
+        (artifact_root / missing).unlink()
+    if invalid_pin is not None:
+        name, digest = invalid_pin
+        environment[artifacts[name]] = digest
+    return subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_shared_runtime_checksum_accepts_all_pinned_files(tmp_path: Path) -> None:
+    result = _run_runtime_checksum(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.count(": OK") == 3
+
+
+@pytest.mark.parametrize(
+    "name", ["dcc_mcp_runtime-0.1.0-py3-none-any.whl", "manifest.json", "obs.json"]
+)
+def test_shared_runtime_checksum_rejects_changed_bytes(tmp_path: Path, name: str) -> None:
+    result = _run_runtime_checksum(tmp_path, changed=name)
+
+    assert result.returncode != 0
+    assert "SHA256 mismatch" in result.stderr
+    assert name in result.stderr
+
+
+@pytest.mark.parametrize(
+    "name", ["dcc_mcp_runtime-0.1.0-py3-none-any.whl", "manifest.json", "obs.json"]
+)
+def test_shared_runtime_checksum_rejects_missing_files(tmp_path: Path, name: str) -> None:
+    result = _run_runtime_checksum(tmp_path, missing=name)
+
+    assert result.returncode != 0
+    assert "Missing pinned runtime file" in result.stderr
+    assert name in result.stderr
+
+
+@pytest.mark.parametrize(
+    "name", ["dcc_mcp_runtime-0.1.0-py3-none-any.whl", "manifest.json", "obs.json"]
+)
+@pytest.mark.parametrize("digest", ["too-short", "g" * 64])
+def test_shared_runtime_checksum_rejects_invalid_pins(
+    tmp_path: Path, name: str, digest: str
+) -> None:
+    result = _run_runtime_checksum(tmp_path, invalid_pin=(name, digest))
+
+    assert result.returncode != 0
+    assert "Invalid SHA256 pin" in result.stderr
+    assert name in result.stderr
 
 
 def test_cli_install_runbook_selects_the_bundled_runtime_and_environment_override() -> None:
