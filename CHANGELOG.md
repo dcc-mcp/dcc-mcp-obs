@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.2](https://github.com/dcc-mcp/dcc-mcp-obs/compare/v1.5.1...v1.5.2) (2026-10-10)
+
+
+### Bug Fixes
+
+* **ci:** anchor release identity on the tag, not github.sha ([#73](https://github.com/dcc-mcp/dcc-mcp-obs/issues/73)) ([da2597d](https://github.com/dcc-mcp/dcc-mcp-obs/commit/da2597d18f0825c612b05ec8df7657c835dfaef3))
+
 ## [1.5.1](https://github.com/dcc-mcp/dcc-mcp-obs/compare/v1.5.0...v1.5.1) (2026-10-09)
 
 
