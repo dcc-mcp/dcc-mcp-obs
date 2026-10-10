@@ -30,17 +30,57 @@ jobs:
       tag: ${{ needs.release-please.outputs.tag }}
       sha: ${{ needs.release-please.outputs.sha }}
       release_id: ${{ needs.release-please.outputs.release_id }}
+      tag_confirmed: ${{ steps.identity.outputs.tag_confirmed }}
     steps:
       - name: Validate caller before checkout
+        id: identity
         shell: bash
         run: |
+          set -euo pipefail
           test "$GITHUB_REPOSITORY" = "dcc-mcp/dcc-mcp-obs"
           test "$GITHUB_EVENT_NAME" = "push"
           test "$GITHUB_REF" = "refs/heads/main"
           [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
-          test "$RELEASE_SHA" = "$GITHUB_SHA"
-          [[ "$RELEASE_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
+          # Anchor identity on the commit the release TAG resolves to, never on
+          # github.sha alone. The release PR can be merged while this run's `checks`
+          # job is still in flight; release-please then tags that later merge commit,
+          # so release-please's `sha` output legitimately differs from the commit that
+          # started this run. Requiring RELEASE_SHA == GITHUB_SHA made artifact jobs
+          # fail in exactly that case, and the next push skipped them (created != true),
+          # so the release shipped with no artifacts and could never self-heal.
+          #
+          # Prefer the tag and fall back to the caller check, because this step runs
+          # before checkout: the tag has to be read from the canonical URL, and if it
+          # has not propagated yet we still have the caller to compare against rather
+          # than blocking a real release on tag visibility.
+          #
+          # Query both the plain and the peeled ref: release-please creates lightweight
+          # tags, which never produce a `^{}` record, so asking only for the peeled ref
+          # silently yields an empty result and drops every run into the caller branch.
+          # Prefer the peeled line when present so an annotated tag resolves to its
+          # commit rather than to the tag object. `|| tag_commit=""` keeps the fallback
+          # reachable under `set -euo pipefail`, where a failing ls-remote would abort
+          # the step before the branch that handles it ever runs.
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          [[ "$RELEASE_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
+          tag_commit="$(git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}.git" \
+              "refs/tags/${RELEASE_TAG}" "refs/tags/${RELEASE_TAG}^{}" 2>/dev/null \
+            | awk -v t="refs/tags/${RELEASE_TAG}" '
+                $2 == t "^{}" { peeled = $1 }
+                $2 == t       { plain  = $1 }
+                END { print (peeled != "" ? peeled : plain) }')" || tag_commit=""
+          if [ -n "$tag_commit" ]; then
+            echo "tag $RELEASE_TAG -> $tag_commit"
+            test "$tag_commit" = "$RELEASE_SHA"
+            confirmed=true
+          else
+            echo "release tag $RELEASE_TAG is not resolvable yet; comparing with the caller"
+            test "$RELEASE_SHA" = "$GITHUB_SHA"
+            confirmed=false
+          fi
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then
+            printf 'tag_confirmed=%s\n' "$confirmed" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ needs.release-please.outputs.sha }}
@@ -51,6 +91,7 @@ jobs:
       - name: Verify Release Please handoff
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG_CONFIRMED: ${{ steps.identity.outputs.tag_confirmed }}
         run: python tools/release_delivery.py check
 
   python-artifacts:
@@ -250,6 +291,7 @@ jobs:
       RELEASE_TAG: ${{ needs.identity.outputs.tag }}
       RELEASE_SHA: ${{ needs.identity.outputs.sha }}
       RELEASE_ID: ${{ needs.identity.outputs.release_id }}
+      RELEASE_TAG_CONFIRMED: ${{ needs.identity.outputs.tag_confirmed }}
     runs-on: ubuntu-24.04
     environment: pypi
     permissions:
