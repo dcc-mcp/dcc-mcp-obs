@@ -516,6 +516,18 @@ def test_push_without_a_created_release_fails_closed_inside_identity() -> None:
     assert code != 0
 
 
+def test_handoff_verification_reads_the_resolved_identity() -> None:
+    """The check step must use the resolved identity, not empty release-please outputs."""
+    check = next(
+        step
+        for step in workflow("release.yml")["jobs"]["identity"]["steps"]
+        if step.get("run") == "python tools/release_delivery.py check"
+    )
+    for key, output in (("RELEASE_TAG", "tag"), ("RELEASE_SHA", "sha"), ("RELEASE_ID", "release_id")):
+        assert check["env"][key] == f"${{{{ steps.identity.outputs.{output} }}}}"
+    assert check["env"]["GH_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
+
+
 @pytest.mark.parametrize(
     "key,value",
     [
