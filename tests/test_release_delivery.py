@@ -405,9 +405,9 @@ def test_handoff_outputs_and_permission_graph_are_exact() -> None:
     assert jobs["identity"]["env"]["RELEASE_CREATED"] == (
         "${{ needs.release-please.outputs.release_created }}"
     )
-    assert 'test "${RELEASE_CREATED:-}" = "true"' in (
-        jobs["identity"]["steps"][0]["run"]
-    ), "the step must re-assert the release-please outcome without a needs gate"
+    assert 'test "${RELEASE_CREATED:-}" = "true"' in (jobs["identity"]["steps"][0]["run"]), (
+        "the step must re-assert the release-please outcome without a needs gate"
+    )
     for name in ("python-artifacts", "native-artifacts"):
         assert jobs[name]["needs"] == "identity"
         assert "if" not in jobs[name]
@@ -542,7 +542,11 @@ def test_handoff_verification_reads_the_resolved_identity() -> None:
         for step in workflow("release.yml")["jobs"]["identity"]["steps"]
         if step.get("run") == "python tools/release_delivery.py check"
     )
-    for key, output in (("RELEASE_TAG", "tag"), ("RELEASE_SHA", "sha"), ("RELEASE_ID", "release_id")):
+    for key, output in (
+        ("RELEASE_TAG", "tag"),
+        ("RELEASE_SHA", "sha"),
+        ("RELEASE_ID", "release_id"),
+    ):
         assert check["env"][key] == f"${{{{ steps.identity.outputs.{output} }}}}"
     assert check["env"]["GH_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
 
