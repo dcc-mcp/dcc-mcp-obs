@@ -126,7 +126,8 @@ jobs:
           fi
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: ${{ needs.identity.outputs.sha }}
+          # This job declares no `needs`, so it reads its own step output here.
+          ref: ${{ steps.identity.outputs.sha }}
           persist-credentials: false
       - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
         with:
