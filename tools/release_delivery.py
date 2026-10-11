@@ -79,8 +79,16 @@ def handoff(root: Path, env: dict[str, str]) -> tuple[str, str, str, str]:
         env.get(key, "") for key in ("RELEASE_TAG", "RELEASE_SHA", "RELEASE_ID")
     )
     require(env.get("GITHUB_REPOSITORY") == REPOSITORY, "foreign repository")
-    require(env.get("GITHUB_EVENT_NAME") == "push", "not a main push")
-    require(env.get("GITHUB_REF") == "refs/heads/main", "not the main branch")
+    # A manual backfill rebuilds one already-published tag, so it has no main-push
+    # caller to compare against. It is admitted only when the identity step confirmed
+    # the tag resolved to this exact commit; every other guard below still applies,
+    # and verify_release still proves the tag, the commit, and the numeric release ID
+    # agree. Only this caller check is relaxed, never the identity proofs.
+    if env.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
+        require(env.get("RELEASE_TAG_CONFIRMED") == "true", "unconfirmed backfill tag")
+    else:
+        require(env.get("GITHUB_EVENT_NAME") == "push", "not a main push")
+        require(env.get("GITHUB_REF") == "refs/heads/main", "not the main branch")
     require(re.fullmatch(r"[0-9a-f]{40}", sha) is not None, "invalid release commit")
     require(re.fullmatch(r"[1-9][0-9]*", release_id) is not None, "invalid release ID")
     # Compare with the caller only as a fallback. release-please resolves its own sha

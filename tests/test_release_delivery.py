@@ -38,9 +38,27 @@ def test_release_please_hands_created_release_directly_to_publisher() -> None:
     assert handoff is not None, "GITHUB_TOKEN tag pushes cannot trigger the publisher"
     assert caller["jobs"]["release-please"]["uses"] == "./.github/workflows/release-please.yml"
     assert handoff["needs"] == "release-please"
-    assert handoff["if"] == "needs.release-please.outputs.release_created == 'true'"
+    assert handoff["if"] == (
+        "needs.release-please.outputs.release_created == 'true' "
+        "|| github.event_name == 'workflow_dispatch'"
+    )
     assert please["on"].keys() == {"workflow_call"}
-    assert caller["on"] == {"push": {"branches": ["main"]}}
+    assert set(caller["on"]) == {"push", "workflow_dispatch"}
+    assert caller["on"]["push"] == {"branches": ["main"]}
+    assert caller["on"]["workflow_dispatch"]["inputs"]["tag"]["required"] == "false"
+    assert caller["on"]["workflow_dispatch"]["inputs"]["tag"]["default"] == ""
+    assert caller["jobs"]["release-please"]["if"] == "github.event_name == 'push'"
+
+
+def test_backfill_dispatch_never_reaches_release_please_or_pypi() -> None:
+    """A manual backfill must rebuild assets without creating a release or publishing."""
+    jobs = workflow("release.yml")["jobs"]
+    pypi = next(
+        step
+        for step in jobs["publish"]["steps"]
+        if step.get("uses", "").startswith("pypa/gh-action-pypi-publish@")
+    )
+    assert pypi["if"] == "github.event_name == 'push'"
 
 
 def test_publisher_extends_owned_release_instead_of_recreating_it() -> None:
@@ -408,7 +426,9 @@ def test_handoff_outputs_and_permission_graph_are_exact() -> None:
         "shared-runtime-artifacts",
         "publish",
     ):
-        owner = "release-please" if name == "identity" else "identity"
+        # Every downstream job reads identity through the tag-anchored outputs, so a
+        # backfill dispatch and a release-please push resolve to the same commit.
+        owner = "identity"
         checkout = next(
             step
             for step in jobs[name]["steps"]
@@ -434,20 +454,37 @@ def test_handoff_outputs_and_permission_graph_are_exact() -> None:
 
 
 @pytest.mark.parametrize("created", ["", "false", "False", "true"])
-def test_no_release_cannot_reach_publisher_or_oidc(created: str) -> None:
+@pytest.mark.parametrize("event", ["push", "workflow_dispatch"])
+def test_no_release_cannot_reach_publisher_or_oidc(created: str, event: str) -> None:
     jobs = workflow("release.yml")["jobs"]
     condition = jobs["identity"]["if"]
-    assert condition == "needs.release-please.outputs.release_created == 'true'"
+    assert condition == (
+        "needs.release-please.outputs.release_created == 'true' "
+        "|| github.event_name == 'workflow_dispatch'"
+    )
     # Interpret the frozen comparison and default success dependencies, not string truthiness.
+    # A backfill dispatch admits identity on its own; a push may only do so when
+    # release-please actually created a release.
     states = {"release-please": "success"}
-    states["identity"] = "success" if created == "true" else "skipped"
+    states["identity"] = (
+        "success" if created == "true" or event == "workflow_dispatch" else "skipped"
+    )
     for name in ("python-artifacts", "native-artifacts", "shared-runtime-artifacts", "publish"):
         needs = jobs[name]["needs"]
         needs = [needs] if isinstance(needs, str) else needs
         states[name] = (
             "success" if all(states[parent] == "success" for parent in needs) else "skipped"
         )
-    assert (states["publish"] == "success") is (created == "true")
+    reachable = created == "true" or event == "workflow_dispatch"
+    assert (states["publish"] == "success") is reachable
+    # PyPI stays unreachable for every manual backfill, whatever the identity outcome.
+    pypi = next(
+        step
+        for step in jobs["publish"]["steps"]
+        if step.get("uses", "").startswith("pypa/gh-action-pypi-publish@")
+    )
+    assert pypi["if"] == "github.event_name == 'push'"
+    assert (pypi["if"] == f"github.event_name == '{event}'") is (event == "push")
 
 
 @pytest.mark.parametrize(
@@ -711,6 +748,45 @@ def test_handoff_accepts_a_confirmed_tag_without_the_caller(release_fixture: tup
     env["GITHUB_SHA"] = "b" * 40
     env["RELEASE_TAG_CONFIRMED"] = "true"
     assert delivery.handoff(root, env)[1] == env["RELEASE_SHA"]
+
+
+def test_backfill_handoff_requires_a_confirmed_tag(release_fixture: tuple) -> None:
+    """A backfill dispatch may skip the caller check only once the tag is confirmed."""
+    root, env, api = release_fixture
+    env["GITHUB_EVENT_NAME"] = "workflow_dispatch"
+    env["GITHUB_SHA"] = "b" * 40
+    env["GITHUB_REF"] = "refs/tags/v1.0.0"
+    for unconfirmed in ("false", "", None):
+        candidate = dict(env)
+        if unconfirmed is None:
+            candidate.pop("RELEASE_TAG_CONFIRMED", None)
+        else:
+            candidate["RELEASE_TAG_CONFIRMED"] = unconfirmed
+        with pytest.raises(ValueError, match="unconfirmed backfill tag"):
+            delivery.handoff(root, candidate)
+        assert api.writes == []
+    candidate = dict(env)
+    candidate["RELEASE_TAG_CONFIRMED"] = "true"
+    assert delivery.handoff(root, candidate)[1] == env["RELEASE_SHA"]
+
+
+def test_backfill_handoff_still_enforces_commit_and_version(release_fixture: tuple) -> None:
+    """Relaxing the caller check must not relax any identity proof."""
+    root, env, api = release_fixture
+    env["GITHUB_EVENT_NAME"] = "workflow_dispatch"
+    env["GITHUB_REF"] = "refs/tags/v1.0.0"
+    env["RELEASE_TAG_CONFIRMED"] = "true"
+    for key, value, match in (
+        ("RELEASE_SHA", "a" * 40, "differs from release commit"),
+        ("RELEASE_ID", "0", "invalid release ID"),
+        ("RELEASE_TAG", "v9.9.9", "release tag does not match"),
+        ("GITHUB_REPOSITORY", "other/repo", "foreign repository"),
+    ):
+        candidate = dict(env)
+        candidate[key] = value
+        with pytest.raises(ValueError, match=match):
+            delivery.handoff(root, candidate)
+        assert api.writes == []
 
 
 def test_upload_conflict_never_overwrites_or_retries(
