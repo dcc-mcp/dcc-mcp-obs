@@ -519,6 +519,22 @@ def test_push_without_a_created_release_fails_closed_inside_identity() -> None:
     assert code != 0
 
 
+def test_backfill_restores_the_release_tool_from_the_workflow_ref() -> None:
+    """A backfill builds the tag, whose own release_delivery.py predates this support."""
+    jobs = workflow("release.yml")["jobs"]
+    for name in ("identity", "publish"):
+        step = next(
+            candidate
+            for candidate in jobs[name]["steps"]
+            if candidate.get("name") == "Restore the release tool from the workflow's own ref"
+        )
+        assert step["if"] == "github.event_name == 'workflow_dispatch'"
+        assert "tools/release_delivery.py" in step["run"]
+        # The tool must come from the workflow's ref, never from the release commit.
+        assert "needs.identity.outputs.sha" not in step["run"]
+        assert "steps.identity.outputs.sha" not in step["run"]
+
+
 def test_handoff_verification_reads_the_resolved_identity() -> None:
     """The check step must use the resolved identity, not empty release-please outputs."""
     check = next(
