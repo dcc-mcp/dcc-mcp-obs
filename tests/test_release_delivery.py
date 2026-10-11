@@ -37,10 +37,10 @@ def test_release_please_hands_created_release_directly_to_publisher() -> None:
     handoff = caller["jobs"].get("identity")
     assert handoff is not None, "GITHUB_TOKEN tag pushes cannot trigger the publisher"
     assert caller["jobs"]["release-please"]["uses"] == "./.github/workflows/release-please.yml"
-    assert handoff["needs"] == "release-please"
+    assert "needs" not in handoff
     assert handoff["if"] == (
-        "needs.release-please.outputs.release_created == 'true' "
-        "|| github.event_name == 'workflow_dispatch'"
+        "${{ github.event_name == 'workflow_dispatch' "
+        "|| needs.release-please.outputs.release_created == 'true' }}"
     )
     assert please["on"].keys() == {"workflow_call"}
     assert set(caller["on"]) == {"push", "workflow_dispatch"}
@@ -398,7 +398,16 @@ def test_handoff_outputs_and_permission_graph_are_exact() -> None:
     assert please["permissions"] == {"contents": "read"}
     assert jobs["release-please"]["permissions"] == {"contents": "write", "pull-requests": "write"}
     assert action_job["permissions"] == jobs["release-please"]["permissions"]
-    assert jobs["identity"]["needs"] == "release-please"
+    # `identity` deliberately declares no `needs`: a skipped required dependency would
+    # skip it unconditionally and strand a backfill. It re-asserts the release-please
+    # outcome inside the step instead, and its own `if` keeps push-mode ordering.
+    assert "needs" not in jobs["identity"]
+    assert jobs["identity"]["env"]["RELEASE_CREATED"] == (
+        "${{ needs.release-please.outputs.release_created }}"
+    )
+    assert 'test "${RELEASE_CREATED:-}" = "true"' in (
+        jobs["identity"]["steps"][0]["run"]
+    ), "the step must re-assert the release-please outcome without a needs gate"
     for name in ("python-artifacts", "native-artifacts"):
         assert jobs[name]["needs"] == "identity"
         assert "if" not in jobs[name]
@@ -459,12 +468,13 @@ def test_no_release_cannot_reach_publisher_or_oidc(created: str, event: str) -> 
     jobs = workflow("release.yml")["jobs"]
     condition = jobs["identity"]["if"]
     assert condition == (
-        "needs.release-please.outputs.release_created == 'true' "
-        "|| github.event_name == 'workflow_dispatch'"
+        "${{ github.event_name == 'workflow_dispatch' "
+        "|| needs.release-please.outputs.release_created == 'true' }}"
     )
-    # Interpret the frozen comparison and default success dependencies, not string truthiness.
-    # A backfill dispatch admits identity on its own; a push may only do so when
-    # release-please actually created a release.
+    # Interpret the frozen condition and default success dependencies, not string
+    # truthiness. `identity` has no `needs`, so a skipped release-please no longer
+    # force-skips it; the step's own RELEASE_CREATED assertion is what stops a push
+    # that created no release from reaching the publisher.
     states = {"release-please": "success"}
     states["identity"] = (
         "success" if created == "true" or event == "workflow_dispatch" else "skipped"
@@ -485,6 +495,23 @@ def test_no_release_cannot_reach_publisher_or_oidc(created: str, event: str) -> 
     )
     assert pypi["if"] == "github.event_name == 'push'"
     assert (pypi["if"] == f"github.event_name == '{event}'") is (event == "push")
+
+
+def test_push_without_a_created_release_fails_closed_inside_identity() -> None:
+    """Dropping the needs gate must not let a created=false push reach the artifacts."""
+    step = workflow("release.yml")["jobs"]["identity"]["steps"][0]
+    env = {
+        "RELEASE_TAG": "v1.0.0",
+        "RELEASE_SHA": "a" * 40,
+        "RELEASE_ID": "123",
+        "RELEASE_CREATED": "false",
+        "GITHUB_SHA": "a" * 40,
+        "GITHUB_REPOSITORY": "dcc-mcp/dcc-mcp-obs",
+        "GITHUB_EVENT_NAME": "push",
+        "GITHUB_REF": "refs/heads/main",
+    }
+    code, _out = run_shell(step["run"], env)
+    assert code != 0
 
 
 @pytest.mark.parametrize(
@@ -516,7 +543,7 @@ def test_real_precheckout_shell_gate(
     result = subprocess.run(
         [bash, "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", step["run"]],
         cwd=root,
-        env={**os.environ, **env},
+        env={**os.environ, **env, "RELEASE_CREATED": "true"},
         capture_output=True,
     )
     assert (result.returncode == 0) is (key is None)
@@ -636,6 +663,7 @@ def base_identity_env(sha: str, tag: str) -> dict[str, str]:
         "RELEASE_TAG": tag,
         "RELEASE_SHA": sha,
         "RELEASE_ID": "123",
+        "RELEASE_CREATED": "true",
         "GITHUB_SHA": "b" * 40,
         "GITHUB_REPOSITORY": "dcc-mcp/dcc-mcp-obs",
         "GITHUB_EVENT_NAME": "push",
