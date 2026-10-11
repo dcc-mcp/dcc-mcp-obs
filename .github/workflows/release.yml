@@ -132,6 +132,17 @@ jobs:
       - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
         with:
           python-version: "3.12"
+      - name: Restore the release tool from the workflow's own ref
+        # A backfill builds the tagged source, which predates the backfill support in
+        # release_delivery.py. The verifier is tooling, not product code, so take it
+        # from the ref that supplies this workflow rather than from the release commit.
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TOOL_REF: ${{ github.ref }}
+        shell: bash
+        run: |
+          git fetch --depth 1 origin "${TOOL_REF#refs/heads/}" --no-tags
+          git checkout FETCH_HEAD -- tools/release_delivery.py
       - name: Verify Release Please handoff
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -354,6 +365,16 @@ jobs:
       - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
         with:
           python-version: "3.12"
+      - name: Restore the release tool from the workflow's own ref
+        # As in identity: a backfill builds the tagged source, which predates the
+        # backfill support in release_delivery.py.
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TOOL_REF: ${{ github.ref }}
+        shell: bash
+        run: |
+          git fetch --depth 1 origin "${TOOL_REF#refs/heads/}" --no-tags
+          git checkout FETCH_HEAD -- tools/release_delivery.py
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           path: release-artifacts
