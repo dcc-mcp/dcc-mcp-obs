@@ -435,16 +435,19 @@ def test_handoff_outputs_and_permission_graph_are_exact() -> None:
         "shared-runtime-artifacts",
         "publish",
     ):
-        # Every downstream job reads identity through the tag-anchored outputs, so a
-        # backfill dispatch and a release-please push resolve to the same commit.
-        owner = "identity"
+        # Downstream jobs read identity through the tag-anchored outputs, so a backfill
+        # dispatch and a release-please push resolve to the same commit. `identity`
+        # itself declares no `needs`, so it reads its own step output instead.
+        source = (
+            "steps.identity.outputs.sha" if name == "identity" else "needs.identity.outputs.sha"
+        )
         checkout = next(
             step
             for step in jobs[name]["steps"]
             if step.get("uses", "").startswith("actions/checkout@")
         )
         assert checkout["with"] == {
-            "ref": f"${{{{ needs.{owner}.outputs.sha }}}}",
+            "ref": f"${{{{ {source} }}}}",
             "persist-credentials": "false",
         }
     publish_steps = jobs["publish"]["steps"]
