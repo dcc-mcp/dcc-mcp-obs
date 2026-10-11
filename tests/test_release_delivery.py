@@ -500,6 +500,8 @@ def test_no_release_cannot_reach_publisher_or_oidc(created: str, event: str) -> 
 def test_push_without_a_created_release_fails_closed_inside_identity() -> None:
     """Dropping the needs gate must not let a created=false push reach the artifacts."""
     step = workflow("release.yml")["jobs"]["identity"]["steps"][0]
+    # The step resolves a backfill tag through the API, so it needs a token of its own.
+    assert step["env"] == {"GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}"}
     env = {
         "RELEASE_TAG": "v1.0.0",
         "RELEASE_SHA": "a" * 40,
