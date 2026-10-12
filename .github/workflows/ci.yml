@@ -14,6 +14,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  actionlint:
+    name: Workflow lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      # Pins the actionlint release so a lint failure reflects this repository's
+      # workflows, not an upstream change.
+      - name: Install actionlint
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="1.7.12"
+          curl -fsSL \
+            "https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_amd64.tar.gz" \
+            | tar -xz -C /usr/local/bin actionlint
+          actionlint -version
+      - name: Lint workflows
+        run: actionlint -color
+
   native-format:
     name: Native format contracts
     runs-on: ubuntu-24.04

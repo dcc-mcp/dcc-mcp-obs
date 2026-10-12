@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -37,16 +38,21 @@ def test_release_please_hands_created_release_directly_to_publisher() -> None:
     handoff = caller["jobs"].get("identity")
     assert handoff is not None, "GITHUB_TOKEN tag pushes cannot trigger the publisher"
     assert caller["jobs"]["release-please"]["uses"] == "./.github/workflows/release-please.yml"
-    assert "needs" not in handoff
+    # `needs` must stay declared. Without it the `needs` context is empty and every
+    # `needs.release-please.outputs.*` below evaluates to "", which skips identity on
+    # every push and strands every future release with no artifacts.
+    assert handoff["needs"] == "release-please"
     assert handoff["if"] == (
-        "${{ github.event_name == 'workflow_dispatch' "
-        "|| needs.release-please.outputs.release_created == 'true' }}"
+        "${{ !cancelled() && (github.event_name == 'workflow_dispatch' "
+        "|| needs.release-please.outputs.release_created == 'true') }}"
     )
     assert please["on"].keys() == {"workflow_call"}
     assert set(caller["on"]) == {"push", "workflow_dispatch"}
     assert caller["on"]["push"] == {"branches": ["main"]}
-    assert caller["on"]["workflow_dispatch"]["inputs"]["tag"]["required"] == "false"
-    assert caller["on"]["workflow_dispatch"]["inputs"]["tag"]["default"] == ""
+    # A dispatch rebuilds one published tag; it never runs release-please, so an
+    # empty tag has no meaning and the input must be required rather than defaulted.
+    assert caller["on"]["workflow_dispatch"]["inputs"]["tag"]["required"] == "true"
+    assert "default" not in caller["on"]["workflow_dispatch"]["inputs"]["tag"]
     assert caller["jobs"]["release-please"]["if"] == "github.event_name == 'push'"
 
 
@@ -398,15 +404,17 @@ def test_handoff_outputs_and_permission_graph_are_exact() -> None:
     assert please["permissions"] == {"contents": "read"}
     assert jobs["release-please"]["permissions"] == {"contents": "write", "pull-requests": "write"}
     assert action_job["permissions"] == jobs["release-please"]["permissions"]
-    # `identity` deliberately declares no `needs`: a skipped required dependency would
-    # skip it unconditionally and strand a backfill. It re-asserts the release-please
-    # outcome inside the step instead, and its own `if` keeps push-mode ordering.
-    assert "needs" not in jobs["identity"]
+    # `identity` keeps `needs` declared so the `needs` context stays populated;
+    # `!cancelled()` is what stops a skipped release-please from cascading into a
+    # skipped backfill. The step re-asserts the outcome so a push that created no
+    # release still fails closed.
+    assert jobs["identity"]["needs"] == "release-please"
+    assert "!cancelled()" in jobs["identity"]["if"]
     assert jobs["identity"]["env"]["RELEASE_CREATED"] == (
         "${{ needs.release-please.outputs.release_created }}"
     )
     assert 'test "${RELEASE_CREATED:-}" = "true"' in (jobs["identity"]["steps"][0]["run"]), (
-        "the step must re-assert the release-please outcome without a needs gate"
+        "the step must re-assert the release-please outcome"
     )
     for name in ("python-artifacts", "native-artifacts"):
         assert jobs[name]["needs"] == "identity"
@@ -471,13 +479,13 @@ def test_no_release_cannot_reach_publisher_or_oidc(created: str, event: str) -> 
     jobs = workflow("release.yml")["jobs"]
     condition = jobs["identity"]["if"]
     assert condition == (
-        "${{ github.event_name == 'workflow_dispatch' "
-        "|| needs.release-please.outputs.release_created == 'true' }}"
+        "${{ !cancelled() && (github.event_name == 'workflow_dispatch' "
+        "|| needs.release-please.outputs.release_created == 'true') }}"
     )
-    # Interpret the frozen condition and default success dependencies, not string
-    # truthiness. `identity` has no `needs`, so a skipped release-please no longer
-    # force-skips it; the step's own RELEASE_CREATED assertion is what stops a push
-    # that created no release from reaching the publisher.
+    # Interpret the frozen condition, not string truthiness. `identity` declares
+    # `needs: release-please`, so the needs context is populated; `!cancelled()` is
+    # what keeps a backfill alive when release-please is skipped. A push that created
+    # no release is stopped by the step's own RELEASE_CREATED assertion.
     states = {"release-please": "success"}
     states["identity"] = (
         "success" if created == "true" or event == "workflow_dispatch" else "skipped"
@@ -498,6 +506,27 @@ def test_no_release_cannot_reach_publisher_or_oidc(created: str, event: str) -> 
     )
     assert pypi["if"] == "github.event_name == 'push'"
     assert (pypi["if"] == f"github.event_name == '{event}'") is (event == "push")
+
+
+def test_jobs_reading_needs_context_declare_that_dependency() -> None:
+    """A `needs.<job>` reference is empty unless that job is a declared dependency.
+
+    GitHub only populates the `needs` context for jobs declared as a direct
+    dependency, and an undeclared property evaluates to "". Reading
+    `needs.release-please.*` from a job without `needs: release-please` therefore
+    silently skips it. This asserts the invariant actionlint cannot check across
+    an `if` that also guards on the event name.
+    """
+    jobs = workflow("release.yml")["jobs"]
+    for name, job in jobs.items():
+        declared = job.get("needs", [])
+        declared = [declared] if isinstance(declared, str) else declared
+        body = yaml.dump(job, default_flow_style=False, sort_keys=False)
+        for referenced in set(re.findall(r"needs\.([A-Za-z0-9_-]+)\.", body)):
+            assert referenced in declared, (
+                f"job {name!r} reads needs.{referenced} without declaring it in needs"
+            )
+            assert referenced != name, f"job {name!r} cannot depend on itself"
 
 
 def test_push_without_a_created_release_fails_closed_inside_identity() -> None:
