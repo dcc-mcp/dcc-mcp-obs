@@ -7,11 +7,11 @@ on:
     inputs:
       tag:
         description: >-
-          Existing release tag to rebuild and backfill, for example v1.5.0. Leave empty
-          to run the normal release-please path from main.
-        required: false
+          Existing release tag to rebuild and backfill, for example v1.5.0. Required:
+          a dispatch rebuilds one published tag and does not run release-please, so an
+          empty value fails. To cut a new release, push to main.
+        required: true
         type: string
-        default: ""
 
 permissions:
   contents: read
@@ -29,12 +29,14 @@ jobs:
       pull-requests: write
 
   identity:
-    # `needs` is intentionally omitted. A skipped required dependency makes GitHub
-    # skip this job unconditionally, which is exactly what strands a release with no
-    # artifacts: release-please reports created=false on every later push, and a
-    # backfill dispatch skips it too. Ordering is enforced by the conditions below.
-    if: ${{ github.event_name == 'workflow_dispatch'
-      || needs.release-please.outputs.release_created == 'true' }}
+    needs: release-please
+    # `needs` must stay declared: without it the `needs` context is empty, so
+    # `needs.release-please.outputs.*` evaluates to "" and this job is skipped on
+    # every push, silently shipping every future release with no artifacts.
+    # `!cancelled()` lifts the default success-only dependency so a backfill
+    # dispatch, which skips release-please, still runs this job.
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch'
+      || needs.release-please.outputs.release_created == 'true') }}
     runs-on: ubuntu-24.04
     env:
       RELEASE_TAG: ${{ needs.release-please.outputs.tag }}
