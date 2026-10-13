@@ -222,6 +222,37 @@ class _FakeProcess:
         self.returncode = 1
 
 
+@pytest.fixture
+def fake_owned_runtime(monkeypatch):
+    from types import SimpleNamespace
+
+    from dcc_mcp_obs.owned_obs import HandleIdentity, OwnedObsHost
+
+    original_start = OwnedObsHost.start
+
+    def start(owner, **kwargs):
+        owner._identity_reader = lambda process: HandleIdentity(
+            process.pid, 0x01DC0000ABCDEF12, str(owner.executable)
+        )
+        transport = SimpleNamespace(close=lambda: None)
+
+        def bridge(_transport, *, expected_pid):
+            identity = {"hostPid": expected_pid, "instanceId": "test-native"}
+            return SimpleNamespace(
+                status=lambda: {**identity, "ready": True},
+                request_graceful_shutdown=lambda: {**identity, "shutdownScheduled": True},
+            )
+
+        return original_start(
+            owner, **kwargs, transport_factory=lambda _: transport, bridge_factory=bridge
+        )
+
+    monkeypatch.setattr(OwnedObsHost, "start", start)
+    monkeypatch.setattr(
+        "dcc_mcp_obs.real_obs_acceptance._probe_authentication_required", lambda _: True
+    )
+
+
 def _windows_bundle(tmp_path: Path) -> Path:
     release = tmp_path / "release"
     binary = release / "dcc-mcp-obs" / "bin" / "64bit" / "dcc-mcp-obs.dll"
@@ -236,7 +267,7 @@ def _windows_bundle(tmp_path: Path) -> Path:
 
 
 def test_runner_keeps_secret_out_of_process_command_and_restores_environment(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_owned_runtime
 ) -> None:
     installed = tmp_path / "installed" / "obs-studio"
     executable = installed / "bin" / "64bit" / "obs64.exe"
@@ -296,12 +327,12 @@ def test_runner_keeps_secret_out_of_process_command_and_restores_environment(
     assert (root / "obs" / "obs-plugins" / "64bit" / "dcc-mcp-obs.dll").is_file()
 
 
-def test_runner_terminates_only_spawned_process_on_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_runner_retains_spawned_process_on_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_owned_runtime
 ) -> None:
     root = tmp_path / "acceptance"
     root.mkdir()
-    executable = tmp_path / "obs64.exe"
+    executable = root / "obs64.exe"
     executable.write_bytes(b"obs")
     layout = DisposableObsLayout(
         root=root,
@@ -321,7 +352,9 @@ def test_runner_terminates_only_spawned_process_on_failure(
         "dcc_mcp_obs.disposable_obs.prepare_obs_configuration", lambda **_kwargs: None
     )
 
-    with pytest.raises(RuntimeError, match="acceptance failed"):
+    from dcc_mcp_obs.owned_obs import OwnedObsError
+
+    with pytest.raises(OwnedObsError) as caught:
         run_disposable_acceptance(
             obs_executable=executable,
             native_plugin_archive=tmp_path / "native.zip",
@@ -336,4 +369,7 @@ def test_runner_terminates_only_spawned_process_on_failure(
             ),
         )
 
-    assert process.terminated is True
+    assert str(caught.value.primary_error) == "acceptance failed"
+    assert caught.value.owner.process is process
+    assert caught.value.owner.returncode is None
+    assert process.terminated is False

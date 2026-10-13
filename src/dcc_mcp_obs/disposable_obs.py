@@ -14,12 +14,14 @@ import sys
 import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .config import ObsEndpointConfig
 from .install_cli import run as run_installer
+from .owned_obs import OwnedObsError, OwnedObsHost
 from .real_obs_acceptance import run_real_obs_acceptance
 
 
@@ -391,17 +393,6 @@ def _scoped_environment(values: Mapping[str, str]) -> Iterator[None]:
                 os.environ[key] = value
 
 
-def _terminate_spawned_process(process: Any) -> None:
-    if process.poll() is not None:
-        return
-    process.terminate()
-    try:
-        process.wait(timeout=8)
-    except (subprocess.TimeoutExpired, TimeoutError):
-        process.kill()
-        process.wait(timeout=8)
-
-
 def _platform_name() -> str:
     if sys.platform == "win32":
         return "windows"
@@ -421,6 +412,7 @@ def run_disposable_acceptance(
     popen_factory: Callable[..., Any] = subprocess.Popen,
     readiness_probe: Callable[[Any, int], None] = _wait_for_obs,
     acceptance_runner: Callable[..., dict[str, object]] = run_real_obs_acceptance,
+    owner_factory: Callable[..., OwnedObsHost] = OwnedObsHost,
 ) -> dict[str, object]:
     """Launch, exercise, and gracefully stop one disposable OBS process."""
 
@@ -440,24 +432,13 @@ def run_disposable_acceptance(
     )
     _install_plugin(layout, native_plugin_archive, selected_platform)
 
-    child_environment = dict(os.environ)
-    child_environment.update(layout.environment)
-    child_environment.pop("DCC_MCP_OBS_WEBSOCKET_PASSWORD", None)
-    child_environment.pop("DCC_MCP_OBS_WEBSOCKET_URL", None)
-    process = None
-    stdout_path = layout.root / "obs-stdout.log"
-    stderr_path = layout.root / "obs-stderr.log"
+    owner = owner_factory(
+        layout,
+        ObsEndpointConfig(port=port, password=password, timeout_seconds=10),
+        platform=selected_platform,
+    )
     try:
-        with stdout_path.open("xb") as stdout, stderr_path.open("xb") as stderr:
-            process = popen_factory(
-                layout.command,
-                cwd=layout.executable.parent,
-                env=child_environment,
-                stdin=subprocess.DEVNULL,
-                stdout=stdout,
-                stderr=stderr,
-            )
-        readiness_probe(process, port)
+        owner.start(popen_factory=popen_factory, readiness_probe=readiness_probe)
         with _scoped_environment(
             {
                 "DCC_MCP_OBS_WEBSOCKET_URL": f"ws://127.0.0.1:{port}",
@@ -465,17 +446,29 @@ def run_disposable_acceptance(
                 "DCC_MCP_OBS_TIMEOUT_SECONDS": "10",
             }
         ):
-            return acceptance_runner(
-                host_pid=process.pid,
+            result = acceptance_runner(
+                host_pid=owner.process.pid,
                 native_plugin_archive=native_plugin_archive,
                 python_wheel=python_wheel,
                 disposable_root=layout.root,
                 output=output,
+                owner=owner,
             )
-    except BaseException:
-        if process is not None:
-            _terminate_spawned_process(process)
-        raise
+            if owner.returncode is None:
+                owner.close()
+            if owner.returncode != 0:
+                _fail("OBS_DISPOSABLE_HOST_EXIT_FAILED")
+            return result
+    except BaseException as error:
+        if isinstance(error, OwnedObsError):
+            raise
+        # The acceptance runner closes its adapter before returning an error.
+        if owner.primary_error is None:
+            owner.primary_error = error
+        if owner.ready and not owner.shutdown_attempted:
+            with suppress(OwnedObsError):
+                owner.close()
+        raise owner.failure("OBS_DISPOSABLE_ACCEPTANCE_FAILED", error) from error
 
 
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
@@ -500,7 +493,39 @@ def main(argv: Sequence[str] | None = None) -> None:
             work_root=args.work_root,
             output=args.output,
         )
-    except (DisposableObsError, Exception) as exc:
+    except OwnedObsError as exc:
+        try:
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "code": str(exc),
+                        "state": "UNKNOWN" if exc.owner.returncode is None else "TERMINAL",
+                        "evidence": str(exc.owner.evidence_path),
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                flush=True,
+            )
+        finally:
+            exc.owner.retain_until_exit()
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "code": str(exc),
+                    "state": "TERMINAL" if exc.owner.returncode is not None else "NOT_STARTED",
+                    "originalWaitReturncode": exc.owner.returncode,
+                    "evidence": str(exc.owner.evidence_path),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            flush=True,
+        )
+        raise SystemExit(1) from None
+    except Exception as exc:
         code = str(exc)
         if not code.startswith("OBS_"):
             code = "OBS_DISPOSABLE_ACCEPTANCE_FAILED"

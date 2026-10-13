@@ -23,6 +23,16 @@ from .protocol import ObsWebSocketTransport
 _server: ObsMcpServer | None = None
 
 
+class AdapterConstructionError(RuntimeError):
+    """Retain a partially initialized adapter if its transport cannot close."""
+
+    def __init__(self, adapter, primary_error, cleanup_error) -> None:
+        super().__init__("OBS_ADAPTER_CONSTRUCTION_FAILED")
+        self.adapter = adapter
+        self.primary_error = primary_error
+        self.cleanup_error = cleanup_error
+
+
 class ObsMcpServer(DccServerBase):
     """DCC-MCP service backed by the native OBS vendor bridge."""
 
@@ -33,37 +43,44 @@ class ObsMcpServer(DccServerBase):
         if control_port == config.port:
             raise ConfigError("OBS_PORT_CONFLICT")
         self._transport = ObsWebSocketTransport(config)
-        self._bridge = ObsControlBridge(self._transport, expected_pid=resolved_pid)
-        status = self._bridge.status()
-        os.environ["DCC_MCP_OBS_HOST_PID"] = str(resolved_pid)
-        os.environ["DCC_MCP_OBS_INSTANCE_ID"] = str(status["instanceId"])
-        execution_bridge = HostExecutionBridge(
-            dispatcher=ObsBridgeDispatcher(),
-            default_thread_affinity="any",
-            default_execution="sync",
-            default_timeout_hint_secs=30,
-        )
-        options = DccServerOptions.from_env(
-            "obs",
-            Path(__file__).resolve().parent / "skills",
-            port=control_port,
-            server_name="dcc-mcp-obs",
-            server_version=__version__,
-            adapter_version=__version__,
-            dcc_version=str(status["obsVersion"]),
-            dcc_pid=resolved_pid,
-            instance_type="gui",
-            host_rpc=f"ws://{config.host}:{config.port}",
-            execution_bridge=execution_bridge,
-        )
-        super().__init__(options=options)
-        self._readiness = AdapterReadinessBinder(self)
-        self._readiness.mark_dispatcher_ready(
-            True,
-            host_execution_bridge_ready=True,
-            main_thread_executor_ready=True,
-            dcc_ready=True,
-        )
+        try:
+            self._bridge = ObsControlBridge(self._transport, expected_pid=resolved_pid)
+            status = self._bridge.status()
+            os.environ["DCC_MCP_OBS_HOST_PID"] = str(resolved_pid)
+            os.environ["DCC_MCP_OBS_INSTANCE_ID"] = str(status["instanceId"])
+            execution_bridge = HostExecutionBridge(
+                dispatcher=ObsBridgeDispatcher(),
+                default_thread_affinity="any",
+                default_execution="sync",
+                default_timeout_hint_secs=30,
+            )
+            options = DccServerOptions.from_env(
+                "obs",
+                Path(__file__).resolve().parent / "skills",
+                port=control_port,
+                server_name="dcc-mcp-obs",
+                server_version=__version__,
+                adapter_version=__version__,
+                dcc_version=str(status["obsVersion"]),
+                dcc_pid=resolved_pid,
+                instance_type="gui",
+                host_rpc=f"ws://{config.host}:{config.port}",
+                execution_bridge=execution_bridge,
+            )
+            super().__init__(options=options)
+            self._readiness = AdapterReadinessBinder(self)
+            self._readiness.mark_dispatcher_ready(
+                True,
+                host_execution_bridge_ready=True,
+                main_thread_executor_ready=True,
+                dcc_ready=True,
+            )
+        except BaseException as primary:
+            try:
+                self._transport.close()
+            except BaseException as cleanup:
+                raise AdapterConstructionError(self, primary, cleanup) from primary
+            raise
 
     def stop(self) -> None:
         try:
@@ -72,21 +89,31 @@ class ObsMcpServer(DccServerBase):
             super().stop()
 
 
+def has_server() -> bool:
+    """Whether this interpreter already owns an adapter, including a stopped one."""
+    return _server is not None
+
+
 def start_server(*, port: int | None = None, host_pid: int | None = None) -> ObsMcpServer:
     global _server
     if _server is None or not _server.is_running:
         if _server is not None:
             _server.stop()
         candidate = ObsMcpServer(port=port, host_pid=host_pid)
+        # Publish ownership before interruptible startup; failed cleanup must retain it.
+        _server = candidate
         try:
             candidate.register_builtin_actions()
             candidate.start()
             if not candidate.load_skill("obs-control"):
                 raise RuntimeError("OBS_SKILL_LOAD_FAILED")
-        except Exception:
-            candidate.stop()
+        except BaseException as primary:
+            try:
+                candidate.stop()
+            except BaseException as cleanup:
+                raise primary from cleanup
+            _server = None
             raise
-        _server = candidate
     return _server
 
 
@@ -135,4 +162,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         stop_server()
 
 
-__all__ = ["ObsMcpServer", "main", "start_server", "stop_server"]
+__all__ = [
+    "AdapterConstructionError",
+    "ObsMcpServer",
+    "has_server",
+    "main",
+    "start_server",
+    "stop_server",
+]

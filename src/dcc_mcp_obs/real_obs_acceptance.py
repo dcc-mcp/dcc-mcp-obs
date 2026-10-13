@@ -19,13 +19,16 @@ import zipfile
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
-from typing import NoReturn, Protocol
+from typing import TYPE_CHECKING, NoReturn, Protocol
 
 from .__version__ import __version__
 from .bridge import ObsControlBridge
 from .config import ObsEndpointConfig
 from .process import OBS_EXECUTABLES
 from .protocol import ObsWebSocketTransport
+
+if TYPE_CHECKING:
+    from .owned_obs import OwnedObsHost
 
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _VERSION_PATTERN = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$")
@@ -1133,6 +1136,7 @@ def run_real_obs_acceptance(
     python_wheel: Path,
     disposable_root: Path,
     output: Path,
+    owner: OwnedObsHost | None = None,
 ) -> dict[str, object]:
     """Run the live gate against one already-launched disposable OBS process."""
 
@@ -1140,7 +1144,21 @@ def run_real_obs_acceptance(
 
     from . import server
 
-    process = _verify_disposable_process(host_pid, disposable_root)
+    if owner is not None:
+        if (
+            owner.process is None
+            or owner.process.pid != host_pid
+            or owner.layout.root.resolve() != disposable_root.resolve()
+            or not owner.ready
+        ):
+            _fail("OBS_ACCEPTANCE_HOST_BINDING_FAILED")
+        owner.verify_identity()
+    current_platform = _platform_name()
+    if owner is not None and current_platform == "windows":
+        process = owner.process
+    else:
+        # Legacy/non-Windows module inspection is separate from the original child's wait.
+        process = _verify_disposable_process(host_pid, disposable_root)
     root = disposable_root.resolve(strict=True)
     recordings = root / "recordings"
     if not recordings.is_dir():
@@ -1160,11 +1178,17 @@ def run_real_obs_acceptance(
     expected_instance_id = status.get("instanceId")
     if not isinstance(expected_instance_id, str) or not expected_instance_id:
         _fail("OBS_ACCEPTANCE_INSTANCE_BINDING_FAILED")
+    if owner is not None:
+        owner.verify_identity()
+        if status.get("hostPid") != host_pid or expected_instance_id != owner.instance_id:
+            _fail("OBS_ACCEPTANCE_INSTANCE_BINDING_FAILED")
 
-    current_platform = _platform_name()
-    mapped_files = _loaded_native_module_paths(
-        process, platform=current_platform, disposable_root=root
-    )
+    if owner is not None and current_platform == "windows":
+        mapped_files = owner.mapped_module_paths()
+    else:
+        mapped_files = _loaded_native_module_paths(
+            process, platform=current_platform, disposable_root=root
+        )
     native = verify_loaded_native_plugin(native_plugin_archive, mapped_files=mapped_files)
     wheel = verify_installed_python_wheel(
         python_wheel, package_root=Path(__file__).resolve().parent
@@ -1179,14 +1203,22 @@ def run_real_obs_acceptance(
     os.environ["DCC_MCP_REGISTRY_DIR"] = str(root / "registry")
     os.environ["DCC_MCP_GATEWAY_PORT"] = "0"
     os.environ["DCC_MCP_DISABLE_DEFAULT_SKILL_PATHS"] = "1"
-    instance = server.start_server(port=0, host_pid=host_pid)
-    url = instance.mcp_url
-    if not isinstance(url, str):
-        server.stop_server()
-        _fail("OBS_ACCEPTANCE_ADAPTER_CONNECTION_FAILED")
-    client = McpAcceptanceClient(url, session_id=expected_instance_id, timeout_seconds=30)
+    if owner is not None and server.has_server():
+        _fail("OBS_ACCEPTANCE_ADAPTER_ALREADY_OWNED")
     instance_stopped = False
+
+    def stop_adapter() -> None:
+        nonlocal instance_stopped
+        if not instance_stopped:
+            server.stop_server()
+            instance_stopped = True
+
     try:
+        instance = server.start_server(port=0, host_pid=host_pid)
+        url = instance.mcp_url
+        if not isinstance(url, str):
+            _fail("OBS_ACCEPTANCE_ADAPTER_CONNECTION_FAILED")
+        client = McpAcceptanceClient(url, session_id=expected_instance_id, timeout_seconds=30)
         client.initialize()
         observed = exercise_live_obs(
             client,
@@ -1201,30 +1233,46 @@ def run_real_obs_acceptance(
             installed_python_wheel_verified=True,
         )
         evidence = build_public_evidence(observed, salt=os.urandom(32))
-        shutdown = client.call("obs_control__request_graceful_shutdown", {})
-        shutdown_context = shutdown.get("context")
-        if (
-            shutdown.get("success") is not True
-            or not isinstance(shutdown_context, Mapping)
-            or shutdown_context.get("instanceId") != expected_instance_id
-            or shutdown_context.get("hostPid") != host_pid
-            or shutdown_context.get("shutdownScheduled") is not True
-        ):
-            _fail("OBS_ACCEPTANCE_GRACEFUL_SHUTDOWN_FAILED")
-        # Close the adapter's authenticated OBS WebSocket before waiting for
-        # OBS module unload. Otherwise OBS waits for this client while this
-        # process waits for OBS, creating a shutdown-order deadlock.
-        server.stop_server()
-        instance_stopped = True
-        try:
-            process.wait(timeout=15)
-        except Exception as exc:
-            raise AcceptanceContractError("OBS_ACCEPTANCE_GRACEFUL_SHUTDOWN_FAILED") from exc
+        if owner is not None:
+            owner.close(
+                shutdown=lambda: client.call("obs_control__request_graceful_shutdown", {}),
+                close_adapter=stop_adapter,
+            )
+            if owner.returncode != 0:
+                _fail("OBS_ACCEPTANCE_HOST_EXIT_FAILED")
+        else:
+            shutdown = client.call("obs_control__request_graceful_shutdown", {})
+            shutdown_context = shutdown.get("context")
+            if (
+                shutdown.get("success") is not True
+                or not isinstance(shutdown_context, Mapping)
+                or shutdown_context.get("instanceId") != expected_instance_id
+                or shutdown_context.get("hostPid") != host_pid
+                or shutdown_context.get("shutdownScheduled") is not True
+            ):
+                _fail("OBS_ACCEPTANCE_GRACEFUL_SHUTDOWN_FAILED")
+            # The standalone accept CLI did not launch the process; retain its legacy contract.
+            stop_adapter()
+            try:
+                exit_code = process.wait(timeout=15)
+            except Exception as exc:
+                raise AcceptanceContractError("OBS_ACCEPTANCE_GRACEFUL_SHUTDOWN_FAILED") from exc
+            if type(exit_code) is not int or exit_code != 0:
+                _fail("OBS_ACCEPTANCE_HOST_EXIT_FAILED")
         _write_public_evidence(output, evidence)
         return evidence
+    except BaseException as error:
+        if owner is not None and owner.primary_error is None:
+            owner.primary_error = error
+        raise
     finally:
-        if not instance_stopped:
-            server.stop_server()
+        try:
+            stop_adapter()
+        except BaseException as error:
+            if owner is None:
+                raise
+            owner.cleanup_errors.append(error)
+            raise owner.failure("OBS_ACCEPTANCE_ADAPTER_CLOSE_FAILED", error) from error
 
 
 def main(argv: Sequence[str] | None = None) -> None:
