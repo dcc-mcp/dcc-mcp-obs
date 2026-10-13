@@ -309,8 +309,26 @@ class OwnedObsHost:
             if not _probe_authentication_required(self.config):
                 raise RuntimeError("OBS_OWNED_AUTHENTICATION_REQUIRED")
             self.transport = transport_factory(self.config)
-            self.bridge = bridge_factory(self.transport, expected_pid=self.process.pid)
-            status = await_authenticated_status(self.bridge.status)
+            first_readiness_error: Exception | None = None
+
+            def probe_status() -> Mapping[str, object]:
+                nonlocal first_readiness_error
+                try:
+                    bridge = bridge_factory(self.transport, expected_pid=self.process.pid)
+                    status = bridge.status()
+                except Exception as error:
+                    if first_readiness_error is None:
+                        first_readiness_error = error
+                    raise
+                self.bridge = bridge
+                return status
+
+            try:
+                status = await_authenticated_status(probe_status)
+            except Exception as error:
+                if first_readiness_error is not None:
+                    raise first_readiness_error from error
+                raise
             if status.get("hostPid") != self.process.pid:
                 raise RuntimeError("OBS_OWNED_NATIVE_PID_MISMATCH")
             self.verify_identity()

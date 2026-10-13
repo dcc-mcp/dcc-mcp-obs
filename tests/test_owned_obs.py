@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 import time
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,6 +13,7 @@ import pytest
 from dcc_mcp_obs.config import ObsEndpointConfig
 from dcc_mcp_obs.disposable_obs import DisposableObsLayout
 from dcc_mcp_obs.owned_obs import HandleIdentity, OwnedObsError, OwnedObsHost
+from dcc_mcp_obs.real_obs_acceptance import await_authenticated_status
 
 
 @pytest.fixture
@@ -67,6 +69,10 @@ def host(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "dcc_mcp_obs.real_obs_acceptance._probe_authentication_required", lambda _: True
     )
+    monkeypatch.setattr(
+        "dcc_mcp_obs.real_obs_acceptance.await_authenticated_status",
+        partial(await_authenticated_status, sleeper=lambda _: None, attempts=3),
+    )
     start = {
         "popen_factory": popen,
         "readiness_probe": lambda *_: None,
@@ -107,6 +113,59 @@ def test_owned_start_and_shutdown_uses_original_wait_after_disconnect(host, monk
     with pytest.raises(OwnedObsError, match="SHUTDOWN_ALREADY_ATTEMPTED"):
         owner.close()
     assert host.events.count("shutdown") == 1
+
+
+@pytest.mark.parametrize("phase", ["constructor", "status"])
+def test_readiness_retries_bridge_construction_and_status(host, phase):
+    attempts = []
+    primary = RuntimeError("OBS_INSTANCE_NOT_READY")
+    ready_status = host.bridge.status
+
+    def status():
+        if phase == "status" and len(attempts) == 1:
+            raise primary
+        return ready_status()
+
+    def bridge_factory(transport, *, expected_pid):
+        assert transport is host.transport
+        assert expected_pid == host.process.pid
+        attempts.append(expected_pid)
+        if phase == "constructor" and len(attempts) == 1:
+            raise primary
+        host.bridge.status = status
+        return host.bridge
+
+    host.start["bridge_factory"] = bridge_factory
+    owner = host.owner.start(**host.start)
+
+    assert len(attempts) == 2
+    assert owner.ready
+    assert owner.bridge is host.bridge
+    assert owner.primary_error is None
+    assert owner.process is host.process
+    assert "shutdown" not in host.events
+
+
+def test_readiness_exhaustion_preserves_first_constructor_error(host):
+    errors = [RuntimeError("first private failure"), RuntimeError("later private failure")]
+    attempts = []
+
+    def bridge_factory(*_, **__):
+        error = errors[bool(attempts)]
+        attempts.append(error)
+        raise error
+
+    host.start["bridge_factory"] = bridge_factory
+    with pytest.raises(OwnedObsError) as caught:
+        host.owner.start(**host.start)
+
+    assert len(attempts) == 3
+    assert caught.value.primary_error is errors[0]
+    assert caught.value.owner.process is host.process
+    assert not host.owner.ready
+    assert host.owner.returncode is None
+    assert not host.owner.shutdown_attempted
+    assert "private failure" not in host.owner.evidence_path.read_text()
 
 
 @pytest.mark.parametrize(
