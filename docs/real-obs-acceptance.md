@@ -51,6 +51,48 @@ dcc-mcp-obs-accept-host \
 Linux requires a graphical display; the repository workflow uses `xvfb-run`.
 The caller owns removal of the disposable root after inspecting a failure.
 
+## Original process ownership
+
+`dcc_mcp_obs.owned_obs.OwnedObsHost` is the reusable lifecycle API behind
+`dcc-mcp-obs-accept-host`. Supply a prepared `DisposableObsLayout` and an
+authenticated loopback `ObsEndpointConfig`, then call `start` with the existing
+readiness probe. The returned owner retains its original `Popen` and exposes
+the authenticated, typed `bridge`; it does not expose raw commands or requests.
+Keep that owner until `close` or `wait_for_exit` returns an original wait result.
+
+On Windows, identity and mapped-module queries use only `Popen._handle`:
+`GetProcessId`, complete 64-bit creation `FILETIME`, actual process image,
+and the launch-time executable SHA-256 are checked before declaring readiness.
+Readiness also requires the authenticated native host PID and nonempty instance
+ID. The chosen WebSocket port is only a candidate until that check succeeds.
+The non-Windows path retains the original child wait but does not claim Windows
+handle identity. This owner does not establish an independent capture-worker
+Job/parent/token relationship and does not change those relationships.
+
+The child environment omits `DCC_MCP_OBS_EXECUTABLE`, disabling native sidecar
+autostart. The caller owns exactly one Python adapter; the acceptance runner
+refuses to reuse an existing adapter. `close` submits typed shutdown once,
+closes the adapter and authenticated transport, and only then waits on the
+original child. The independent `dcc-mcp-obs-accept` command keeps its existing
+already-launched-host contract and does not claim original launch ownership.
+It publishes passed evidence only for an integer exit code of zero; an unknown
+or nonzero exit result fails the gate without writing public acceptance evidence.
+
+Every post-launch failure raises `OwnedObsError` with `owner` and the original
+`primary_error`. No failure path terminates or kills OBS. Retain the exception's
+owner even when readiness, shutdown, or a wait fails. The command-line host
+runner prints `UNKNOWN` and stays alive holding that owner until its original
+wait proves termination; it then prints `TERMINAL` with the original exit code
+and exits unsuccessfully. Interrupting a wait does not release ownership.
+
+Local `owned-obs-lifecycle.json`, `obs-stdout.log`, and `obs-stderr.log` remain in
+the private work root. The lifecycle record includes path/PID/full FILETIME,
+image hash, candidate port, private profile/scene collection scope, shutdown
+attempt, original exit code, and allowlisted error codes. Passwords and arbitrary
+exception messages are excluded. These local diagnostics are not the public
+acceptance evidence below; do not upload the private root or its authentication
+configuration as release evidence.
+
 ## Evidence contract
 
 Successful evidence contains only:
