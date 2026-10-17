@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.2](https://github.com/dcc-mcp/dcc-mcp-obs/compare/v1.5.1...v1.5.2) (2026-10-17)
+
+
+### Bug Fixes
+
+* **ci:** add workflow_dispatch backfill entry to the release workflow ([64aa719](https://github.com/dcc-mcp/dcc-mcp-obs/commit/64aa719cd929326f1a791bb5e8879152e9d88c5c))
+* **ci:** anchor release identity on the tag, not github.sha ([#73](https://github.com/dcc-mcp/dcc-mcp-obs/issues/73)) ([da2597d](https://github.com/dcc-mcp/dcc-mcp-obs/commit/da2597d18f0825c612b05ec8df7657c835dfaef3))
+* **ci:** give the identity step a token for the release lookup ([64c76cd](https://github.com/dcc-mcp/dcc-mcp-obs/commit/64c76cde2f52ccbeefa89e3205a0be17ac6fbbf0))
+* **ci:** keep identity's needs declaration and lift the success dependency ([16b6d7c](https://github.com/dcc-mcp/dcc-mcp-obs/commit/16b6d7cdcdaf563b03513eeabf5fe81b179e4ddf))
+* **ci:** let the identity job run without a needs gate ([5dd8f36](https://github.com/dcc-mcp/dcc-mcp-obs/commit/5dd8f367f68407e0d4b4ac590d879d8cb9623de1))
+* **ci:** read the identity step output for its own checkout ([f7e6169](https://github.com/dcc-mcp/dcc-mcp-obs/commit/f7e6169b35dfb6216e580a238523357ee1b4368e))
+* **ci:** restore the release tool from the workflow ref on backfill ([6ac0dba](https://github.com/dcc-mcp/dcc-mcp-obs/commit/6ac0dba5aa902c344987e8c4d99bcd68a565db54))
+* **ci:** verify the handoff against the resolved identity ([2cd342c](https://github.com/dcc-mcp/dcc-mcp-obs/commit/2cd342c4e5f1ef3af859d822bf8ca10d6c2a4e50))
+* **lifecycle:** retain spawned OBS ownership through shutdown ([#78](https://github.com/dcc-mcp/dcc-mcp-obs/issues/78)) ([f7ecf6b](https://github.com/dcc-mcp/dcc-mcp-obs/commit/f7ecf6b89402d2b4a12bd863d5e7403b98c1b262))
+
 ## [1.5.1](https://github.com/dcc-mcp/dcc-mcp-obs/compare/v1.5.0...v1.5.1) (2026-10-09)
 
 
