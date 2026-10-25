@@ -49,8 +49,11 @@ def _inputs(tmp_path: Path) -> dict[str, Path]:
         ],
     }
     with zipfile.ZipFile(inputs["native_plugin"], "w") as archive:
-        archive.writestr("dcc-mcp-obs-plugin.json", json.dumps(native_manifest))
-        archive.writestr("payload/plugin", native_payload)
+        for name, payload in (
+            ("dcc-mcp-obs-plugin.json", json.dumps(native_manifest)),
+            ("payload/plugin", native_payload),
+        ):
+            archive.writestr(zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0)), payload)
     return inputs
 
 
@@ -73,10 +76,26 @@ def _build(tmp_path: Path, name: str) -> Path:
     )
 
 
-def test_shared_runtime_bundle_is_byte_reproducible(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "second_clock",
+    [
+        (2026, 10, 25, 0, 0, 2, 6, 298, 0),
+        (2027, 1, 1, 12, 34, 56, 4, 1, 0),
+    ],
+    ids=["dos-timestamp-boundary", "different-date"],
+)
+def test_shared_runtime_bundle_is_byte_reproducible(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, second_clock: tuple[int, ...]
+) -> None:
+    monkeypatch.setattr(
+        zipfile.time, "localtime", lambda *_args: (2026, 10, 25, 0, 0, 0, 6, 298, 0)
+    )
     first = _build(tmp_path, "first.zip")
+    first_native_input = (tmp_path / "dcc-mcp-obs-plugin.zip").read_bytes()
+    monkeypatch.setattr(zipfile.time, "localtime", lambda *_args: second_clock)
     second = _build(tmp_path, "second.zip")
 
+    assert first_native_input == (tmp_path / "dcc-mcp-obs-plugin.zip").read_bytes()
     assert first.read_bytes() == second.read_bytes()
     with zipfile.ZipFile(first) as archive:
         for member in archive.infolist():
