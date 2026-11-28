@@ -31,6 +31,16 @@ and a failed publication restores the prior managed installation.
 
 ## Commands
 
+To start OBS Studio from an agent or a shell in another directory, use the
+adapter wheel's launcher. It sets the child working directory to the directory
+containing the executable, where Windows OBS can resolve its relative locale
+and resource paths. The command returns the spawned PID. Check plugin readiness
+separately before issuing control requests.
+
+```powershell
+dcc-mcp-obs-launch-studio --obs-executable "C:\Program Files\obs-studio\bin\64bit\obs64.exe"
+```
+
 Start with the Core planner. It returns this adapter-owned runbook as the first
 next step and does not silently modify the OBS plugin directory:
 

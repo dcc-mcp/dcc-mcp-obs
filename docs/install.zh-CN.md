@@ -16,6 +16,12 @@ launcher 发布前不会宣称“无需系统 Python”。
 
 ## 命令
 
+从 Agent 或其他工作目录启动 OBS Studio 时，使用 adapter wheel 提供的命令。它把子进程的工作目录设为可执行文件所在目录，让 Windows OBS 能找到语言文件和其他资源。命令返回新进程的 PID，控制 OBS 前还需确认插件就绪。
+
+```powershell
+dcc-mcp-obs-launch-studio --obs-executable "C:\Program Files\obs-studio\bin\64bit\obs64.exe"
+```
+
 先使用 Core 安装规划器。它会把本仓库维护的安装说明作为第一个 next step，且不会
 静默修改 OBS 插件目录：
 
